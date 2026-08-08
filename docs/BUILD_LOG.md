@@ -218,3 +218,102 @@ before there is a schema to migrate.
 - **Meta business verification** — developer account approved; verification
   pending. P2 onward waits on it. **Soko Intel does not**, which is why it can
   run in parallel.
+
+---
+
+## 2026-08-08 · P1 scope change and the data model
+
+### Scope: three ingestion paths, not one
+
+The plan assumed one front door — sync a TikTok handle. That fails two-thirds of
+real sellers, so P1 now carries three:
+
+| Path | Seller does | System does |
+|---|---|---|
+| Profile sync | enters `@handle` | Apify pulls the feed → AI drafts each video |
+| Single link | pastes one TikTok URL | same pipeline, one item |
+| Manual upload | uploads a photo | no scrape; AI drafts from the uploaded image |
+
+The third reuses the vision agent unchanged — it does not care whether an image
+came from a TikTok cover or a camera roll. Same code, new door.
+
+### Frontend decided: Jinja2 + HTMX + Tailwind
+
+Not Next.js, despite TIKTOK having a working one. Keeping the whole application
+in one language and one deploy is the reason Python was chosen; HTMX covers
+inline editing, bulk actions, upload progress and live filtering without a JS
+framework or a second debugging context.
+
+Two surfaces from one stack: the buyer storefront (mobile-first, minimal JS, also
+the SEO surface) and the seller dashboard (the working surface, draft review
+queue first).
+
+### The data model — rails in the database, not in services
+
+`Seller`, `Product`, `ScrapeJob`, plus a `models/enums.py`.
+
+**Why the constraints live in Postgres rather than service code:** a model, a
+future agent, a migration script and a hand-written query all have to obey the
+database. Only application code has to *remember* to call a validator.
+
+Fifteen CHECK constraints landed. The ones that carry weight:
+
+| Constraint | Prevents |
+|---|---|
+| `published_requires_price` | the AI pushing an unpriced item live |
+| `stock_non_negative` | overselling, at the storage layer |
+| `price_positive` | a KSh 0 product — always a parse failure, never a giveaway |
+| `price_plausible` (≤ 10,000,000) | the phone-number misparse reaching a storefront |
+| `manual_has_no_video_id` | a manual product looking re-syncable |
+| `published_needs_whatsapp` | a live shop with no way to contact the seller |
+| `slug_format` | a URL a buyer cannot type |
+| `failed_needs_error` | a failed scrape nobody can debug |
+
+**Design decisions worth keeping:**
+
+- **Enums stored as strings with CHECK constraints**, not native PG enum types.
+  Adding a value to a native enum needs a migration and an exclusive lock;
+  adding one here is a code change. For categories, which will grow, that
+  matters more than the bytes saved.
+- **`tiktok_video_id` is nullable and unique.** Postgres permits multiple NULLs
+  in a unique index, so manual products coexist with no partial index needed.
+- **`price_source` records which cascade tier produced the price.** This is the
+  feedback signal for the whole approach: if tier 3 rarely fires, the expensive
+  path is not paying for itself. Without the column that is unanswerable.
+- **`raw_payload` on ScrapeJob is kept deliberately** — it lets a changed parser
+  be replayed against real data for free, and it is the evidence when a seller
+  disputes an extraction.
+- **`Seller.tiktok_handle` is nullable.** A manual-upload-only seller is
+  legitimate; TikTok is an option, not a requirement.
+
+### Testing the rails
+
+`tests/test_models.py` — 24 tests, and most assert that Postgres **refuses**
+something. A constraint nobody has watched fail is only a claim.
+
+Autogenerate produced the migration; all 15 CHECK constraints carried through
+and were verified by reading the migration before applying it.
+
+### One fixture bug found by its own warnings
+
+The rail tests emitted 13 × `SAWarning: transaction already deassociated from
+connection`. Cause: tests deliberately trigger `IntegrityError`, Postgres aborts
+the transaction, and the fixture then tried to roll back something already gone.
+
+Fixed with an `is_active` guard. Isolation was never affected — each test gets a
+fresh connection either way — but a warning on every rail test trains you to
+ignore warnings, which is how the real one gets missed.
+
+### Known cost: the test suite is slow
+
+42 tests take ~49 seconds, almost entirely network round trips to Railway. Fine
+now; it will hurt at 200 tests. The fix when it does is a local Postgres for
+tests — the shared-server choice bought zero setup at the price of latency.
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        42 passed, 0 warnings
+alembic                       3bbf0cbc3f71 applied on top of f33154a36521
+```

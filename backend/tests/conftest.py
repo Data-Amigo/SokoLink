@@ -94,13 +94,26 @@ def _schema(engine: Engine) -> Generator[None, None, None]:
 
 @pytest.fixture
 def connection(engine: Engine, _schema: None) -> Generator[Connection, None, None]:
-    """A connection with an open transaction that is always rolled back."""
+    """
+    A connection with an open transaction that is always rolled back.
+
+    The ``is_active`` guard matters here specifically because many tests in this
+    suite deliberately trigger IntegrityError to prove a constraint refuses.
+    Postgres aborts the transaction on such an error, so by the time this
+    fixture tears down there may be nothing left to roll back — and calling
+    rollback() anyway raises a SAWarning that would otherwise appear on every
+    rail test and train us to ignore warnings.
+
+    Isolation is unaffected either way: the connection is closed regardless, and
+    each test gets a fresh one.
+    """
     conn = engine.connect()
     trans = conn.begin()
     try:
         yield conn
     finally:
-        trans.rollback()
+        if trans.is_active:
+            trans.rollback()
         conn.close()
 
 

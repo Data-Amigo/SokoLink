@@ -150,6 +150,21 @@ with the seller, not stranded on a success page.
 
 ### P1 — Catalog `p1-catalog`
 
+*Goal: products reach the catalogue by whichever route suits the seller.*
+
+**Three ingestion paths, one pipeline.** Real sellers are not all alike: some
+have a feed worth bulk-importing, some want to add one specific video, and some
+have stock that was never filmed. A single front door fails two of those three.
+
+| Path | Seller does | System does |
+|---|---|---|
+| **Profile sync** | enters `@handle` once | Apify pulls the feed → AI drafts each video |
+| **Single link** | pastes one TikTok URL | same pipeline, one item |
+| **Manual upload** | uploads a photo | no scrape; AI drafts from the uploaded image |
+
+The third path reuses the vision agent unchanged — it does not care whether the
+image came from a TikTok cover or the seller's camera roll. Same code, new door.
+
 - **Spike first**: re-validate the Apify actor and payload shape.
 - `services/scraper.py` — Apify behind our own interface. Thumbnails stored by us;
   TikTok CDN URLs expire.
@@ -158,7 +173,19 @@ with the seller, not stranded on a success page.
   Structured output against a Pydantic schema; the model drafts, publish is human.
 - Each video processed **once ever**, keyed by video id, cached.
 
-**Done when:** a real handle yields drafted products with prices read from covers or spoken audio.
+**Data-model consequences of the three paths:**
+
+- `Product.source` — `tiktok_profile` / `tiktok_link` / `manual`. Provenance
+  decides what may be re-synced and what must never be overwritten.
+- `tiktok_video_id` is **nullable** with its unique constraint intact — Postgres
+  permits multiple NULLs in a unique index, so manual products coexist cleanly.
+- **A profile re-sync must never touch manually-created products.** Enforced as a
+  rail with its own test, not left to convention: a seller who adds stock by
+  hand, syncs their feed, and watches it vanish does not come back.
+- The full cascade applies to paths 1 and 2. Manual uploads reach tier 2 (cover
+  image) only — there is no video to listen to.
+
+**Done when:** all three paths produce reviewable drafts, and a profile re-sync leaves manual products untouched.
 
 ---
 
@@ -176,9 +203,16 @@ with the seller, not stranded on a success page.
 
 ---
 
-### P3 — WhatsApp Storefront `p3-storefront`
+### P3 — Storefront + Seller Dashboard `p3-storefront`
 
-*The mobile web experience launched from the chat.*
+*Two surfaces, two audiences, one stack: Jinja2 + HTMX + Tailwind.*
+
+Chosen so the whole application stays one language and one deploy — the reason
+Python was picked in the first place. HTMX covers inline editing, bulk actions,
+upload progress and live filtering without a JavaScript framework or a second
+debugging context.
+
+**Buyer storefront** — opened in the WhatsApp in-app browser:
 
 - Server-rendered, mobile-first. Minimal client JS — buyers are on cheap Android
   handsets over expensive data.
@@ -188,7 +222,20 @@ with the seller, not stranded on a success page.
 - **Publicly indexable shop pages** with correct OG/Twitter metadata, so a link
   pasted into TikTok or WhatsApp previews properly — this is also the SEO surface.
 
-**Done when:** a buyer taps a link in WhatsApp, browses the shop in the in-app browser, and selects a product.
+**Seller dashboard** — the working surface, often on a laptop:
+
+- All three ingestion paths: sync a handle, paste a link, upload a photo.
+- **Draft review queue** — the primary screen. Bulk-confirm what the AI got
+  right, correct what it did not. Low-confidence parses surface first, because
+  those are where a wrong price hides.
+- Inline edit of price, title, sizes and stock, without a page reload.
+- Publish, with the publish-requires-price gate visible rather than mysterious —
+  a disabled button that says *why* it is disabled.
+- At-a-glance state: how many drafts wait, what is live, what is sold out.
+- Sync status and last-synced time, so "why has nothing changed?" has an answer
+  on the page instead of in a support message.
+
+**Done when:** a buyer completes a selection from WhatsApp, and a seller takes a product from any of the three paths to published without leaving the dashboard.
 
 ---
 
