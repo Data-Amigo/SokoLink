@@ -95,7 +95,13 @@ class Settings(BaseSettings):
 
     # ── P1: AI (Gemini) ──────────────────────────────────────────────────────
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+
+    #: Vision + reasoning model for the price cascade.
+    #:
+    #: gemini-2.5-flash was retired for new API keys (404 NOT_FOUND, 2026-08-08).
+    #: 3.6-flash is current and is also what Project TIKTOK validated on for
+    #: Sheng/Swahili in-image text, which is the hard part of this job.
+    gemini_model: str = "gemini-3.6-flash"
 
     # ── P2: WhatsApp Cloud API ───────────────────────────────────────────────
     whatsapp_phone_number_id: str | None = None

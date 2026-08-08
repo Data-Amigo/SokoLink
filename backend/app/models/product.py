@@ -88,7 +88,31 @@ class Product(Base):
     description: Mapped[str | None] = mapped_column(Text)
 
     #: Price in whole KES. NULL while drafting — publishing requires it.
+    #:
+    #: This is the price of ONE UNIT AS SOLD, which is not always one item —
+    #: see unit_quantity below.
     price_kes: Mapped[int | None] = mapped_column(Integer)
+
+    # ── What the price actually buys ─────────────────────────────────────────
+    # Discovered from real data, not designed up front: @zumamitumbabales sells
+    # mitumba BALES — "3000 for 30 pairs". Showing "KES 3,000" alone would make
+    # a buyer expect one pair, which is a trust-destroying error on the one
+    # field that must never mislead.
+    #
+    #: How many items one purchase contains. 1 for ordinary retail; 30 for a
+    #: bale of 30 pairs. NULL means unknown, which the UI must not render as 1.
+    unit_quantity: Mapped[int | None] = mapped_column(Integer)
+
+    #: What the units are called, in the seller's own words: "pairs", "pieces",
+    #: "bale", "dozen". Not normalised — wholesale vocabulary varies by trade
+    #: and inventing a canonical set would lose meaning buyers rely on.
+    unit_label: Mapped[str | None] = mapped_column(String(32))
+
+    #: The exact words the price was stated in, e.g. "@3000 30pairs" or
+    #: "mia tano". Kept as the audit trail behind an AI-read price: when a
+    #: seller disputes a number, this is the evidence, and it is what revealed
+    #: bulk pricing in the first place. Never shown to buyers.
+    price_evidence: Mapped[str | None] = mapped_column(String(200))
 
     #: Sizes exactly as the seller wrote them: "30-34", "S/M/L", "one size".
     #: Deliberately not normalised — Kenyan sizing conventions vary by product,
@@ -172,6 +196,17 @@ class Product(Base):
             "source <> 'manual' OR tiktok_video_id IS NULL",
             name="ck_products_manual_has_no_video_id",
         ),
+        # A lot of zero or negative items is meaningless.
+        CheckConstraint(
+            "unit_quantity IS NULL OR unit_quantity > 0",
+            name="ck_products_unit_quantity_positive",
+        ),
+        # A quantity with no noun is unrenderable: "KES 3,000 for 30" of what?
+        # Either both are known or neither is.
+        CheckConstraint(
+            "(unit_quantity IS NULL) = (unit_label IS NULL)",
+            name="ck_products_unit_quantity_and_label_together",
+        ),
         CheckConstraint(
             "views >= 0 AND likes >= 0 AND comments >= 0 AND shares >= 0",
             name="ck_products_metrics_non_negative",
@@ -206,6 +241,32 @@ class Product(Base):
     def price_is_ai_drafted(self) -> bool:
         """True when the price came from a model rather than a person."""
         return self.price_source is not None and self.price_source != PriceSource.SELLER.value
+
+    @property
+    def is_wholesale(self) -> bool:
+        """Whether one purchase contains more than a single item."""
+        return self.unit_quantity is not None and self.unit_quantity > 1
+
+    @property
+    def price_display(self) -> str | None:
+        """
+        The price as a buyer must see it — never a bare number for a bulk lot.
+
+        "KES 3,000 for 30 pairs" and "KES 3,000" mean very different things to
+        someone deciding whether to send money. Rendering the second when the
+        first is true is the single most damaging mistake this storefront could
+        make, so the units live in the same string as the number.
+
+        Returns:
+            A display string, or None when there is no price yet.
+        """
+        if self.price_kes is None:
+            return None
+
+        price = f"KES {self.price_kes:,}"
+        if self.is_wholesale:
+            return f"{price} for {self.unit_quantity} {self.unit_label}"
+        return price
 
     def __repr__(self) -> str:
         return f"<Product id={self.id} title={self.title!r} status={self.status}>"

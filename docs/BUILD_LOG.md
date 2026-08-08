@@ -317,3 +317,114 @@ ruff · format · mypy strict   clean
 pytest                        42 passed, 0 warnings
 alembic                       3bbf0cbc3f71 applied on top of f33154a36521
 ```
+
+---
+
+## 2026-08-08 · Spikes against a real seller — @zumamitumbabales
+
+Test subject: a live Kenyan mitumba (second-hand clothing) seller. 22,000
+followers, 1,453 videos, selling ladies' sandals in bulk.
+
+Four spikes, each writing its raw output to `spikes/out/` so every later
+question is answerable offline and for free.
+
+### The cascade, measured on real data
+
+| Tier | Source | Yield | Cost |
+|---|---|---|---|
+| 1 | Caption | **0/10** | ~free |
+| 2 | Cover image | **0/4** | cheap |
+| 3 | **Video, audio + visual** | **3/3** | expensive |
+
+**The cascade is not a nice-to-have — for this seller it is the only thing that
+works.** Tiers 1 and 2 returned nothing at all. Had we built only caption
+parsing, this seller would have been uncatalogable.
+
+Tier 2 is still worth keeping: it costs a fraction of tier 3 and other sellers
+do print prices on covers. Ordering by cost is the entire point.
+
+### Tier 2 failed *correctly*
+
+Gemini identified the products confidently (0.90–0.95: "Mixed Ladies Sandals",
+"Assorted ladies sandals available for wholesale purchase in bulk lots") and
+returned `price_kes: null` on every one. It did **not** invent a plausible
+price. The guardrail — *never guess, a wrong price is worse than a missing one*
+— held under real conditions.
+
+### The finding that changed the data model
+
+Tier 3 read the price from all three clips, and the `price_heard_as` field —
+added so a human could verify the model's reading — showed why that matters:
+
+```
+"@3000 30pairs"    "3000 for 30 pairs"    "3000 30pairs shown on screen"
+```
+
+**This seller prices in bulk lots, not units.** KES 3,000 buys *thirty pairs*.
+The account is literally named ZUMA MITUMBA **BALES**.
+
+A storefront rendering "Mixed Ladies Sandals — KES 3,000" would make a buyer
+expect one pair. That is a trust-destroying error on the single field that must
+never mislead — and the `Product` model designed two hours earlier had no way to
+express it.
+
+Added, driven entirely by the data:
+
+- `unit_quantity` — 30
+- `unit_label` — "pairs", in the seller's own vocabulary, not normalised
+- `price_evidence` — the exact words the price was stated in, kept as the audit
+  trail behind an AI-read number. It is what revealed bulk pricing at all.
+- `price_display` — renders "KES 3,000 for 30 pairs", never the bare number
+- Two constraints: a lot size must be positive, and quantity and label must be
+  present together (*"KES 3,000 for 30" of what?*)
+
+**This is the whole argument for spiking before schema, demonstrated on
+ourselves.** The model was reasonable, well-documented, fully tested — and wrong
+about a real seller in a way no amount of thinking would have surfaced.
+
+### Other findings worth keeping
+
+- **No TikTok transcriptions.** `transcriptionLink` and `subtitleLinks` were
+  null on 10/10, matching TIKTOK's spike 00. Tier 3 must send actual video;
+  there is no cheap text shortcut.
+- **Cover URLs are signed and expire.** We must store our own copies, as
+  designed.
+- **The bio carries phone numbers.** `signature` held
+  *"...contact us 0105515839/0754234636/0762508007"* — so `whatsapp_number` can
+  be pre-filled at onboarding and merely confirmed. One less field to type.
+- **Clips are short** — 9–24s, mean 13.8s. Tier 3 is affordable per item, but
+  must stay cached once-ever per video id.
+- **1,453 videos on this profile.** A full import is ~$0.44 in Apify alone, and
+  most of it is stale stock. Initial sync must be capped at the recent N, not
+  the whole history.
+- **Hashtags carry category, never price** — `#sandalsforwomen`, `#zarasandals`,
+  `#kidscrocs`. Useful as a hint to the vision model, worthless as a price source.
+- **Engagement baseline is thin at 10 posts** (mean 563 views, no 3× outliers).
+  Soko Intel's outlier detection needs a fuller feed to mean anything.
+
+### Three failures along the way
+
+**1. `gemini-2.5-flash` is retired.** 404 *"no longer available to new users"*.
+Switched to `gemini-3.6-flash`, which is also what TIKTOK validated on for
+Sheng/Swahili. Model ids in config are a maintenance surface, not a constant.
+
+**2. Apify's downloaded videos are not public.** `mediaUrls` points into Apify's
+key-value store and 403s without the API token. My spike fetched a 214-byte JSON
+error and posted it to Gemini **as a video** — a paid call spent on garbage,
+with no complaint. Fixed by adding the token, and by refusing to send anything
+whose content-type is not video or that is implausibly small. Exactly the silent
+failure our own standard bans, committed by me.
+
+**3. `create_all` does not migrate.** The session fixture created missing tables
+but never altered existing ones, so adding three columns left the test database
+stale and produced 25 failures with a baffling *"column unit_quantity does not
+exist"*. Now drops and recreates, which cannot drift. Safe because
+`TEST_DATABASE_URL` is refused if it equals the app database.
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        50 passed
+alembic                       588f6c5577d0 (head)
+```

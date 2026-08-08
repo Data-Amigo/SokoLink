@@ -49,7 +49,7 @@ def test_defaults_are_safe_for_local_development() -> None:
     s = build()
     assert s.app_env == "dev"
     assert s.is_prod is False
-    assert s.gemini_model == "gemini-2.5-flash"
+    assert s.gemini_model == "gemini-3.6-flash"
     assert s.apify_tiktok_actor_id == "clockworks~tiktok-scraper"
 
 

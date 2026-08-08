@@ -248,6 +248,66 @@ class TestScrapeJobRails:
         assert job.error is None
 
 
+class TestWholesalePricing:
+    """
+    Found by spike 04, not by design: @zumamitumbabales sells mitumba bales —
+    "3000 for 30 pairs". A buyer shown a bare "KES 3,000" would expect one pair.
+    """
+
+    def test_a_bulk_price_always_renders_its_units(self, db: Session) -> None:
+        seller = make_seller(db)
+        product = make_product(db, seller, price_kes=3000, unit_quantity=30, unit_label="pairs")
+        assert product.is_wholesale is True
+        assert product.price_display == "KES 3,000 for 30 pairs"
+
+    def test_a_single_item_price_renders_plainly(self, db: Session) -> None:
+        seller = make_seller(db)
+        product = make_product(db, seller, price_kes=1500)
+        assert product.is_wholesale is False
+        assert product.price_display == "KES 1,500"
+
+    def test_a_quantity_of_one_is_not_wholesale(self, db: Session) -> None:
+        seller = make_seller(db)
+        product = make_product(db, seller, price_kes=1500, unit_quantity=1, unit_label="piece")
+        assert product.is_wholesale is False
+        assert product.price_display == "KES 1,500"
+
+    def test_no_price_means_no_display(self, db: Session) -> None:
+        seller = make_seller(db)
+        assert make_product(db, seller, price_kes=None).price_display is None
+
+    def test_a_zero_or_negative_lot_size_is_refused(self, db: Session) -> None:
+        seller = make_seller(db)
+        with pytest.raises(IntegrityError, match="unit_quantity_positive"):
+            make_product(db, seller, price_kes=3000, unit_quantity=0, unit_label="pairs")
+
+    def test_a_quantity_without_a_label_is_refused(self, db: Session) -> None:
+        """ "KES 3,000 for 30" of what? Either both are known or neither is."""
+        seller = make_seller(db)
+        with pytest.raises(IntegrityError, match="unit_quantity_and_label_together"):
+            make_product(db, seller, price_kes=3000, unit_quantity=30, unit_label=None)
+
+    def test_a_label_without_a_quantity_is_refused(self, db: Session) -> None:
+        seller = make_seller(db)
+        with pytest.raises(IntegrityError, match="unit_quantity_and_label_together"):
+            make_product(db, seller, price_kes=3000, unit_quantity=None, unit_label="pairs")
+
+    def test_price_evidence_preserves_what_the_model_heard(self, db: Session) -> None:
+        """The audit trail behind an AI-read price, and how bulk pricing surfaced."""
+        seller = make_seller(db)
+        product = make_product(
+            db,
+            seller,
+            price_kes=3000,
+            unit_quantity=30,
+            unit_label="pairs",
+            price_source="video",
+            price_evidence="@3000 30pairs",
+        )
+        assert product.price_evidence == "@3000 30pairs"
+        assert product.price_is_ai_drafted is True
+
+
 class TestDerivedProperties:
     def test_needs_review_is_true_until_a_human_confirms(self, db: Session) -> None:
         seller = make_seller(db)
