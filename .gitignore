@@ -1,0 +1,48 @@
+# SokoLink - files git must never track.
+#
+# The secrets block is the important one: DATABASE_URL, GEMINI_API_KEY,
+# APIFY_TOKEN and the Daraja credentials are real keys with real billing
+# attached. Once a secret lands in git history, rotating it is the only real
+# fix - so it is excluded from the very first commit.
+
+# ---- Secrets -----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.Python
+
+# ---- Testing and tooling ------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- Media -------------------------------------------------------------------
+# Scraped covers are stored by us (TikTok CDN URLs expire) but are regenerable
+# and large - not repo content.
+backend/media/
+
+# ---- Editors and OS ----------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Logs --------------------------------------------------------------------
+*.log
+
+# ---- Build and deploy --------------------------------------------------------
+.railway/
+dist/
+build/

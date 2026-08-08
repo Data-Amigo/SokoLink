@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SokoLink — Business Document</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  :root {
+    --ink: #16181d;
+    --muted: #5f6672;
+    --line: #dfe3ea;
+    --brand: #047857;
+    --brand-soft: #ecfdf5;
+    --accent: #b45309;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", -apple-system, system-ui, Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.55;
+    margin: 0;
+  }
+  h1 { font-size: 26pt; line-height: 1.1; margin: 0 0 6px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 14pt; margin: 26px 0 10px; color: var(--brand);
+    border-bottom: 2px solid var(--brand-soft); padding-bottom: 5px;
+    break-after: avoid;
+  }
+  h3 { font-size: 11.5pt; margin: 18px 0 6px; break-after: avoid; }
+  p { margin: 0 0 10px; }
+  ul, ol { margin: 0 0 10px; padding-left: 18px; }
+  li { margin-bottom: 5px; }
+  strong { font-weight: 650; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 9.5pt; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f5f7fa; font-weight: 650; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  tr { break-inside: avoid; }
+  .cover { border-bottom: 3px solid var(--brand); padding-bottom: 18px; margin-bottom: 22px; }
+  .eyebrow { font-size: 8.5pt; letter-spacing: 0.16em; text-transform: uppercase; color: var(--brand); font-weight: 650; margin-bottom: 10px; }
+  .tagline { font-size: 12.5pt; color: var(--muted); margin: 8px 0 14px; }
+  .meta { font-size: 9pt; color: var(--muted); }
+  .callout {
+    background: var(--brand-soft); border-left: 3px solid var(--brand);
+    padding: 11px 14px; margin: 14px 0; break-inside: avoid;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .warn { background: #fffbeb; border-left-color: var(--accent); }
+  .stat-row { display: flex; gap: 10px; margin: 16px 0; }
+  .stat {
+    flex: 1; border: 1px solid var(--line); border-radius: 6px;
+    padding: 11px 12px; text-align: center; break-inside: avoid;
+  }
+  .stat .n { font-size: 19pt; font-weight: 700; color: var(--brand); line-height: 1.1; }
+  .stat .l { font-size: 8pt; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+  .flow {
+    font-family: Consolas, "Courier New", monospace; font-size: 8.5pt;
+    background: #f7f9fc; border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px 14px; white-space: pre; line-height: 1.5; margin: 12px 0;
+    break-inside: avoid;
+  }
+  .quote {
+    font-style: italic; color: var(--muted); border-left: 2px solid var(--line);
+    padding-left: 12px; margin: 12px 0;
+  }
+  .pillars { display: flex; gap: 10px; margin: 14px 0; }
+  .pillar { flex: 1; border: 1px solid var(--line); border-top: 3px solid var(--brand); border-radius: 5px; padding: 11px 12px; break-inside: avoid; }
+  .pillar h4 { margin: 0 0 6px; font-size: 10.5pt; color: var(--brand); }
+  .pillar ul { padding-left: 15px; margin: 0; font-size: 9pt; }
+  .pagebreak { break-before: page; }
+  footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 8.5pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="eyebrow">Business Document · Confidential</div>
+  <h1>SokoLink</h1>
+  <div class="tagline">Where your audience becomes your customers.</div>
+  <div class="meta">Version 1.0 &nbsp;·&nbsp; August 2026 &nbsp;·&nbsp; Owner: Fredrick Muchoya &nbsp;·&nbsp; Market: Kenya</div>
+</div>
+
+<h2>1. Executive summary</h2>
+
+<p>Kenyan social commerce runs on TikTok for discovery, WhatsApp for conversation, and M-Pesa for money. These three systems do not talk to each other. Every sale is manually stitched together by a seller who is also filming, sourcing, packing and delivering.</p>
+
+<p><strong>SokoLink closes that loop.</strong> A seller's TikTok feed becomes a live catalogue; a buyer taps through from WhatsApp into a storefront, asks questions in plain Sheng, and pays by M-Pesa without leaving the conversation. Alongside it, SokoLink tells the seller what to post next — grounded in what is actually working in their niche, in their market, in their language.</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="n">3–4 hrs</div><div class="l">lost daily by sellers to reposting, pricing replies and manual bookkeeping</div></div>
+  <div class="stat"><div class="n">0 of 24</div><div class="l">real seller captions that state a price — verified against live data</div></div>
+  <div class="stat"><div class="n">1 tap</div><div class="l">from watching a video to a checkout that already knows the product</div></div>
+</div>
+
+<h2>2. The problem</h2>
+
+<h3>2.1 The buyer bottleneck</h3>
+
+<p>A buyer sees a product in a TikTok video. To buy it, they must comment <em>"Price?"</em>, wait hours for a reply that may never come, hunt for a link in a bio, then compose a message from scratch describing an item the seller cannot identify.</p>
+
+<p>Every step leaks intent. The buyer who was ready at 9pm is gone by the time the seller replies at midnight.</p>
+
+<div class="callout">
+  <p><strong>The price is withheld on purpose.</strong> We verified this against 24 real captions from live Kenyan sellers: <strong>zero</strong> mention KSh, and only three contain any price-like number at all. Sellers omit the price deliberately, to force a DM and open a conversation.</p>
+  <p>That tactic is precisely what creates the bottleneck. The seller trades conversion for contact — and then cannot answer fast enough to convert anyway.</p>
+</div>
+
+<h3>2.2 The seller time sink</h3>
+
+<p>Sellers spend three to four hours a day on work that produces nothing new: answering the same price question dozens of times, reposting the same items, tracking who paid by scrolling M-Pesa messages, and guessing what to film next.</p>
+
+<h3>2.3 The growth problem</h3>
+
+<p>Underneath both sits a harder one: <strong>most sellers do not know why some videos work.</strong> They copy trends late, after the trend has passed, because the tools that would tell them otherwise are built for other markets.</p>
+
+<div class="callout warn">
+  <p><strong>Existing hook and script tools do not work here.</strong> Hooks are culture-bound and language-bound. A hook that converts in Los Angeles does not convert in Nairobi, and no volume of English-language "viral formula" content closes a Sheng gap. This is a structural gap in the market, not a temporary one.</p>
+</div>
+
+<h2>3. Why now</h2>
+
+<table>
+  <tr><th>Condition</th><th>Why it matters</th></tr>
+  <tr><td><strong>WhatsApp is entrenched</strong></td><td>It is where Kenyan commerce already happens. Adoption needs no persuasion — only a reason to stay in the thread.</td></tr>
+  <tr><td><strong>M-Pesa is universal</strong></td><td>Payment rails already reach every seller and buyer, including those without bank accounts.</td></tr>
+  <tr><td><strong>TikTok is the discovery engine</strong></td><td>Kenyan sellers already produce the content. The catalogue exists; it just is not shoppable.</td></tr>
+  <tr><td><strong>Multimodal AI reads Sheng</strong></td><td>Newly practical: a model can now read a price printed on a video cover, or hear one spoken in Sheng. This did not work well eighteen months ago.</td></tr>
+</table>
+
+<div class="pagebreak"></div>
+
+<h2>4. The product</h2>
+
+<div class="pillars">
+  <div class="pillar">
+    <h4>Soko Commerce</h4>
+    <ul><li>Catalog</li><li>Orders</li><li>Payments</li><li>WhatsApp Storefront</li></ul>
+  </div>
+  <div class="pillar">
+    <h4>Soko Intel</h4>
+    <ul><li>Scripts</li><li>Captions</li><li>Market Insights</li><li>Competitor Intelligence</li></ul>
+  </div>
+  <div class="pillar">
+    <h4>Soko AI</h4>
+    <ul><li>Customer Support</li><li>Sales Agent</li><li>Follow-ups</li><li>Order Assistance</li></ul>
+  </div>
+</div>
+
+<h3>4.1 Soko Commerce — selling</h3>
+
+<p>The seller connects their TikTok handle once. SokoLink pulls their videos and turns each into a draft product, reading the product name and price from the cover image — and, when it is not printed, from the seller speaking in the clip. The seller confirms and publishes.</p>
+
+<p>Buyers arrive through WhatsApp:</p>
+
+<div class="flow">WhatsApp chat
+      ↓
+Browse products
+      ↓
+WhatsApp in-app browser opens
+      ↓
+SokoLink storefront          ← mobile-first, server-rendered
+      ↓
+Product selection
+      ↓
+M-Pesa checkout
+      ↓
+Return to WhatsApp</div>
+
+<p>Rather than pushing buyers to a separate website, SokoLink launches a mobile-first web experience <strong>from inside WhatsApp</strong>. The buyer never leaves the app they were already in, and never creates an account — their verified phone number is the identity, and it is the same number M-Pesa charges.</p>
+
+<h3>4.2 Soko AI — the conversation</h3>
+
+<p>Buyers ask questions the way they actually ask them: <em>"Iko size 38?"</em>, <em>"Ni ngapi?"</em>, <em>"Uko na red?"</em> The agent answers grounded strictly in the shop's published catalogue — it can say a thing is sold out, and it cannot invent a colour that does not exist.</p>
+
+<p>After the sale it handles order status, delivery questions, and opt-in restock nudges.</p>
+
+<div class="callout">
+  <p><strong>The agent proposes; code disposes.</strong> The AI drafts words and reads a price it can see. It never decides price, stock, or payment status. A product is not live until the seller publishes it, and no charge happens except through deterministic payment rails. This is what makes the system safe enough for a stranger's money.</p>
+</div>
+
+<h3>4.3 Soko Intel — getting seen</h3>
+
+<p>Selling well matters little if nobody watches. Soko Intel tells the seller what is working in their niche:</p>
+
+<ul>
+  <li><strong>Niche discovery</strong> — the seller types a keyword; SokoLink finds the creators winning in that space.</li>
+  <li><strong>Benchmarking</strong> — their follower counts, views and comments, set against the seller's own numbers.</li>
+  <li><strong>Outlier detection</strong> — which posts broke out, well above their own baseline.</li>
+  <li><strong>Hooks, captions and scripts</strong> — generated in Sheng and Swahili, grounded in hooks that actually performed here, and written around the seller's real stock.</li>
+  <li><strong>Reports and traction tracking</strong> — how the seller's own videos perform over time.</li>
+</ul>
+
+<h2>5. The moat</h2>
+
+<p>Features get copied. The asset underneath does not.</p>
+
+<div class="flow">niche search ──▶ outlier posts ──▶ extract hooks ──▶ hook corpus
+                                                        │
+  seller's stock ───────────────────────────────────────┤
+                                                        ▼
+                            a hook that has actually worked,
+                            in this niche, in this market</div>
+
+<p>Every premium niche search feeds a growing corpus of hooks that demonstrably performed in Kenya, tagged by niche and by language register. Generation improves as the corpus grows. Better generation sells more premium seats, which fund more searches.</p>
+
+<p><strong>A competitor can copy the feature but not the corpus</strong> — and cannot easily assemble one without already serving this market.</p>
+
+<h2>6. Business model</h2>
+
+<p>Commerce acquires sellers at no cost to them. Intel is what they upgrade for — which also aligns the pricing with the cost structure, since niche search is the only expensive operation a user can trigger at will.</p>
+
+<table>
+  <tr><th>Tier</th><th>Includes</th><th>Rationale</th></tr>
+  <tr><td><strong>Free</strong></td><td>Catalogue, WhatsApp storefront, M-Pesa checkout</td><td>Acquisition. Costs are bounded — scraping is capped at once per seller per day.</td></tr>
+  <tr><td><strong>Premium</strong></td><td>All of the above, plus Soko Intel: niche search, benchmarking, hooks, scripts, reports</td><td>The upgrade reason. Gating the expensive feature ties cost directly to revenue.</td></tr>
+</table>
+
+<p class="meta">Price points are under review. The earlier structure (KSh 499 / KSh 999) was set when Intel was a minor add-on rather than the primary upgrade driver.</p>
+
+<h2>7. Risks and mitigations</h2>
+
+<table>
+  <tr><th>Risk</th><th>Mitigation</th></tr>
+  <tr><td><strong>Meta approval timing</strong> — the WhatsApp channel depends on business verification</td><td>Developer account approved; business verification pending. Soko Intel is fully independent of WhatsApp and can be built in parallel.</td></tr>
+  <tr><td><strong>Scraping fragility</strong> — TikTok changes break scrapers</td><td>The scrape engine sits behind our own interface; swapping it is a one-file change. Results are cached, so an outage degrades rather than stops.</td></tr>
+  <tr><td><strong>AI misreads a price</strong></td><td>The model drafts; the seller publishes. A misread price sits in a draft a human reviews — it never reaches a buyer unattended.</td></tr>
+  <tr><td><strong>Unbounded AI and scraping cost</strong></td><td>Every expensive operation is cached and quota-limited; each video is processed once ever; niche search is behind the paywall.</td></tr>
+  <tr><td><strong>Payment disputes</strong></td><td>The M-Pesa callback is the single source of payment truth, processed idempotently so a retry never double-fulfils.</td></tr>
+</table>
+
+<h2>8. What we are deliberately not building yet</h2>
+
+<ul>
+  <li><strong>SokoLedger</strong> — on-device M-Pesa SMS reconciliation. Real, valuable, and Phase 2.</li>
+  <li><strong>Marketplace search across sellers</strong> — needs seller density that does not yet exist.</li>
+  <li><strong>Generative virtual try-on</strong> — Phase 2, feature-flagged and cost-capped.</li>
+</ul>
+
+<div class="callout">
+  <p><strong>A note on privacy claims.</strong> When SokoLedger arrives, the honest description is <em>"parsed on-device, aggregates only"</em> — never "data never leaves your phone." A WhatsApp interface requires a server by definition. In a market this wary about money data, an overstated privacy promise that gets caught destroys more trust than the weaker true one ever built.</p>
+</div>
+
+<footer>
+  SokoLink — Business Document v1.0 · August 2026 · Prepared for internal use. Figures marked as verified come from live seller data pulled during discovery.
+</footer>
+
+</body>
+</html>

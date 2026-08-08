@@ -1,0 +1,32 @@
+# SokoLink backend dependencies — pinned exactly so every machine (dev, CI,
+# Railway) runs identical code. Update deliberately, never by accident.
+#
+# Install:  .venv\Scripts\python -m pip install -r requirements.txt
+#
+# Only what P0 needs is here. Later milestones add their own lines with a
+# comment saying which milestone introduced them and why — so nobody has to
+# guess later whether a dependency is still earning its place.
+
+# ── Web framework ────────────────────────────────────────────────────────────
+fastapi==0.128.0
+uvicorn[standard]==0.38.0        # the ASGI server that runs the app
+
+# ── Config & validation ──────────────────────────────────────────────────────
+pydantic==2.12.3
+pydantic-settings==2.7.1         # typed .env loading — see app/config.py
+
+# ── Database ─────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.44
+psycopg[binary]==3.2.10          # Postgres driver; binary = no compiler needed
+alembic==1.16.5                  # schema migrations — see alembic/
+
+# ── Templating (P3 storefront; installed now so the surface is ready) ────────
+jinja2==3.1.6
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest==8.4.2
+httpx==0.28.1                    # powers FastAPI's TestClient
+
+# ── Quality gates (also run in CI) ───────────────────────────────────────────
+ruff==0.14.2                     # linting + formatting, one tool
+mypy==1.18.2

@@ -1,0 +1,56 @@
+# Tooling configuration for the SokoLink backend.
+#
+# Dependencies live in requirements.txt (pinned exactly); this file configures
+# the quality gates only. Both ruff and mypy run in CI, and a failure blocks
+# the merge — see .github/workflows/ci.yml.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".venv",                # not our code
+    "alembic/versions",     # generated migrations; reviewed, not reformatted
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B",    # bugbear — real bug patterns, not style
+    "UP",   # pyupgrade
+    "C4",   # comprehension clarity
+    "SIM",  # simplifiable code
+    "TID",  # tidy imports
+]
+ignore = [
+    # FastAPI's dependency injection idiom is `Depends()` in a default argument.
+    # B008 flags function calls in defaults, which is correct in general and
+    # wrong here.
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use assert freely and shadow names in fixtures.
+"tests/*" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+# SQLAlchemy 2.0 ships its own plugin-free typing; these keep third-party gaps
+# from drowning out real errors in our code.
+ignore_missing_imports = true
+disallow_untyped_decorators = false  # FastAPI decorators are untyped upstream
+
+[[tool.mypy.overrides]]
+# Generated migrations are not hand-written code and are not type-checked.
+module = "alembic.versions.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+filterwarnings = ["error::DeprecationWarning"]

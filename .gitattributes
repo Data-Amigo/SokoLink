@@ -1,0 +1,18 @@
+# Normalise line endings so a Windows dev and a Linux CI runner never produce
+# spurious whole-file diffs. Text is stored LF in the repo and checked out
+# native; binaries are marked so git never mangles them.
+
+* text=auto eol=lf
+
+# Explicitly binary — git must not "fix" line endings in these.
+*.pdf   binary
+*.pptx  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.ico   binary
+
+# Generated; keep them out of diff noise and language statistics.
+docs/*.pdf   linguist-generated
+docs/*.pptx  linguist-generated

@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SokoLink — Technical Document</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  :root {
+    --ink: #16181d;
+    --muted: #5f6672;
+    --line: #dfe3ea;
+    --brand: #1d4ed8;
+    --brand-soft: #eff6ff;
+    --accent: #b45309;
+    --danger: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", -apple-system, system-ui, Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink); font-size: 10.5pt; line-height: 1.55; margin: 0;
+  }
+  h1 { font-size: 26pt; line-height: 1.1; margin: 0 0 6px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 14pt; margin: 26px 0 10px; color: var(--brand);
+    border-bottom: 2px solid var(--brand-soft); padding-bottom: 5px; break-after: avoid;
+  }
+  h3 { font-size: 11.5pt; margin: 18px 0 6px; break-after: avoid; }
+  p { margin: 0 0 10px; }
+  ul, ol { margin: 0 0 10px; padding-left: 18px; }
+  li { margin-bottom: 5px; }
+  code { font-family: Consolas, "Courier New", monospace; font-size: 9pt; background: #f1f4f9; padding: 1px 4px; border-radius: 3px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 9.5pt; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f5f7fa; font-weight: 650; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  tr { break-inside: avoid; }
+  .cover { border-bottom: 3px solid var(--brand); padding-bottom: 18px; margin-bottom: 22px; }
+  .eyebrow { font-size: 8.5pt; letter-spacing: 0.16em; text-transform: uppercase; color: var(--brand); font-weight: 650; margin-bottom: 10px; }
+  .tagline { font-size: 12.5pt; color: var(--muted); margin: 8px 0 14px; }
+  .meta { font-size: 9pt; color: var(--muted); }
+  .callout { background: var(--brand-soft); border-left: 3px solid var(--brand); padding: 11px 14px; margin: 14px 0; break-inside: avoid; }
+  .callout p:last-child { margin-bottom: 0; }
+  .warn { background: #fffbeb; border-left-color: var(--accent); }
+  .rule { background: #f0fdf4; border-left-color: #047857; }
+  .flow {
+    font-family: Consolas, "Courier New", monospace; font-size: 8.5pt;
+    background: #f7f9fc; border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px 14px; white-space: pre; line-height: 1.5; margin: 12px 0; break-inside: avoid;
+  }
+  .pagebreak { break-before: page; }
+  footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 8.5pt; color: var(--muted); }
+  .tag { display: inline-block; font-size: 7.5pt; font-weight: 650; padding: 1px 6px; border-radius: 3px; background: var(--brand-soft); color: var(--brand); text-transform: uppercase; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="eyebrow">Technical Document</div>
+  <h1>SokoLink — Architecture &amp; Tech Stack</h1>
+  <div class="tagline">Python · FastAPI · Postgres · Gemini · WhatsApp Cloud API · M-Pesa Daraja</div>
+  <div class="meta">Version 1.0 &nbsp;·&nbsp; August 2026 &nbsp;·&nbsp; Owner: Fredrick Muchoya</div>
+</div>
+
+<h2>1. System overview</h2>
+
+<div class="flow">                    ┌──────────────┐
+   TikTok ──scrape──▶ │              │ ◀──chat──▶  WhatsApp Cloud API
+                      │   FastAPI    │                    │
+   Gemini ◀──vision──▶│   backend    │                    │ storefront link
+   (draft + agent)    │              │                    ▼
+                      │  api/        │            WhatsApp in-app browser
+   Apify  ◀──niche───▶│  agent/      │                    │
+   (search)           │  services/   │                    ▼
+                      │  models/     │  ◀───────  SokoLink storefront
+   Daraja ◀──STK─────▶│              │            (server-rendered)
+   (M-Pesa)           └──────┬───────┘
+                             │
+                        PostgreSQL
+                        (Railway)</div>
+
+<p>One FastAPI application serves three surfaces: the WhatsApp webhook, the server-rendered storefront, and the internal APIs behind both. A single Postgres database is the source of truth.</p>
+
+<h2>2. Tech stack</h2>
+
+<table>
+  <tr><th>Layer</th><th>Choice</th><th>Why this</th></tr>
+  <tr><td>Language</td><td><strong>Python 3.11+</strong></td><td>The maintainer's strongest language. On a solo build, ability to debug unaided outweighs framework elegance.</td></tr>
+  <tr><td>Web framework</td><td><strong>FastAPI</strong></td><td>Async, typed, small. Every endpoint is visible; nothing is hidden behind conventions.</td></tr>
+  <tr><td>Validation</td><td><strong>Pydantic v2</strong></td><td>One tool for API schemas <em>and</em> LLM output schemas. The single most important guardrail in the system.</td></tr>
+  <tr><td>Database</td><td><strong>PostgreSQL</strong> (Railway)</td><td>Relational data with hard constraints. The DB enforces rails the application cannot bypass.</td></tr>
+  <tr><td>ORM / migrations</td><td><strong>SQLAlchemy 2.0 + Alembic</strong></td><td>Migrations are schema version control. Every change is reviewed before it is applied.</td></tr>
+  <tr><td>Templating</td><td><strong>Jinja2</strong></td><td>Server-rendered storefront. Minimal client JS on the buyer's critical path.</td></tr>
+  <tr><td>AI</td><td><strong>Gemini</strong> via <code>google-genai</code></td><td>Tested best on Sheng/Swahili, both printed on covers and spoken in clips. Called directly — no wrapper.</td></tr>
+  <tr><td>Scraping</td><td><strong>Apify</strong>, behind our own adapter</td><td>Profile pulls without seller OAuth. The adapter means swapping engines is a one-file change.</td></tr>
+  <tr><td>Messaging</td><td><strong>WhatsApp Cloud API</strong></td><td>The interface Kenyan commerce already lives in.</td></tr>
+  <tr><td>Payments</td><td><strong>M-Pesa Daraja</strong> (STK push)</td><td>Universal in Kenya, including for the unbanked.</td></tr>
+  <tr><td>Testing</td><td><strong>pytest</strong></td><td>Transactional fixtures against real Postgres; all external services mocked.</td></tr>
+  <tr><td>Hosting</td><td><strong>Railway</strong></td><td>App and database on one platform.</td></tr>
+</table>
+
+<div class="callout">
+  <p><strong>No AI framework.</strong> No LangChain, no vector database, no orchestration layer. Provider SDKs are called directly with Pydantic schemas as the guardrail. Frameworks hide the loop, the tool call, the retry — exactly the mechanics you need visible when something breaks at 11pm.</p>
+</div>
+
+<div class="pagebreak"></div>
+
+<h2>3. Repository layout</h2>
+
+<div class="flow">backend/
+  app/
+    main.py          thin — wires routers, owns nothing
+    config.py        typed settings via pydantic-settings
+    db.py            engine + session; pool_pre_ping for cloud DBs
+    models/          SQLAlchemy models — the DB rails live here
+    schemas/         Pydantic wire + LLM schemas
+    services/        business logic (scraper, storefront, orders, mpesa)
+    agent/           LLM-facing code (draft, sales)
+    api/             HTTP routes — thin, delegate to services
+    templates/       Jinja2 — the storefront
+  alembic/           migrations, reviewed line by line
+  tests/             pytest, mirrors app/
+  spikes/            throwaway probes against real APIs
+docs/                plan, concepts, this document</div>
+
+<p>The layering rule: <code>api/</code> handles HTTP shapes, <code>services/</code> holds business logic, <code>models/</code> owns persistence. When a file in <code>main.py</code> grows past ~100 lines, something is in the wrong place.</p>
+
+<h2>4. Data model</h2>
+
+<table>
+  <tr><th>Model</th><th>Purpose</th><th>Rails enforced in the database</th></tr>
+  <tr><td><code>Account</code></td><td>Seller login</td><td>Unique email/phone; Argon2id hash never leaves the row</td></tr>
+  <tr><td><code>Seller</code></td><td>Storefront identity</td><td>Unique handle; one-to-one with account</td></tr>
+  <tr><td><code>Product</code></td><td>A catalogue item from one video</td><td><code>stock &gt;= 0</code>; unique <code>tiktok_video_id</code>; <strong>published requires a price</strong></td></tr>
+  <tr><td><code>Order</code></td><td>A purchase and its payment state</td><td>State machine; unique checkout request id</td></tr>
+  <tr><td><code>Customer</code></td><td>A buyer, keyed by phone</td><td>Unique per seller</td></tr>
+  <tr><td><code>NicheSearch</code> / <code>Hook</code></td><td>Soko Intel corpus</td><td>Cached by keyword; hooks tagged by niche and language register</td></tr>
+</table>
+
+<div class="callout rule">
+  <p><strong>Money is stored as integer KES.</strong> No float or decimal price columns anywhere. A rounding error in a price is a rounding error in what a buyer is charged.</p>
+</div>
+
+<h2>5. The price extraction cascade</h2>
+
+<p>Discovery finding, verified against 24 real captions: <strong>captions carry no prices.</strong> Zero mention KSh; only three contain any price-like number. The product must be read from the media, not the text.</p>
+
+<div class="flow">Tier 1  caption + hashtags       near-free   → category hints, sometimes sizes
+   │    (rarely yields a price)
+   ▼
+Tier 2  cover image                cheap       → price printed as text overlay
+   │    Gemini vision
+   ▼
+Tier 3  video: visual + AUDIO      expensive   → seller says the price in Sheng
+        Gemini multimodal                        highest yield</div>
+
+<p>Each tier escalates only when the one above fails to produce a confident price. <strong>Every video is processed once ever</strong>, keyed by TikTok video id, and cached — per-request processing would be ruinous.</p>
+
+<p>Proven live on real clips: KES 500 / 550 / 550 / 600 read correctly from spoken and on-screen prices.</p>
+
+<h2>6. LLM integration patterns</h2>
+
+<h3>6.1 Structured output, not parsed hope</h3>
+
+<p>We do not ask the model for JSON and pray. A Pydantic schema is passed to the API, and generation is <em>constrained</em> so the output can only be a valid instance of that shape — no prose, no fenced code blocks, no missing keys.</p>
+
+<div class="flow">cover image + hashtags ──▶ Gemini (schema=ProductDraft) ──▶ validated object
+                           constrained decoding</div>
+
+<h3>6.2 The agent proposes, code disposes</h3>
+
+<div class="callout rule">
+  <p>The LLM output is always a <strong>proposal</strong>, never a decision, on anything that matters. The agent drafts words and reads a price it can see. <strong>Prices, stock, payment status and consent are decided by plain code with hard rules.</strong></p>
+  <p>A misread price sits in a draft the seller reviews. Publishing is a deliberate human action that still requires a price. The AI removes typing; it cannot sell anything.</p>
+</div>
+
+<h3>6.3 No RAG</h3>
+
+<p>RAG solves retrieval-by-similarity when you cannot predict which document is relevant. Every lookup here is by a known key — this product, this seller, this niche. Retrieval-by-known-key is a <code>SELECT</code>. Do not bring a vector database to a <code>WHERE id = ?</code> problem.</p>
+
+<p class="meta">The one place similarity may genuinely arrive: "find hooks similar in spirit to this product." Recognise it if it comes; do not reach for it early.</p>
+
+<div class="pagebreak"></div>
+
+<h2>7. The WhatsApp storefront flow</h2>
+
+<div class="flow">WhatsApp chat
+      ↓  buyer taps a signed storefront link
+WhatsApp in-app browser opens
+      ↓
+SokoLink storefront (Jinja2, server-rendered, mobile-first)
+      ↓
+Product selection
+      ↓
+M-Pesa STK push  ──▶ buyer's phone prompts for PIN
+      ↓                        │
+   checkout page polls ◀───────┘  Daraja callback = payment truth
+      ↓
+Return to WhatsApp</div>
+
+<p>Rather than redirecting buyers to a separate website, SokoLink launches a mobile-first web experience directly from WhatsApp. <span class="tag">Design note</span> This uses the ordinary in-app browser, not WhatsApp Flows — which removes any dependency on Flows approval and gives full control of the interface.</p>
+
+<h3>The three hard parts</h3>
+
+<table>
+  <tr><th>Problem</th><th>Approach</th></tr>
+  <tr>
+    <td><strong>Identity across the hop.</strong> The storefront must know which buyer and which shop, with no login.</td>
+    <td>The chat mints a <strong>signed, scoped, short-lived token</strong> in the link. <strong class="tag">Critical</strong> Never put a phone number in a URL — links leak through history, referrer headers, and buyers forwarding them to friends.</td>
+  </tr>
+  <tr>
+    <td><strong>M-Pesa interrupts the browser.</strong> The STK prompt takes over the same phone the webview runs on.</td>
+    <td>Checkout <strong>polls order status</strong> and renders paid / failed / timed-out honestly when the buyer returns. The callback remains the only truth; the page merely reflects it.</td>
+  </tr>
+  <tr>
+    <td><strong>The return hop.</strong> A confirmed order should not strand the buyer on a success page.</td>
+    <td>Deep-link back into the conversation with the seller. Designed, not bolted on.</td>
+  </tr>
+</table>
+
+<h2>8. Payment rails</h2>
+
+<div class="flow">order created ──▶ STK push ──▶ Daraja ──▶ buyer enters PIN
+                                    │
+                                    ▼
+                          callback (may repeat!)
+                                    │
+                     ┌──────────────┴──────────────┐
+                     │  idempotent handler          │
+                     │  same order never fulfils    │
+                     │  twice; stock drops once     │
+                     └──────────────────────────────┘</div>
+
+<div class="callout warn">
+  <p><strong>Idempotency is not optional.</strong> Daraja retries callbacks, and so does Meta with webhooks. Any handler that is not safe to run twice will eventually double-fulfil an order or double-charge a buyer. Both are tested with explicit replay tests.</p>
+</div>
+
+<p><strong>Rails before agent.</strong> The payment path is built and proven with a plain button before the sales agent is permitted to call it. The agent <em>requests</em> a charge; the rails execute it.</p>
+
+<h2>9. Cost rails</h2>
+
+<table>
+  <tr><th>Cost centre</th><th>Guard</th></tr>
+  <tr><td>Apify — per-seller scraping</td><td>At most once per day per seller, cached. Never per request.</td></tr>
+  <tr><td>Apify — niche search <span class="tag">unbounded</span></td><td>The only cost a user can trigger repeatedly at will. Three guards, all required: <strong>premium tier only</strong> (cost tracks revenue), <strong>per-seat quotas</strong>, <strong>result caching</strong>.</td></tr>
+  <tr><td>Gemini — video tier</td><td>Most expensive tier of the cascade. Once ever per video id. Billing stays enabled — the free tier caps at 20/day and has already bitten once.</td></tr>
+  <tr><td>Gemini — drafting</td><td>On-demand, split out of ingest so ingest stays cheap and fast.</td></tr>
+</table>
+
+<h2>10. Security</h2>
+
+<ul>
+  <li><strong>Secrets</strong> live in <code>.env</code> (gitignored) and Railway variables. Never in <code>.env.example</code> — that file is committed, and this has already caught us once.</li>
+  <li><strong>Auth</strong> — Argon2id password hashing, signed JWT sessions, anti-enumeration on login.</li>
+  <li><strong>Ownership scoping</strong> — every product query is scoped to the caller's storefront; another seller's rows read as not-found.</li>
+  <li><strong>Webhook verification</strong> — signature checks on both Meta and Daraja callbacks before any state changes.</li>
+  <li><strong>No identity in URLs</strong> — storefront links carry signed, expiring tokens.</li>
+  <li><strong>Rate limiting and input validation</strong> on every public route.</li>
+</ul>
+
+<h2>11. Testing strategy</h2>
+
+<table>
+  <tr><th>Layer</th><th>What it covers</th></tr>
+  <tr><td>Unit</td><td>Price parsing, phone normalisation, slug generation, pure helpers</td></tr>
+  <tr><td>Integration</td><td>API routes and queries against real Postgres, in rolled-back transactions</td></tr>
+  <tr><td>Money paths</td><td>Every order state transition, plus <strong>explicit replay tests</strong> proving idempotency</td></tr>
+  <tr><td>AI accuracy</td><td>Fixture set of real Sheng captions and covers, guarding prompt changes from silent regression</td></tr>
+</table>
+
+<p><strong>External services are always mocked.</strong> Tests never call Apify, Gemini, Meta or Daraja — those cost money and rate-limit. Tests ship in the same PR as the logic.</p>
+
+<h2>12. Documentation standard</h2>
+
+<p>Every file opens with a header docstring covering what it does, the pipeline it sits in (as an ASCII diagram when data flows through it), and <strong>why it exists and is shaped that way</strong>. Comments explain <em>why</em>, not <em>what</em>.</p>
+
+<div class="callout">
+  <p>In six weeks nobody remembers why the cascade escalates in that order, or why a callback is idempotent. The code has to say so itself. This is what makes the codebase understandable, debuggable, and safe to change.</p>
+</div>
+
+<footer>
+  SokoLink — Technical Document v1.0 · August 2026 · Companion to <code>docs/PRODUCTION_PLAN.md</code> and <code>WAYS_OF_WORKING.md</code>.
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,675 @@
+{
+  "exportedAt": "2026-08-06T16:37:52.519Z",
+  "source": "SokoLink POC database (Python/Alembic) on Railway",
+  "purpose": "Day 3 Gemini parsing accuracy test set, and the seed fallback for when Apify rate-limits.",
+  "privacyNote": "PII excluded by design - no account emails, password hashes, or seller phone numbers.",
+  "sellers": [
+    {
+      "handle": "classycloset490",
+      "displayName": "Classy closet🥻🩰🛍",
+      "tiktokUsername": "classycloset490",
+      "followerCount": 6533
+    },
+    {
+      "handle": "fouhart_goods",
+      "displayName": "FouHart  0:7.19.17*77:91",
+      "tiktokUsername": "fouhart_goods",
+      "followerCount": 13400
+    },
+    {
+      "handle": "bntclassycollectionke",
+      "displayName": "bntcollectionke",
+      "tiktokUsername": "bntclassycollectionke",
+      "followerCount": 6901
+    }
+  ],
+  "products": [
+    {
+      "tiktokVideoId": "7656353136990227719",
+      "caption": "All sizes available kindly WhatsApp#whatApp0739439750 #foryoupage #onlyforyou ##fyppppppppppppppppppppppp #kenyantiktok🇰🇪 ",
+      "hashtags": [
+        {
+          "name": "whatapp0739439750"
+        },
+        {
+          "name": "foryoupage"
+        },
+        {
+          "name": "onlyforyou"
+        },
+        {
+          "name": "fyppppppppppppppppppppppp"
+        },
+        {
+          "name": "kenyantiktok🇰🇪"
+        }
+      ],
+      "pocName": "Denim Skirts",
+      "pocDescription": "Stylish women's denim skirts available in various blue and black shades, lengths, and designs. They are available in all sizes.",
+      "pocPriceKes": 500,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7656353136990227719",
+      "coverUrl": "covers/7656353136990227719.jpg"
+    },
+    {
+      "tiktokVideoId": "7656353770695118098",
+      "caption": "#kenyantiktok🇰🇪 #onlyforyou #foryoupage #classyoutfit #fyppppppppppppppppppppppp ",
+      "hashtags": [
+        {
+          "name": "kenyantiktok🇰🇪"
+        },
+        {
+          "name": "onlyforyou"
+        },
+        {
+          "name": "foryoupage"
+        },
+        {
+          "name": "classyoutfit"
+        },
+        {
+          "name": "fyppppppppppppppppppppppp"
+        }
+      ],
+      "pocName": "Ladies Jeans",
+      "pocDescription": "A variety of stylish ladies jeans available in all sizes. Perfect for a classy outfit.",
+      "pocPriceKes": 550,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7656353770695118098",
+      "coverUrl": "covers/7656353770695118098.jpg"
+    },
+    {
+      "tiktokVideoId": "7656354416982756616",
+      "caption": "#tiktok #classyoutfit #onlyforyou #kenyantiktok🇰🇪 #fyppppppppppppppppppppppp ",
+      "hashtags": [
+        {
+          "name": "tiktok"
+        },
+        {
+          "name": "classyoutfit"
+        },
+        {
+          "name": "onlyforyou"
+        },
+        {
+          "name": "kenyantiktok🇰🇪"
+        },
+        {
+          "name": "fyppppppppppppppppppppppp"
+        }
+      ],
+      "pocName": "Assorted Women's Jeans & Cargo Pants",
+      "pocDescription": "A selection of stylish women's high-waisted jeans and cargo trousers featuring various designs, colors, and prints. Available in all sizes.",
+      "pocPriceKes": 550,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7656354416982756616",
+      "coverUrl": "covers/7656354416982756616.jpg"
+    },
+    {
+      "tiktokVideoId": "7662093120900812039",
+      "caption": "#comegetyours #onlyforyou #classyoutfit #fyppppppppppppppppppppppp #whatApp0739439750 ",
+      "hashtags": [
+        {
+          "name": "comegetyours"
+        },
+        {
+          "name": "onlyforyou"
+        },
+        {
+          "name": "classyoutfit"
+        },
+        {
+          "name": "fyppppppppppppppppppppppp"
+        },
+        {
+          "name": "whatapp0739439750"
+        }
+      ],
+      "pocName": "Jeans Skirt",
+      "pocDescription": "A stylish blue jeans skirt perfect for casual outings. Available for KES 600.",
+      "pocPriceKes": 600,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7662093120900812039",
+      "coverUrl": "covers/7662093120900812039.jpg"
+    },
+    {
+      "tiktokVideoId": "7662092723519851794",
+      "caption": "#tiktokstyle #kenyantiktok🇰🇪 #whatApp0739439750 #comegetyours #fyppppppppppppppppppppppp ",
+      "hashtags": [
+        {
+          "name": "tiktokstyle"
+        },
+        {
+          "name": "kenyantiktok🇰🇪"
+        },
+        {
+          "name": "whatapp0739439750"
+        },
+        {
+          "name": "comegetyours"
+        },
+        {
+          "name": "fyppppppppppppppppppppppp"
+        }
+      ],
+      "pocName": "Denim Skirt",
+      "pocDescription": "A stylish denim skirt perfect for casual wear. Available for KES 600.",
+      "pocPriceKes": 600,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7662092723519851794",
+      "coverUrl": "covers/7662092723519851794.jpg"
+    },
+    {
+      "tiktokVideoId": "7662082660533079304",
+      "caption": "#fyppppppppppppppppppppppp #comegetyours #kenyantiktok🇰🇪 #whatApp0739439750 #tiktokstyle ",
+      "hashtags": [
+        {
+          "name": "fyppppppppppppppppppppppp"
+        },
+        {
+          "name": "comegetyours"
+        },
+        {
+          "name": "kenyantiktok🇰🇪"
+        },
+        {
+          "name": "whatapp0739439750"
+        },
+        {
+          "name": "tiktokstyle"
+        }
+      ],
+      "pocName": "Boyfriend Jeans",
+      "pocDescription": "Stylish boyfriend jeans available in various designs and sizes. Perfect for casual wear.",
+      "pocPriceKes": 600,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7662082660533079304",
+      "coverUrl": "covers/7662082660533079304.jpg"
+    },
+    {
+      "tiktokVideoId": "7662081322675932424",
+      "caption": "#classyoutfit #onlyforyou #comegetyours #fyppppppppppppppppppppppp #whatApp0739439750 ",
+      "hashtags": [
+        {
+          "name": "classyoutfit"
+        },
+        {
+          "name": "onlyforyou"
+        },
+        {
+          "name": "comegetyours"
+        },
+        {
+          "name": "fyppppppppppppppppppppppp"
+        },
+        {
+          "name": "whatapp0739439750"
+        }
+      ],
+      "pocName": "Ripped Jeans",
+      "pocDescription": "Stylish ripped jeans available in various sizes. Perfect for a classy outfit.",
+      "pocPriceKes": 600,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7662081322675932424",
+      "coverUrl": "covers/7662081322675932424.jpg"
+    },
+    {
+      "tiktokVideoId": "7662080728234036487",
+      "caption": "#fyppppppppppppppppppppppp #comegetyours#whatApp0739439750 #onlyforyou #classyoutfit ",
+      "hashtags": [
+        {
+          "name": "fyppppppppppppppppppppppp"
+        },
+        {
+          "name": "comegetyours"
+        },
+        {
+          "name": "whatapp0739439750"
+        },
+        {
+          "name": "onlyforyou"
+        },
+        {
+          "name": "classyoutfit"
+        }
+      ],
+      "pocName": "Boyfriend Jeans",
+      "pocDescription": "Stylish boyfriend jeans available in various sizes from 27 to 46. Perfect for a casual look with a trendy vibe.",
+      "pocPriceKes": null,
+      "stock": 1,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@classycloset490/video/7662080728234036487",
+      "coverUrl": "covers/7662080728234036487.jpg"
+    },
+    {
+      "tiktokVideoId": "7596434236362591500",
+      "caption": "we are at Royal palms mall wing A 3rd floor shop AS33 along Ronald Ngala street \n\n#ladiesopens #flatshoes #flatsforwomen #forwomen #fyp",
+      "hashtags": [
+        {
+          "name": "ladiesopens"
+        },
+        {
+          "name": "flatshoes"
+        },
+        {
+          "name": "flatsforwomen"
+        },
+        {
+          "name": "forwomen"
+        },
+        {
+          "name": "fyp"
+        }
+      ],
+      "pocName": "Pointed Flat Shoes",
+      "pocDescription": "Stylish pointed flat shoes available in multiple colors. Sizes range from 37 to 42.",
+      "pocPriceKes": null,
+      "stock": 0,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7596434236362591500",
+      "coverUrl": "covers/7596434236362591500.jpg"
+    },
+    {
+      "tiktokVideoId": "7592696888596401464",
+      "caption": "",
+      "hashtags": [],
+      "pocName": "Kids Open Sandals",
+      "pocDescription": "Stylish open sandals for kids available in three colors: black, brown, and white. Sizes range from 31 to 36.",
+      "pocPriceKes": null,
+      "stock": 0,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7592696888596401464",
+      "coverUrl": "covers/7592696888596401464.jpg"
+    },
+    {
+      "tiktokVideoId": "7666442727034211604",
+      "caption": "Kitten heels @2500\n#kittenheels #lowheels #heels #kittenheelshoes #heelsforwomen ",
+      "hashtags": [
+        {
+          "name": "kittenheels"
+        },
+        {
+          "name": "lowheels"
+        },
+        {
+          "name": "heels"
+        },
+        {
+          "name": "kittenheelshoes"
+        },
+        {
+          "name": "heelsforwomen"
+        }
+      ],
+      "pocName": "Kitten Heels",
+      "pocDescription": "Stylish kitten heels available in sizes 37 to 43. Perfect for a chic look without sacrificing comfort.",
+      "pocPriceKes": 2500,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7666442727034211604",
+      "coverUrl": "covers/7666442727034211604.jpg"
+    },
+    {
+      "tiktokVideoId": "7665781630228761876",
+      "caption": "Men casual air.mx 95 @3700 \n#airmax #mencasualshoes #mensneakers #sneakersformen #casualsneakers ",
+      "hashtags": [
+        {
+          "name": "airmax"
+        },
+        {
+          "name": "mencasualshoes"
+        },
+        {
+          "name": "mensneakers"
+        },
+        {
+          "name": "sneakersformen"
+        },
+        {
+          "name": "casualsneakers"
+        }
+      ],
+      "pocName": "Air.mx 95 Sneakers",
+      "pocDescription": "Stylish Air.mx 95 sneakers available in sizes 38 to 45. Perfect for casual wear and everyday comfort.",
+      "pocPriceKes": 3700,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7665781630228761876",
+      "coverUrl": "covers/7665781630228761876.jpg"
+    },
+    {
+      "tiktokVideoId": "7665763687717817621",
+      "caption": "#girlsshoes #shoesforgirls #kidsshoes #kidsweddingshoes #galsshoes ",
+      "hashtags": [
+        {
+          "name": "girlsshoes"
+        },
+        {
+          "name": "shoesforgirls"
+        },
+        {
+          "name": "kidsshoes"
+        },
+        {
+          "name": "kidsweddingshoes"
+        },
+        {
+          "name": "galsshoes"
+        }
+      ],
+      "pocName": "Baby Girls Shoes",
+      "pocDescription": "Stylish baby girls' shoes suitable for various occasions. Available in sizes 21 to 36.",
+      "pocPriceKes": 1500,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7665763687717817621",
+      "coverUrl": "covers/7665763687717817621.jpg"
+    },
+    {
+      "tiktokVideoId": "7665704477193932052",
+      "caption": "#timberland #casualshoes #shoesformen #doublemonk #mencasual ",
+      "hashtags": [
+        {
+          "name": "timberland"
+        },
+        {
+          "name": "casualshoes"
+        },
+        {
+          "name": "shoesformen"
+        },
+        {
+          "name": "doublemonk"
+        },
+        {
+          "name": "mencasual"
+        }
+      ],
+      "pocName": "Timberland Casual Shoes",
+      "pocDescription": "Stylish Timberland casual shoes for men, featuring a unique textured design. Available in sizes 40 to 45.",
+      "pocPriceKes": 2999,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7665704477193932052",
+      "coverUrl": "covers/7665704477193932052.jpg"
+    },
+    {
+      "tiktokVideoId": "7665618142831463701",
+      "caption": "#loafers #ladiesloafers #loafersshoes #loafersforwomen #leatherloafers ",
+      "hashtags": [
+        {
+          "name": "loafers"
+        },
+        {
+          "name": "ladiesloafers"
+        },
+        {
+          "name": "loafersshoes"
+        },
+        {
+          "name": "loafersforwomen"
+        },
+        {
+          "name": "leatherloafers"
+        }
+      ],
+      "pocName": "Ladies Loafers",
+      "pocDescription": "Stylish ladies loafers available in sizes 37 to 43. Perfect for casual or semi-formal occasions.",
+      "pocPriceKes": 5000,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7665618142831463701",
+      "coverUrl": "covers/7665618142831463701.jpg"
+    },
+    {
+      "tiktokVideoId": "7665392029282815253",
+      "caption": "@#unisexsweater #sweaters #pullnecksweaters #turtlenecksweater #warmsweater ",
+      "hashtags": [
+        {
+          "name": "unisexsweater"
+        },
+        {
+          "name": "sweaters"
+        },
+        {
+          "name": "pullnecksweaters"
+        },
+        {
+          "name": "turtlenecksweater"
+        },
+        {
+          "name": "warmsweater"
+        }
+      ],
+      "pocName": "Unisex Pullneck Sweater",
+      "pocDescription": "A cozy unisex pullneck/turtleneck sweater in a vibrant red color. Available in free size, perfect for both men and women.",
+      "pocPriceKes": 1000,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@fouhart_goods/video/7665392029282815253",
+      "coverUrl": "covers/7665392029282815253.jpg"
+    },
+    {
+      "tiktokVideoId": "7621462079706516756",
+      "caption": "Luxury bags that speak for you ✨\nQuality, class & affordability in one place 👜\n📍Garden Estate Road, Nairobi (Opp Kilimanjaro Meat Hub, Shop A12)\n🚚 Deliveries countrywide\n#NairobiBusiness #KenyaFashion #BagsKenya #LuxuryStyle #coachtote ",
+      "hashtags": [
+        {
+          "name": "nairobibusiness"
+        },
+        {
+          "name": "kenyafashion"
+        },
+        {
+          "name": "bagskenya"
+        },
+        {
+          "name": "luxurystyle"
+        },
+        {
+          "name": "coachtote"
+        }
+      ],
+      "pocName": "Black Coach Leather Tote Bag",
+      "pocDescription": "Structured black leather tote bag with gold logo hardware and buckle strap accents. Features a spacious main compartment suitable for daily use or work.",
+      "pocPriceKes": null,
+      "stock": 0,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7621462079706516756",
+      "coverUrl": "covers/7621462079706516756.jpg"
+    },
+    {
+      "tiktokVideoId": "7593247235756805388",
+      "caption": "Replying to @aretptarhs \nkaribuuuuu🥰🥰🥰🥰\n📞/whatsp 0721582298 \n📌 garden estate road opp Kilimanjaro Meat Hub shop A12 \n🚚 deliveries countrywide \n     payment on delivery within Nairobi \n#bagsonabudget #designerbags #KenyaLuxury #bntclassycollection #gardenestateroad ",
+      "hashtags": [
+        {
+          "name": ""
+        },
+        {
+          "name": "bagsonabudget"
+        },
+        {
+          "name": "designerbags"
+        },
+        {
+          "name": "kenyaluxury"
+        },
+        {
+          "name": "bntclassycollection"
+        },
+        {
+          "name": "gardenestateroad"
+        }
+      ],
+      "pocName": "Unclear — location directions video",
+      "pocDescription": "This video shows outdoor directions to the shop rather than displaying a physical item for sale.",
+      "pocPriceKes": null,
+      "stock": 0,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7593247235756805388",
+      "coverUrl": "covers/7593247235756805388.jpg"
+    },
+    {
+      "tiktokVideoId": "7667221506732182804",
+      "caption": "New arrivals ✨️\n#chanel  #designerbags #classybags #bntclassycollection    #creatorsearchinsights ",
+      "hashtags": [
+        {
+          "name": "chanel"
+        },
+        {
+          "name": "designerbags"
+        },
+        {
+          "name": "classybags"
+        },
+        {
+          "name": "bntclassycollection"
+        },
+        {
+          "name": "creatorsearchinsights"
+        }
+      ],
+      "pocName": "Light Blue Top Handle Handbag",
+      "pocDescription": "A structured light blue handbag featuring a top handle and front flap closure.",
+      "pocPriceKes": null,
+      "stock": 0,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7667221506732182804",
+      "coverUrl": "covers/7667221506732182804.jpg"
+    },
+    {
+      "tiktokVideoId": "7667160800641092884",
+      "caption": "New arrivals ✨️\n#chanel #designerbags #classybags #bntclassycollection      #creatorsearchinsights ",
+      "hashtags": [
+        {
+          "name": "chanel"
+        },
+        {
+          "name": "designerbags"
+        },
+        {
+          "name": "classybags"
+        },
+        {
+          "name": "bntclassycollection"
+        },
+        {
+          "name": "creatorsearchinsights"
+        }
+      ],
+      "pocName": "Chanel Designer Item",
+      "pocDescription": "A black Chanel branded gift box presented inside a boutique.",
+      "pocPriceKes": null,
+      "stock": 0,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7667160800641092884",
+      "coverUrl": "covers/7667160800641092884.jpg"
+    },
+    {
+      "tiktokVideoId": "7667143861482917141",
+      "caption": "New arrivals ✨️\n#christianlouboutin #designerbags #classybags #bntclassycollection   #creatorsearchinsights ",
+      "hashtags": [
+        {
+          "name": "christianlouboutin"
+        },
+        {
+          "name": "designerbags"
+        },
+        {
+          "name": "classybags"
+        },
+        {
+          "name": "bntclassycollection"
+        },
+        {
+          "name": "creatorsearchinsights"
+        }
+      ],
+      "pocName": "Studded Black Tote Bag",
+      "pocDescription": "A spacious black tote bag adorned with metallic studs and distinctive red side panels. Features sturdy double top handles, perfect for everyday wear.",
+      "pocPriceKes": null,
+      "stock": 0,
+      "status": "draft",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7667143861482917141",
+      "coverUrl": "covers/7667143861482917141.jpg"
+    },
+    {
+      "tiktokVideoId": "7667128018455923989",
+      "caption": "New arrivals ✨️\n#coachshoes  #coachtabby #smallbag #bntclassycollection   #creatorsearchinsights ",
+      "hashtags": [
+        {
+          "name": "coachshoes"
+        },
+        {
+          "name": "coachtabby"
+        },
+        {
+          "name": "smallbag"
+        },
+        {
+          "name": "bntclassycollection"
+        },
+        {
+          "name": "creatorsearchinsights"
+        }
+      ],
+      "pocName": "Unclear — needs seller review",
+      "pocDescription": "A woman holding a black Coach branded box inside a handbag boutique. The specific item inside the box is not visible.",
+      "pocPriceKes": 800,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7667128018455923989",
+      "coverUrl": "covers/7667128018455923989.jpg"
+    },
+    {
+      "tiktokVideoId": "7666450541949586708",
+      "caption": "New arrivals ✨️\n#christiandior #dior #smallbag #bntclassycollection  #creatorsearchinsights ",
+      "hashtags": [
+        {
+          "name": "christiandior"
+        },
+        {
+          "name": "dior"
+        },
+        {
+          "name": "smallbag"
+        },
+        {
+          "name": "bntclassycollection"
+        },
+        {
+          "name": "creatorsearchinsights"
+        }
+      ],
+      "pocName": "Christian Dior Style Boxed Item",
+      "pocDescription": "A seller holding a decorative Dior-patterned box inside a women's bag boutique. The specific item inside the box is not visible.",
+      "pocPriceKes": 800,
+      "stock": 1,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7666450541949586708",
+      "coverUrl": "covers/7666450541949586708.jpg"
+    },
+    {
+      "tiktokVideoId": "7666370561366314260",
+      "caption": "Replying to @mercychepchumba_17 ",
+      "hashtags": [
+        {
+          "name": ""
+        }
+      ],
+      "pocName": "Unclear — needs seller review",
+      "pocDescription": "This video is a response to a user comment inside a handbag boutique. No single specific product is being highlighted for sale.",
+      "pocPriceKes": 1000,
+      "stock": 0,
+      "status": "published",
+      "videoUrl": "https://www.tiktok.com/@bntclassycollectionke/video/7666370561366314260",
+      "coverUrl": "covers/7666370561366314260.jpg"
+    }
+  ]
+}
