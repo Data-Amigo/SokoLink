@@ -428,3 +428,76 @@ ruff · format · mypy strict   clean
 pytest                        50 passed
 alembic                       588f6c5577d0 (head)
 ```
+
+---
+
+## 2026-08-08 · Ingestion and the cascade, in production code
+
+The spikes are now the specification. Three layers, each with one job.
+
+### `schemas/tiktok.py` — the validation border
+
+Apify's response is a third-party contract we do not control. Validating once,
+at the edge, means a shape change fails loudly with a readable error instead of
+surfacing three layers later as a `None`.
+
+The models are **tolerant of extra fields and strict about the ones we depend
+on**. Apify sends 28 top-level keys; we need nine. A field they add can never
+break us; one they remove that we rely on does — which is the right way round.
+
+Field names come from the real payload, not from documentation.
+
+### `services/scraper.py` — the adapter
+
+Callers depend on `ScraperEngine`, never on Apify. Swapping the engine is a
+change to one file. TIKTOK proved the value of this seam by swapping vision
+providers three times through an equivalent one.
+
+`download_media()` refuses anything whose content type is not what was asked
+for. That guard exists because a spike fetched a 214-byte JSON error from
+Apify's key-value store and passed it to Gemini **as a video** — a paid call
+spent on nothing, silently.
+
+`DEFAULT_PROFILE_LIMIT = 30`, because the spike account had 1,453 videos. A full
+import is ~$0.44 of Apify for one seller, mostly stale stock.
+
+### `agent/draft.py` — the provider seam
+
+The only file that knows which vision provider we use. Constrained decoding
+against `ProductDraft`, so the output can only be a valid instance.
+
+One guard worth naming: **constrained decoding guarantees the SHAPE, never the
+SENSE.** A model can still return a phone number in a price field. The agent
+rejects an implausible price itself, so the failure names the draft rather than
+arriving as an IntegrityError from three layers down.
+
+### `services/drafting.py` — where the economics live
+
+The agent knows how to ask a model; this knows how much we are willing to pay to
+find out. Conflating them is how a cost control ends up buried in a prompt.
+
+- Tier 1 (caption) is **skipped as a price source on purpose** — 0/10 measured,
+  and every caption already reaches the model as hashtag context. A separate
+  text call would spend money re-reading what tier 2 sees anyway.
+- A confident tier-2 price **stops** the cascade.
+- A failed tier does **not** abort it — the next tier may still rescue the item —
+  but the failure is recorded, never swallowed.
+- `allow_video_tier=False` exists for bulk imports and over-quota sellers.
+- `tiers_attempted` is recorded so we can ask later whether the expensive tier
+  earns its cost. Unrecorded, that question is unanswerable.
+
+### Testing what actually matters here
+
+The cascade tests protect **cost**, not just correctness. A regression that
+quietly escalated every item would pass a naive correctness test and arrive as a
+bill — so the tests assert which tiers ran, not only what came out.
+
+Scraper fixtures are built from the real captured payload. A test that passes
+against a payload we imagined proves nothing about the one the provider sends.
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        92 passed
+```
