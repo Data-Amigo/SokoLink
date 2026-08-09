@@ -1,22 +1,34 @@
 """
-Product — one catalogue item, from any of the three ingestion paths.
+Product — one catalogue item, from any ingestion path on any platform.
 
-    TikTok profile sync ─┐
-    Pasted TikTok link  ─┼──> Product (DRAFT) ──> seller confirms ──> PUBLISHED
-    Manual photo upload ─┘
+    profile sync (tiktok/instagram/…) ─┐
+    pasted post link                  ─┼─> Product (DRAFT) ─> seller confirms ─> PUBLISHED
+    photo upload                      ─┘
+
+PROVENANCE IS TWO DIMENSIONS, not one:
+
+    platform        WHERE it came from   tiktok | instagram | facebook | jumia | manual
+    ingest_method   HOW it got here      profile_sync | single_link | upload
+
+They are separate because only the second decides re-sync ownership. A feed
+sync owns what it created and may update it; it must never touch a product the
+seller uploaded by hand.
 
 WHY the constraints below are in the DATABASE rather than in service code: they
 are the rails that make an AI-assisted catalogue safe. A model, a future agent,
 a migration script and a hand-written query all have to obey Postgres. Only
-application code has to remember to call the validator.
+application code has to remember to call a validator.
 
-Three rails, each with a test that proves it refuses:
+Four rails, each with a test that proves it refuses:
 
-  1. published_requires_price  — the LLM can never push an unpriced item live
-  2. stock_non_negative        — overselling is impossible at the storage layer
-  3. unique tiktok_video_id    — re-scraping the same feed cannot duplicate items
+  1. published_requires_price     the LLM can never push an unpriced item live
+  2. stock_non_negative           overselling is impossible at the storage layer
+  3. uq_products_platform_post    re-scraping a feed updates, never duplicates
+  4. upload_has_no_post_id        an uploaded product cannot look re-syncable
 
-MONEY IS INTEGER KES. `price_kes = 1500` is KSh 1,500. No floats near a price.
+MONEY IS INTEGER KES. `price_kes = 1500` is KSh 1,500. No floats near a price —
+and the price is of ONE UNIT AS SOLD, which is not always one item. See
+`unit_quantity`.
 """
 
 from __future__ import annotations
@@ -33,16 +45,18 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
-from app.models.enums import PriceSource, ProductSource, ProductStatus
+from app.models.enums import IngestMethod, Platform, PriceSource, ProductStatus
 
 if TYPE_CHECKING:
     from app.models.seller import Seller
+    from app.models.social_account import SocialAccount
 
 
 class Product(Base):
@@ -58,19 +72,34 @@ class Product(Base):
     seller: Mapped[Seller] = relationship(back_populates="products")
 
     # ── Provenance ───────────────────────────────────────────────────────────
-    #: Which path created this. Decides what a re-sync may touch: a profile sync
-    #: owns what it created, and must leave MANUAL products entirely alone.
-    source: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=ProductSource.TIKTOK_PROFILE.value
+    # Two dimensions, deliberately separate: WHERE it came from, and HOW it got
+    # here. The second is what decides re-sync ownership.
+
+    #: tiktok | instagram | facebook | jumia | manual
+    platform: Mapped[str] = mapped_column(String(20), nullable=False, default=Platform.TIKTOK.value)
+
+    #: profile_sync | single_link | upload
+    ingest_method: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=IngestMethod.PROFILE_SYNC.value
     )
 
-    #: TikTok's video id. NULL for manual uploads.
-    #: Unique so re-scraping a feed updates rather than duplicates — and
-    #: Postgres permits many NULLs in a unique index, so manual products
-    #: coexist without needing a partial index.
-    tiktok_video_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    #: The connected account this came from. NULL for uploads and for pasted
+    #: links to accounts the seller has not connected.
+    social_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("social_accounts.id", ondelete="SET NULL")
+    )
+    social_account: Mapped[SocialAccount | None] = relationship(back_populates="products")
 
-    video_url: Mapped[str | None] = mapped_column(String(500))
+    #: The platform's own id for the post. NULL for uploads.
+    #:
+    #: Unique per (platform, id) so re-scraping a feed updates rather than
+    #: duplicates, while the same numeric id on two different platforms stays
+    #: legal. Postgres permits many NULLs in a unique index, so uploads coexist
+    #: without needing a partial index.
+    platform_post_id: Mapped[str | None] = mapped_column(String(64))
+
+    #: Link back to the original post.
+    source_url: Mapped[str | None] = mapped_column(String(500))
 
     #: Cover image, stored BY US. TikTok CDN URLs expire, so a stored copy is
     #: the difference between a storefront that works next month and one full
@@ -180,8 +209,12 @@ class Product(Base):
             name="ck_products_confidence_range",
         ),
         CheckConstraint(
-            "source IN ('tiktok_profile', 'tiktok_link', 'manual')",
-            name="ck_products_source_valid",
+            "platform IN ('tiktok', 'instagram', 'facebook', 'jumia', 'manual')",
+            name="ck_products_platform_valid",
+        ),
+        CheckConstraint(
+            "ingest_method IN ('profile_sync', 'single_link', 'upload')",
+            name="ck_products_ingest_method_valid",
         ),
         CheckConstraint(
             "status IN ('draft', 'published', 'archived')",
@@ -191,11 +224,22 @@ class Product(Base):
             "price_source IS NULL OR price_source IN ('caption', 'cover_image', 'video', 'seller')",
             name="ck_products_price_source_valid",
         ),
-        # A manual product has no TikTok video behind it, by definition.
+        # An uploaded product has no platform post behind it, by definition.
+        # Allowing one would make it look re-syncable and put seller-entered
+        # data at risk of being overwritten by a feed sync.
         CheckConstraint(
-            "source <> 'manual' OR tiktok_video_id IS NULL",
-            name="ck_products_manual_has_no_video_id",
+            "ingest_method <> 'upload' OR platform_post_id IS NULL",
+            name="ck_products_upload_has_no_post_id",
         ),
+        # The two provenance dimensions must agree: manual means uploaded, and
+        # uploaded means manual. A "tiktok upload" is incoherent.
+        CheckConstraint(
+            "(platform = 'manual') = (ingest_method = 'upload')",
+            name="ck_products_manual_iff_upload",
+        ),
+        # Re-scraping a feed must UPDATE, never duplicate — but the same
+        # numeric id on two platforms is legal, so uniqueness is per platform.
+        UniqueConstraint("platform", "platform_post_id", name="uq_products_platform_post"),
         # A lot of zero or negative items is meaningless.
         CheckConstraint(
             "unit_quantity IS NULL OR unit_quantity > 0",
@@ -215,9 +259,26 @@ class Product(Base):
         Index("ix_products_seller_status", "seller_id", "status"),
         # The dashboard review queue: this seller's drafts, worst parses first.
         Index("ix_products_seller_confidence", "seller_id", "parse_confidence"),
-        # The re-sync guard: "does this seller already have this video?"
-        Index("ix_products_seller_source", "seller_id", "source"),
+        # The re-sync guard: "which of this seller's products does a sync of
+        # this platform own?"
+        Index("ix_products_seller_platform", "seller_id", "platform", "ingest_method"),
     )
+
+    @property
+    def is_sync_owned(self) -> bool:
+        """
+        Whether a profile re-sync may modify or remove this product.
+
+        Only items a sync created. A seller who adds stock by hand, syncs their
+        feed, and watches it vanish does not come back — this is the guard that
+        prevents it, and it has its own test.
+        """
+        return IngestMethod(self.ingest_method).is_sync_owned
+
+    @property
+    def platform_label(self) -> str:
+        """Display name of the source platform, for the dashboard."""
+        return Platform(self.platform).label
 
     @property
     def is_buyable(self) -> bool:

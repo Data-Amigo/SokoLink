@@ -20,8 +20,16 @@ sqlalchemy==2.0.44
 psycopg[binary]==3.2.10          # Postgres driver; binary = no compiler needed
 alembic==1.16.5                  # schema migrations — see alembic/
 
-# ── Templating (P3 storefront; installed now so the surface is ready) ────────
+# ── Templating (P3 storefront + dashboard) ───────────────────────────────────
 jinja2==3.1.6
+python-multipart==0.0.20         # HTML form bodies and file uploads
+
+# ── Auth (P3) ────────────────────────────────────────────────────────────────
+argon2-cffi==25.1.0              # password hashing; memory-hard, GPU-resistant
+pyjwt==2.10.1                    # signed session tokens
+
+# ── AI (P1) ──────────────────────────────────────────────────────────────────
+google-genai==2.17.0             # Gemini: the vision + audio price cascade
 
 # ── Testing ──────────────────────────────────────────────────────────────────
 pytest==8.4.2

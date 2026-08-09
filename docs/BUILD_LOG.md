@@ -501,3 +501,89 @@ against a payload we imagined proves nothing about the one the provider sends.
 ruff · format · mypy strict   clean
 pytest                        92 passed
 ```
+
+---
+
+## 2026-08-09 · Multi-platform, and logins
+
+### The schema was TikTok-shaped
+
+Instagram, Facebook and later Jumia entered the plan. The model could not hold
+them: `Seller.tiktok_handle` is one platform and one handle, and
+`Product.tiktok_video_id` cannot express "this came from IG post X".
+
+**Generalised now, deliberately, with zero production rows.** A migration
+nobody notices today; backfilling fifty live seller catalogues later.
+
+| Before | After |
+|---|---|
+| `Seller.tiktok_handle` | `SocialAccount` rows — a seller has many |
+| `Product.source` (conflated) | `platform` + `ingest_method` — two dimensions |
+| `Product.tiktok_video_id` | `platform_post_id`, unique **per platform** |
+
+**Why a table rather than more columns:** a column per platform means a
+migration for every platform added, and nowhere to record per-account state
+like "when did we last sync *this* one". A row per connection makes adding
+Jumia a data change rather than a schema change.
+
+**Why two provenance dimensions:** platform says *where it came from*,
+ingest_method says *how it got here* — and only the second decides re-sync
+ownership. `IngestMethod.is_sync_owned` is the guard: a feed sync owns only
+what it created.
+
+Two new constraints fell out of the split:
+
+- `manual_iff_upload` — a "tiktok upload" is incoherent; the dimensions must agree.
+- `uq_products_platform_post` — uniqueness is **per platform**, because two
+  platforms can legitimately mint the same numeric id and a global unique would
+  reject the second.
+
+Only TikTok has an engine. Instagram and Facebook are declared so the schema,
+URLs and UI never change to admit them; `ScraperEngine` is already a protocol,
+so a new engine slots in beside `ApifyEngine` without callers changing.
+
+### Auth — email + password now, phone later
+
+Phone + OTP is the better fit (the number is already the seller's identity, and
+it is what M-Pesa charges) but it needs an SMS provider we do not have.
+`Account.phone` exists from the start so that migration is additive.
+
+`app/security.py` owns hashing and signing; nothing else touches a password.
+
+**Anti-enumeration is the whole point of `services/accounts.py`.** Three
+measures, all load-bearing and all tested:
+
+1. **One message for every failure** — unknown email, wrong password and
+   deactivated account are indistinguishable. "Your account is disabled" would
+   itself confirm the address exists.
+2. **A timing equaliser.** When no account is found we still verify against
+   `DUMMY_HASH`, so a missing email costs the same Argon2 work as a wrong
+   password. Without it, response time is an oracle measurable over the network
+   — and there is a test asserting the unknown-email path is not an order of
+   magnitude faster.
+3. **No early return** before that comparison.
+
+Signup *can* say "email already registered" — a stranger reaching that message
+already claimed the address, and hiding it would leave them stuck. Login never
+can. The asymmetry is deliberate.
+
+Other decisions worth keeping:
+
+- **Signup creates the Seller too**, in one transaction. A login with no shop
+  is a dead end.
+- **Slug collisions append `-2`** rather than failing. A taken shop name must
+  not block signup; the slug is not permanent until publish.
+- **`RESERVED_SLUGS`** stops a seller taking `/login` or impersonating the
+  platform — with a test asserting every entry is lowercase and self-slugifying,
+  so a typo cannot silently disable the guard.
+- **Password rule is length only.** Character-class rules push people toward
+  `Passw0rd!`; a long phrase is stronger and far easier on a phone keyboard.
+- **`Account.__repr__` omits the email**, because repr lands in logs.
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        145 passed
+alembic                       d6cdd06e2776 (head)
+```

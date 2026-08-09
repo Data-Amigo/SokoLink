@@ -16,13 +16,21 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Product, ProductSource, ProductStatus, ScrapeJob, ScrapeStatus, Seller
+from app.models import (
+    IngestMethod,
+    Platform,
+    Product,
+    ProductStatus,
+    ScrapeJob,
+    ScrapeStatus,
+    Seller,
+    SocialAccount,
+)
 
 
 def make_seller(db: Session, **overrides: object) -> Seller:
     """A valid seller, with fields overridable per test."""
     values: dict[str, object] = {
-        "tiktok_handle": "nairobithrift",
         "slug": "nairobithrift",
         "display_name": "Nairobi Thrift",
         "whatsapp_number": "254712345678",
@@ -34,13 +42,29 @@ def make_seller(db: Session, **overrides: object) -> Seller:
     return seller
 
 
+def make_account(db: Session, seller: Seller, **overrides: object) -> SocialAccount:
+    """A connected social account, TikTok unless overridden."""
+    values: dict[str, object] = {
+        "seller_id": seller.id,
+        "platform": Platform.TIKTOK.value,
+        "handle": "nairobithrift",
+        "display_name": "Nairobi Thrift",
+    }
+    values.update(overrides)
+    account = SocialAccount(**values)
+    db.add(account)
+    db.flush()
+    return account
+
+
 def make_product(db: Session, seller: Seller, **overrides: object) -> Product:
     """A valid draft product, with fields overridable per test."""
     values: dict[str, object] = {
         "seller_id": seller.id,
         "title": "Cargo Pants",
-        "source": ProductSource.TIKTOK_PROFILE.value,
-        "tiktok_video_id": "7100000000000000001",
+        "platform": Platform.TIKTOK.value,
+        "ingest_method": IngestMethod.PROFILE_SYNC.value,
+        "platform_post_id": "7100000000000000001",
     }
     values.update(overrides)
     product = Product(**values)
@@ -87,19 +111,35 @@ class TestStockRail:
         assert product.is_buyable is False
 
 
-class TestVideoIdUniqueness:
+class TestPostIdUniqueness:
     """RAIL 3 — re-scraping a feed updates rather than duplicates."""
 
-    def test_the_same_video_cannot_be_stored_twice(self, db: Session) -> None:
+    def test_the_same_post_cannot_be_stored_twice(self, db: Session) -> None:
         seller = make_seller(db)
-        make_product(db, seller, tiktok_video_id="7100000000000000042")
+        make_product(db, seller, platform_post_id="7100000000000000042")
         with pytest.raises(IntegrityError):
-            make_product(db, seller, tiktok_video_id="7100000000000000042")
+            make_product(db, seller, platform_post_id="7100000000000000042")
 
-    def test_many_manual_products_can_have_no_video_id(self, db: Session) -> None:
+    def test_the_same_id_on_two_platforms_is_legal(self, db: Session) -> None:
+        """
+        Uniqueness is per platform. Two platforms can legitimately mint the
+        same numeric id, and a global unique would reject the second one.
+        """
+        seller = make_seller(db)
+        make_product(db, seller, platform=Platform.TIKTOK.value, platform_post_id="12345")
+        make_product(
+            db,
+            seller,
+            platform=Platform.INSTAGRAM.value,
+            platform_post_id="12345",
+            title="Same id, different platform",
+        )
+        assert db.query(Product).filter_by(platform_post_id="12345").count() == 2
+
+    def test_many_uploads_can_have_no_post_id(self, db: Session) -> None:
         """
         Postgres allows multiple NULLs in a unique index — which is what lets
-        manual uploads coexist without a partial index.
+        uploads coexist without needing a partial index.
         """
         seller = make_seller(db)
         for i in range(3):
@@ -107,10 +147,11 @@ class TestVideoIdUniqueness:
                 db,
                 seller,
                 title=f"Uploaded item {i}",
-                source=ProductSource.MANUAL.value,
-                tiktok_video_id=None,
+                platform=Platform.MANUAL.value,
+                ingest_method=IngestMethod.UPLOAD.value,
+                platform_post_id=None,
             )
-        assert db.query(Product).filter_by(source=ProductSource.MANUAL.value).count() == 3
+        assert db.query(Product).filter_by(platform=Platform.MANUAL.value).count() == 3
 
 
 class TestPriceSanity:
@@ -139,51 +180,143 @@ class TestPriceSanity:
             make_product(db, seller, parse_confidence=1.5)
 
 
-class TestSourceRails:
+class TestProvenanceRails:
     """Provenance decides what a re-sync may touch, so it must be trustworthy."""
 
-    def test_an_unknown_source_is_refused(self, db: Session) -> None:
+    def test_an_unknown_platform_is_refused(self, db: Session) -> None:
         seller = make_seller(db)
-        with pytest.raises(IntegrityError, match="source_valid"):
-            make_product(db, seller, source="instagram")
+        with pytest.raises(IntegrityError, match="platform_valid"):
+            make_product(db, seller, platform="myspace")
 
-    def test_a_manual_product_cannot_carry_a_video_id(self, db: Session) -> None:
+    def test_an_unknown_ingest_method_is_refused(self, db: Session) -> None:
+        seller = make_seller(db)
+        with pytest.raises(IntegrityError, match="ingest_method_valid"):
+            make_product(db, seller, ingest_method="telepathy")
+
+    def test_an_upload_cannot_carry_a_post_id(self, db: Session) -> None:
         """
-        Manual products have no TikTok video by definition. Allowing one would
-        make them look re-syncable and put seller-entered data at risk.
+        Uploads have no platform post by definition. Allowing one would make
+        them look re-syncable and put seller-entered data at risk.
         """
         seller = make_seller(db)
-        with pytest.raises(IntegrityError, match="manual_has_no_video_id"):
+        with pytest.raises(IntegrityError, match="upload_has_no_post_id"):
             make_product(
                 db,
                 seller,
-                source=ProductSource.MANUAL.value,
-                tiktok_video_id="7100000000000000099",
+                platform=Platform.MANUAL.value,
+                ingest_method=IngestMethod.UPLOAD.value,
+                platform_post_id="7100000000000000099",
+            )
+
+    def test_manual_and_upload_must_agree(self, db: Session) -> None:
+        """A "tiktok upload" is incoherent — the two dimensions must match."""
+        seller = make_seller(db)
+        with pytest.raises(IntegrityError, match="manual_iff_upload"):
+            make_product(
+                db,
+                seller,
+                platform=Platform.TIKTOK.value,
+                ingest_method=IngestMethod.UPLOAD.value,
+                platform_post_id=None,
             )
 
     def test_all_three_ingestion_paths_are_accepted(self, db: Session) -> None:
         seller = make_seller(db)
+        make_product(db, seller, ingest_method=IngestMethod.PROFILE_SYNC.value)
         make_product(
             db,
             seller,
-            source=ProductSource.TIKTOK_PROFILE.value,
-            tiktok_video_id="7100000000000000001",
-        )
-        make_product(
-            db,
-            seller,
-            source=ProductSource.TIKTOK_LINK.value,
-            tiktok_video_id="7100000000000000002",
+            ingest_method=IngestMethod.SINGLE_LINK.value,
+            platform_post_id="7100000000000000002",
             title="From a link",
         )
         make_product(
             db,
             seller,
-            source=ProductSource.MANUAL.value,
-            tiktok_video_id=None,
+            platform=Platform.MANUAL.value,
+            ingest_method=IngestMethod.UPLOAD.value,
+            platform_post_id=None,
             title="Uploaded by hand",
         )
         assert db.query(Product).filter_by(seller_id=seller.id).count() == 3
+
+    def test_only_profile_sync_products_are_sync_owned(self, db: Session) -> None:
+        """
+        The rail that protects hand-entered stock: a feed sync owns only what
+        it created. A seller who adds a product, syncs, and watches it vanish
+        does not come back.
+        """
+        seller = make_seller(db)
+        synced = make_product(db, seller, ingest_method=IngestMethod.PROFILE_SYNC.value)
+        pasted = make_product(
+            db,
+            seller,
+            ingest_method=IngestMethod.SINGLE_LINK.value,
+            platform_post_id="7100000000000000002",
+        )
+        uploaded = make_product(
+            db,
+            seller,
+            platform=Platform.MANUAL.value,
+            ingest_method=IngestMethod.UPLOAD.value,
+            platform_post_id=None,
+        )
+
+        assert synced.is_sync_owned is True
+        assert pasted.is_sync_owned is False
+        assert uploaded.is_sync_owned is False
+
+
+class TestSocialAccountRails:
+    """Connections are per platform, and a handle belongs to one seller only."""
+
+    def test_a_seller_can_connect_several_platforms(self, db: Session) -> None:
+        seller = make_seller(db)
+        make_account(db, seller, platform=Platform.TIKTOK.value)
+        make_account(db, seller, platform=Platform.INSTAGRAM.value, handle="nairobi_thrift")
+
+        assert sorted(seller.connected_platforms) == ["instagram", "tiktok"]
+        assert seller.has_any_connection is True
+
+    def test_the_same_platform_cannot_be_connected_twice(self, db: Session) -> None:
+        """Two TikToks would make "sync my feed" ambiguous."""
+        seller = make_seller(db)
+        make_account(db, seller, platform=Platform.TIKTOK.value, handle="one")
+        with pytest.raises(IntegrityError):
+            make_account(db, seller, platform=Platform.TIKTOK.value, handle="two")
+
+    def test_one_handle_cannot_belong_to_two_sellers(self, db: Session) -> None:
+        """Otherwise two shops could publish the same account's products."""
+        first = make_seller(db, slug="first")
+        second = make_seller(db, slug="second")
+        make_account(db, first, handle="contested")
+        with pytest.raises(IntegrityError):
+            make_account(db, second, handle="contested")
+
+    def test_manual_is_not_a_connectable_platform(self, db: Session) -> None:
+        seller = make_seller(db)
+        with pytest.raises(IntegrityError):
+            make_account(db, seller, platform=Platform.MANUAL.value)
+
+    def test_account_for_finds_the_right_platform(self, db: Session) -> None:
+        seller = make_seller(db)
+        make_account(db, seller, platform=Platform.TIKTOK.value)
+
+        assert seller.account_for(Platform.TIKTOK) is not None
+        assert seller.account_for(Platform.INSTAGRAM) is None
+
+    def test_a_disconnected_account_is_not_counted(self, db: Session) -> None:
+        """Kept rather than deleted, so imported products keep a coherent origin."""
+        seller = make_seller(db)
+        make_account(db, seller, is_active=False)
+
+        assert seller.connected_platforms == []
+        assert seller.account_for(Platform.TIKTOK) is None
+
+    def test_a_seller_can_exist_with_no_connections(self, db: Session) -> None:
+        """Manual uploads alone are a legitimate way to run a shop."""
+        seller = make_seller(db)
+        assert seller.has_any_connection is False
 
 
 class TestSellerRails:
@@ -198,14 +331,9 @@ class TestSellerRails:
             make_seller(db, slug="Nairobi Thrift!")
 
     def test_duplicate_slugs_are_refused(self, db: Session) -> None:
-        make_seller(db, slug="thrift", tiktok_handle="one")
+        make_seller(db, slug="thrift")
         with pytest.raises(IntegrityError):
-            make_seller(db, slug="thrift", tiktok_handle="two")
-
-    def test_a_seller_can_exist_without_a_tiktok_handle(self, db: Session) -> None:
-        """Manual-upload-only sellers are legitimate — TikTok is optional."""
-        seller = make_seller(db, tiktok_handle=None, slug="handmade-crafts")
-        assert seller.tiktok_handle is None
+            make_seller(db, slug="thrift")
 
 
 class TestScrapeJobRails:
@@ -215,7 +343,8 @@ class TestScrapeJobRails:
         job = ScrapeJob(
             seller_id=seller.id,
             status=ScrapeStatus.FAILED.value,
-            source=ProductSource.TIKTOK_PROFILE.value,
+            platform=Platform.TIKTOK.value,
+            ingest_method=IngestMethod.PROFILE_SYNC.value,
             error=None,
         )
         db.add(job)
@@ -227,7 +356,8 @@ class TestScrapeJobRails:
         job = ScrapeJob(
             seller_id=seller.id,
             status=ScrapeStatus.FAILED.value,
-            source=ProductSource.TIKTOK_PROFILE.value,
+            platform=Platform.TIKTOK.value,
+            ingest_method=IngestMethod.PROFILE_SYNC.value,
             error="Apify actor timed out after 300s",
         )
         db.add(job)
@@ -240,7 +370,8 @@ class TestScrapeJobRails:
         job = ScrapeJob(
             seller_id=seller.id,
             status=ScrapeStatus.SUCCEEDED.value,
-            source=ProductSource.TIKTOK_PROFILE.value,
+            platform=Platform.TIKTOK.value,
+            ingest_method=IngestMethod.PROFILE_SYNC.value,
             video_count=0,
         )
         db.add(job)

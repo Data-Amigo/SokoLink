@@ -55,8 +55,11 @@ class ScrapeJob(Base):
         String(20), nullable=False, default=ScrapeStatus.PENDING.value
     )
 
+    #: Which platform was scraped.
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)
+
     #: Which ingestion path triggered this — a full profile pull or one link.
-    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    ingest_method: Mapped[str] = mapped_column(String(20), nullable=False)
 
     #: The raw, unmodified provider response. Kept deliberately: it is what lets
     #: us re-run a changed parser against real data for free, and it is the
@@ -85,6 +88,14 @@ class ScrapeJob(Base):
         CheckConstraint(
             "status IN ('pending', 'running', 'succeeded', 'failed')",
             name="ck_scrape_jobs_status_valid",
+        ),
+        CheckConstraint(
+            "platform IN ('tiktok', 'instagram', 'facebook', 'jumia')",
+            name="ck_scrape_jobs_platform_valid",
+        ),
+        CheckConstraint(
+            "ingest_method IN ('profile_sync', 'single_link')",
+            name="ck_scrape_jobs_ingest_method_valid",
         ),
         # A failed job without a reason is unactionable for whoever debugs it.
         CheckConstraint(

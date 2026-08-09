@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.agent.draft import DraftAgent, DraftAgentError
-from app.models.enums import PriceSource
+from app.models.enums import Platform, PriceSource
 from app.schemas.draft import ProductDraft
 from app.schemas.tiktok import TikTokVideo
 from app.services.scraper import ScraperEngine, ScraperError
@@ -49,6 +49,10 @@ class CascadeResult:
     #: Non-fatal failures. A tier that errored must not abort the cascade — the
     #: next tier may still succeed — but the failure is never swallowed either.
     warnings: list[str] = field(default_factory=list)
+
+    #: Which platform this draft came from. Carried through so the caller can
+    #: persist provenance without re-deriving it.
+    platform: Platform = Platform.TIKTOK
 
     @property
     def succeeded(self) -> bool:
@@ -73,23 +77,29 @@ class DraftingService:
         self._scraper = scraper
 
     def draft_for_video(
-        self, video: TikTokVideo, *, allow_video_tier: bool = True
+        self,
+        video: TikTokVideo,
+        *,
+        allow_video_tier: bool = True,
+        platform: Platform = Platform.TIKTOK,
     ) -> CascadeResult:
         """
-        Produce the best draft available for one video, cheapest tier first.
+        Produce the best draft available for one post, cheapest tier first.
 
         Args:
-            video: A validated scraped video.
+            video: A validated scraped post.
             allow_video_tier: Set False to forbid the expensive tier — used when
                 a seller is over quota, or during a bulk import where paying for
                 every clip would be ruinous.
+            platform: Which platform this came from. Carried onto the result so
+                the caller persists provenance without re-deriving it.
 
         Returns:
             A CascadeResult. A result with no price is a legitimate outcome, not
             an error: the seller fills it in during review, which is exactly the
             human gate the whole design rests on.
         """
-        result = CascadeResult(draft=None, price_source=None)
+        result = CascadeResult(draft=None, price_source=None, platform=platform)
 
         # ── Tier 2: the cover image ─────────────────────────────────────────
         # Tier 1 (caption) is skipped as a PRICE source on purpose: measured at
