@@ -129,6 +129,8 @@ Project context for Claude Code: [`CLAUDE.md`](./CLAUDE.md)
 
 | Document | What it covers |
 |---|---|
+| [`docs/CODEBASE.md`](docs/CODEBASE.md) | **Start here.** A guided tour of the code as it stands — layers, files, flows, and a reading order |
+| [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md) | What was built, what broke, and why each decision was made |
 | [`docs/PRODUCTION_PLAN.md`](docs/PRODUCTION_PLAN.md) | The build plan — P0–P9 across four phases |
 | [`docs/SokoLink_Business_Document.pdf`](docs/SokoLink_Business_Document.pdf) | Problem, market, product, moat, business model |
 | [`docs/SokoLink_Technical_Document.pdf`](docs/SokoLink_Technical_Document.pdf) | Architecture, stack, flows, security |
