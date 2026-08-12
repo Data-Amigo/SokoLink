@@ -24,6 +24,7 @@ from app.models.enums import (
     PriceSource,
     ProductStatus,
     ScrapeStatus,
+    VerificationMethod,
 )
 from app.models.product import Product
 from app.models.scrape_job import ScrapeJob
@@ -42,4 +43,5 @@ __all__ = [
     "ScrapeStatus",
     "Seller",
     "SocialAccount",
+    "VerificationMethod",
 ]

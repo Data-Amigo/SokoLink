@@ -23,54 +23,8 @@ from app.models import (
     ProductStatus,
     ScrapeJob,
     ScrapeStatus,
-    Seller,
-    SocialAccount,
 )
-
-
-def make_seller(db: Session, **overrides: object) -> Seller:
-    """A valid seller, with fields overridable per test."""
-    values: dict[str, object] = {
-        "slug": "nairobithrift",
-        "display_name": "Nairobi Thrift",
-        "whatsapp_number": "254712345678",
-    }
-    values.update(overrides)
-    seller = Seller(**values)
-    db.add(seller)
-    db.flush()
-    return seller
-
-
-def make_account(db: Session, seller: Seller, **overrides: object) -> SocialAccount:
-    """A connected social account, TikTok unless overridden."""
-    values: dict[str, object] = {
-        "seller_id": seller.id,
-        "platform": Platform.TIKTOK.value,
-        "handle": "nairobithrift",
-        "display_name": "Nairobi Thrift",
-    }
-    values.update(overrides)
-    account = SocialAccount(**values)
-    db.add(account)
-    db.flush()
-    return account
-
-
-def make_product(db: Session, seller: Seller, **overrides: object) -> Product:
-    """A valid draft product, with fields overridable per test."""
-    values: dict[str, object] = {
-        "seller_id": seller.id,
-        "title": "Cargo Pants",
-        "platform": Platform.TIKTOK.value,
-        "ingest_method": IngestMethod.PROFILE_SYNC.value,
-        "platform_post_id": "7100000000000000001",
-    }
-    values.update(overrides)
-    product = Product(**values)
-    db.add(product)
-    db.flush()
-    return product
+from tests.factories import make_account, make_product, make_seller
 
 
 class TestPublishRequiresPrice:

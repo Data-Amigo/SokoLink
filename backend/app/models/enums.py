@@ -84,6 +84,28 @@ class IngestMethod(StrEnum):
         return self is IngestMethod.PROFILE_SYNC
 
 
+class VerificationMethod(StrEnum):
+    """
+    How a seller proved they control a social account.
+
+    WHY THIS EXISTS AT ALL: without proof, a handle is just a string someone
+    typed. A stranger could claim @zumamitumbabales, have us scrape her videos
+    and her photos, and publish a storefront pointing at *their* WhatsApp
+    number. That is not impersonation, it is sales diversion — and it would be
+    invisible to the buyer.
+
+    OAuth is the better experience: one tap, and the platform tells us who they
+    are. It is unavailable until TikTok and Meta approve our app, which is on
+    their clock. BIO_CODE bridges that gap using only what we already fetch.
+    """
+
+    BIO_CODE = "bio_code"
+    """Seller placed a one-time code in their profile bio; we read it back."""
+
+    OAUTH = "oauth"
+    """The platform itself vouched for them. Preferred, once approved."""
+
+
 class ProductStatus(StrEnum):
     """
     Where a product sits between arriving and being buyable.

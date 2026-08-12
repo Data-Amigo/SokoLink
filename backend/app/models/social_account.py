@@ -80,6 +80,30 @@ class SocialAccount(Base):
     #: fresh import of everything.
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # ── Ownership proof ──────────────────────────────────────────────────────
+    # Without this, a handle is just a string someone typed. A stranger could
+    # claim another seller's account, have us scrape her videos and photos, and
+    # publish a storefront pointing at THEIR WhatsApp number — sales diversion
+    # that is invisible to the buyer.
+    #
+    # AN UNVERIFIED ACCOUNT CANNOT BE SYNCED. That is the rail, enforced in
+    # services/verification.py and tested; it means an unproven claim can never
+    # produce a single product.
+
+    #: When ownership was proven. NULL means unproven, and unproven means unusable.
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    #: bio_code | oauth. NULL until verified.
+    verification_method: Mapped[str | None] = mapped_column(String(20))
+
+    #: The one-time code the seller must place in their bio. Cleared the moment
+    #: verification succeeds — a live code lying around is a standing target.
+    verification_code: Mapped[str | None] = mapped_column(String(32))
+
+    #: Codes expire so an abandoned attempt cannot be resumed months later by
+    #: whoever controls the account then.
+    verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     #: Drives the once-per-day scrape guard, and answers "why has nothing
     #: changed?" on the dashboard instead of in a support message.
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -104,6 +128,17 @@ class SocialAccount(Base):
             "follower_count >= 0 AND post_count >= 0",
             name="ck_social_accounts_counts_non_negative",
         ),
+        # A verified account must record HOW it was verified — otherwise we
+        # cannot tell a bio-code proof from an OAuth one when auditing later,
+        # or re-verify when a method is retired.
+        CheckConstraint(
+            "verified_at IS NULL OR verification_method IS NOT NULL",
+            name="ck_social_accounts_verified_has_method",
+        ),
+        CheckConstraint(
+            "verification_method IS NULL OR verification_method IN ('bio_code', 'oauth')",
+            name="ck_social_accounts_verification_method_valid",
+        ),
         # One account per platform per seller. Connecting a second TikTok would
         # make "sync my feed" ambiguous.
         UniqueConstraint("seller_id", "platform", name="uq_social_accounts_seller_platform"),
@@ -117,6 +152,22 @@ class SocialAccount(Base):
     def platform_enum(self) -> Platform:
         """The platform as an enum, for display and dispatch."""
         return Platform(self.platform)
+
+    @property
+    def is_verified(self) -> bool:
+        """Whether ownership has been proven. Unproven means unsyncable."""
+        return self.verified_at is not None
+
+    @property
+    def can_sync(self) -> bool:
+        """
+        Whether we may pull this account's content.
+
+        Both conditions matter: a disconnected account should not be scraped,
+        and an unverified one must not be — the second is what stops a stranger
+        harvesting someone else's catalogue.
+        """
+        return self.is_active and self.is_verified
 
     def __repr__(self) -> str:
         return f"<SocialAccount {self.platform}/@{self.handle}>"
