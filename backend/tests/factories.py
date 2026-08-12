@@ -16,11 +16,19 @@ right to reject that.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import IngestMethod, Platform, Product, Seller, SocialAccount
+from app.models import (
+    IngestMethod,
+    Platform,
+    Product,
+    Seller,
+    SocialAccount,
+    VerificationMethod,
+)
 
 
 def make_seller(db: Session, **overrides: Any) -> Seller:
@@ -39,17 +47,24 @@ def make_seller(db: Session, **overrides: Any) -> Seller:
 
 def make_account(db: Session, seller: Seller, **overrides: Any) -> SocialAccount:
     """
-    A connected social account — TikTok, and deliberately UNVERIFIED.
+    A connected social account — TikTok unless overridden.
 
-    Unverified is the honest default: verification is opt-in work a seller has
-    to do, and a factory that quietly pre-verified would hide the very rail
-    most of these tests exist to check.
+    NECESSARILY VERIFIED. There is no unverified kind: ``verified_at`` and
+    ``verification_method`` are NOT NULL, so an unproven connection cannot be
+    stored at all. An unproven attempt is an ``AccountClaim``, which is a
+    different table and grants nothing.
+
+    That is why this factory cannot offer an "unverified account" option — the
+    thing does not exist. Tests that need one build a claim instead, via
+    ``services.verification.start_claim``.
     """
     values: dict[str, Any] = {
         "seller_id": seller.id,
         "platform": Platform.TIKTOK.value,
         "handle": "nairobithrift",
         "display_name": "Nairobi Thrift",
+        "verified_at": datetime.now(UTC),
+        "verification_method": VerificationMethod.BIO_CODE.value,
     }
     values.update(overrides)
     account = SocialAccount(**values)

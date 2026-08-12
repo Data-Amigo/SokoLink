@@ -18,6 +18,7 @@ see.
 
 from app.db import Base
 from app.models.account import Account
+from app.models.account_claim import AccountClaim
 from app.models.enums import (
     IngestMethod,
     Platform,
@@ -33,6 +34,7 @@ from app.models.social_account import SocialAccount
 
 __all__ = [
     "Account",
+    "AccountClaim",
     "Base",
     "IngestMethod",
     "Platform",

@@ -29,6 +29,7 @@ from app.models.enums import Platform
 
 if TYPE_CHECKING:
     from app.models.account import Account
+    from app.models.account_claim import AccountClaim
     from app.models.product import Product
     from app.models.scrape_job import ScrapeJob
     from app.models.social_account import SocialAccount
@@ -75,7 +76,14 @@ class Seller(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+    #: Connected accounts. Every row here is VERIFIED by construction — an
+    #: unproven attempt lives in `account_claims` instead and grants nothing.
     social_accounts: Mapped[list[SocialAccount]] = relationship(
+        back_populates="seller", cascade="all, delete-orphan"
+    )
+
+    #: Ownership claims still being proven. Not connections.
+    account_claims: Mapped[list[AccountClaim]] = relationship(
         back_populates="seller", cascade="all, delete-orphan"
     )
     products: Mapped[list[Product]] = relationship(
