@@ -24,6 +24,7 @@ unanswerable and the cost is unmanageable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from app.agent.draft import DraftAgent, DraftAgentError
 from app.models.enums import Platform, PriceSource
@@ -67,6 +68,27 @@ class CascadeResult:
     def reached_video_tier(self) -> bool:
         """Whether the most expensive tier ran — the number to watch."""
         return "video" in self.tiers_attempted
+
+
+class Drafter(Protocol):
+    """
+    What ingestion needs from the cascade.
+
+    A Protocol rather than the concrete class, mirroring ``ScraperEngine``:
+    callers depend on the shape, not the implementation. It also means tests
+    can substitute a fake without a single ``# type: ignore``, which matters —
+    a file full of silenced type errors is a file nobody reads warnings in.
+    """
+
+    def draft_for_video(
+        self,
+        video: TikTokVideo,
+        *,
+        allow_video_tier: bool = True,
+        platform: Platform = Platform.TIKTOK,
+    ) -> CascadeResult:
+        """Produce the best draft available for one post."""
+        ...
 
 
 class DraftingService:

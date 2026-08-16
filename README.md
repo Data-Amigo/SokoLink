@@ -1,4 +1,4 @@
-# SokoLink
+# Biashara Mall
 
 **Where your audience becomes your customers.**
 
@@ -7,7 +7,7 @@ browse, ask questions in Sheng, and pay by M-Pesa without leaving the
 conversation.
 
 ```
-SokoLink
+Biashara Mall
 ├── Soko Commerce    Catalog · Orders · Payments · WhatsApp Storefront
 ├── Soko Intel       Scripts · Captions · Market Insights · Competitor Intelligence
 └── Soko AI          Customer Support · Sales Agent · Follow-ups · Order Assistance
@@ -24,7 +24,7 @@ describing an item the seller cannot identify. Every step leaks intent.
 The price is withheld on purpose — verified against 24 real captions, **zero**
 mention KSh. That tactic is exactly what creates the bottleneck.
 
-SokoLink reads the price off the video cover, or hears the seller say it in
+Biashara Mall reads the price off the video cover, or hears the seller say it in
 Sheng, and turns the whole feed into something a buyer can tap.
 
 ---
@@ -132,9 +132,9 @@ Project context for Claude Code: [`CLAUDE.md`](./CLAUDE.md)
 | [`docs/CODEBASE.md`](docs/CODEBASE.md) | **Start here.** A guided tour of the code as it stands — layers, files, flows, and a reading order |
 | [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md) | What was built, what broke, and why each decision was made |
 | [`docs/PRODUCTION_PLAN.md`](docs/PRODUCTION_PLAN.md) | The build plan — P0–P9 across four phases |
-| [`docs/SokoLink_Business_Document.pdf`](docs/SokoLink_Business_Document.pdf) | Problem, market, product, moat, business model |
-| [`docs/SokoLink_Technical_Document.pdf`](docs/SokoLink_Technical_Document.pdf) | Architecture, stack, flows, security |
-| [`docs/SokoLink_Project_Flow.pptx`](docs/SokoLink_Project_Flow.pptx) | End-to-end flow deck |
+| [`docs/BiasharaMall_Business_Document.pdf`](docs/BiasharaMall_Business_Document.pdf) | Problem, market, product, moat, business model |
+| [`docs/BiasharaMall_Technical_Document.pdf`](docs/BiasharaMall_Technical_Document.pdf) | Architecture, stack, flows, security |
+| [`docs/BiasharaMall_Project_Flow.pptx`](docs/BiasharaMall_Project_Flow.pptx) | End-to-end flow deck |
 | [`docs/NOTION_WORKSPACE.md`](docs/NOTION_WORKSPACE.md) | Spec to rebuild the Notion tracker |
 
 Documents are generated from `docs/src/` — edit the source and re-run, so four

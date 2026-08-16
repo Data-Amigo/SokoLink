@@ -1,0 +1,53 @@
+{# Base layout for every page.
+
+   Kept deliberately thin. Anything added here loads on the STOREFRONT, which is
+   the one surface where payload size costs a buyer real money in mobile data.
+
+   Tailwind is loaded from a CDN for now — a build step is one more thing to
+   break before the weekend, and swapping to a compiled stylesheet later is a
+   change to this file alone.
+#}
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+  {# Zoom stays enabled on purpose: buyers squint at product photos on small
+     screens, and disabling it is an accessibility failure. #}
+
+  <title>{% block title %}Biashara Mall{% endblock %}</title>
+  <meta name="description" content="{% block description %}Shop straight from WhatsApp.{% endblock %}">
+
+  {% block meta %}{% endblock %}
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            soko:  { 50:'#ecfdf5', 100:'#d1fae5', 500:'#10b981', 600:'#059669', 700:'#047857' },
+            ink:   { DEFAULT:'#16181d', muted:'#5f6672' },
+          },
+          fontFamily: {
+            sans: ['ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','sans-serif'],
+          },
+        },
+      },
+    }
+  </script>
+
+  <style>
+    /* Respect users who have asked for less motion. */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body class="h-full bg-white text-ink font-sans antialiased">
+  {% block body %}{% endblock %}
+</body>
+</html>

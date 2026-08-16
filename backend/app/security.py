@@ -35,7 +35,7 @@ _hasher = PasswordHasher()
 #: A real Argon2 hash of a value nobody knows, used to burn the same CPU time
 #: when an email does not exist as when it does. Without this, response timing
 #: tells an attacker which emails are registered.
-DUMMY_HASH = _hasher.hash("sokolink-timing-equaliser-not-a-real-password")
+DUMMY_HASH = _hasher.hash("biashara-timing-equaliser-not-a-real-password")
 
 #: How long a session lasts. Long enough that a seller reviewing drafts on a
 #: slow connection is not logged out mid-edit; short enough that a borrowed
@@ -45,7 +45,7 @@ SESSION_LIFETIME = timedelta(days=14)
 ALGORITHM = "HS256"
 
 #: The cookie the browser carries. HttpOnly, so no script can read it.
-SESSION_COOKIE = "sokolink_session"
+SESSION_COOKIE = "biashara_session"
 
 #: Minimum password length. Length beats character-class rules — a long
 #: passphrase is both stronger and easier for a seller on a phone keyboard.

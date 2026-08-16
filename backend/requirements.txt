@@ -1,4 +1,4 @@
-# SokoLink backend dependencies — pinned exactly so every machine (dev, CI,
+# Biashara Mall backend dependencies — pinned exactly so every machine (dev, CI,
 # Railway) runs identical code. Update deliberately, never by accident.
 #
 # Install:  .venv\Scripts\python -m pip install -r requirements.txt

@@ -1,5 +1,5 @@
 """
-Create SokoLink's application and test databases on an existing Postgres server.
+Create Biashara Mall's application and test databases on an existing Postgres server.
 
     python scripts/create_databases.py
 
@@ -10,8 +10,8 @@ no new infrastructure to run. Docker is unnecessary for this.
 
     server (Railway)
       ├── railway         ← pre-existing POC data, NEVER touched by this script
-      ├── sokolink        ← the application database
-      └── sokolink_test   ← the test database (tests create and drop tables here)
+      ├── biashara        ← the application database
+      └── biashara_test   ← the test database (tests create and drop tables here)
 
 It connects using DATABASE_URL from .env, which may point at any database on the
 target server — it only needs a connection, since CREATE DATABASE is a
@@ -35,7 +35,7 @@ import psycopg  # noqa: E402
 from app.config import settings  # noqa: E402
 
 #: Databases this project needs. Anything already present is left alone.
-DATABASES = ("sokolink", "sokolink_test")
+DATABASES = ("biashara", "biashara_test")
 
 
 def main() -> int:
@@ -71,8 +71,8 @@ def main() -> int:
 
     print(
         "\nNext: point .env at them —\n"
-        "  DATABASE_URL      -> .../sokolink\n"
-        "  TEST_DATABASE_URL -> .../sokolink_test"
+        "  DATABASE_URL      -> .../biashara\n"
+        "  TEST_DATABASE_URL -> .../biashara_test"
     )
     return 0
 

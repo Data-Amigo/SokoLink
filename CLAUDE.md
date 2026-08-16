@@ -1,13 +1,13 @@
-# SokoLink — Project Context
+# Biashara Mall — Project Context
 
 > Read automatically at the start of every Claude Code session. Keep it under ~200 lines.
 
 ## What we're building
 
-SokoLink turns a Kenyan seller's TikTok feed into a shop that lives inside WhatsApp.
+Biashara Mall turns a Kenyan seller's TikTok feed into a shop that lives inside WhatsApp.
 
 ```
-SokoLink
+Biashara Mall
 ├── Soko Commerce    Catalog · Orders · Payments · WhatsApp Storefront
 ├── Soko Intel       Scripts · Captions · Market Insights · Competitor Intelligence
 └── Soko AI          Customer Support · Sales Agent · Follow-ups · Order Assistance
@@ -18,7 +18,7 @@ SokoLink
 ## The buyer journey
 
 ```
-WhatsApp chat → browse → WhatsApp in-app browser opens → SokoLink storefront
+WhatsApp chat → browse → WhatsApp in-app browser opens → Biashara Mall storefront
     → product selection → M-Pesa checkout → return to WhatsApp
 ```
 
@@ -142,7 +142,7 @@ callbacks.
 
 **Read and adapt it; never copy blind, never reinvent either.** Its
 `docs/CONCEPTS.md` is worth reading in full. It is a reference, not a foundation:
-production SokoLink puts WhatsApp at the centre and adds Soko Intel, which
+production Biashara Mall puts WhatsApp at the centre and adds Soko Intel, which
 TIKTOK never had.
 
 ## Workflow

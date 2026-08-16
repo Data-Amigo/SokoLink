@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from app.config import Settings, settings
 
-DB_URL = "postgresql://user:pass@localhost:5432/sokolink"
+DB_URL = "postgresql://user:pass@localhost:5432/biashara"
 
 
 def build(**overrides: object) -> Settings:
@@ -55,7 +55,9 @@ def test_defaults_are_safe_for_local_development() -> None:
 
 def test_base_url_never_keeps_a_trailing_slash() -> None:
     """A trailing slash produces `//path` when links are built by concatenation."""
-    assert build(app_base_url="https://sokolink.shop/").app_base_url == "https://sokolink.shop"
+    assert (
+        build(app_base_url="https://biasharamall.com/").app_base_url == "https://biasharamall.com"
+    )
 
 
 def test_later_milestone_keys_are_optional() -> None:
@@ -106,17 +108,17 @@ class TestDriverNormalisation:
 
     def test_bare_postgresql_scheme_gets_the_psycopg_driver(self) -> None:
         assert build().database_url_str == (
-            "postgresql+psycopg://user:pass@localhost:5432/sokolink"
+            "postgresql+psycopg://user:pass@localhost:5432/biashara"
         )
 
     def test_an_explicit_psycopg_driver_is_left_alone(self) -> None:
-        url = "postgresql+psycopg://user:pass@localhost:5432/sokolink"
+        url = "postgresql+psycopg://user:pass@localhost:5432/biashara"
         assert build(database_url=url).database_url_str == url
 
     def test_test_database_url_is_normalised_too(self) -> None:
-        s = build(test_database_url="postgresql://user:pass@localhost:5432/sokolink_test")
+        s = build(test_database_url="postgresql://user:pass@localhost:5432/biashara_test")
         assert s.test_database_url_str == (
-            "postgresql+psycopg://user:pass@localhost:5432/sokolink_test"
+            "postgresql+psycopg://user:pass@localhost:5432/biashara_test"
         )
 
     def test_test_database_url_is_none_when_unset(self) -> None:
@@ -125,4 +127,4 @@ class TestDriverNormalisation:
 
 def test_module_level_settings_loaded() -> None:
     """The imported singleton is usable — this is what the app actually runs on."""
-    assert settings.app_name == "SokoLink"
+    assert settings.app_name == "Biashara Mall"

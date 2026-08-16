@@ -120,7 +120,7 @@ def start_claim(db: Session, seller_id: int, platform: Platform | str, handle: s
         if taken.seller_id == seller_id:
             raise VerificationError(f"@{clean} is already connected to your shop.")
         raise VerificationError(
-            f"@{clean} has already been verified by another SokoLink shop. "
+            f"@{clean} has already been verified by another Biashara Mall shop. "
             "If this is your account, contact support."
         )
 

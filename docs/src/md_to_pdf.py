@@ -223,12 +223,12 @@ def render(md_path: Path, accent_name: str) -> str:
 <style>{CSS.format(accent=accent, accent_soft=accent_soft)}</style>
 </head><body>
 <div class="cover">
-  <div class="eyebrow">SokoLink</div>
+  <div class="eyebrow">Biashara Mall</div>
   <h1>{html.escape(title)}</h1>
   {subtitle_html}
 </div>
 {converted}
-<footer>SokoLink &middot; generated from <code>{html.escape(md_path.name)}</code>
+<footer>Biashara Mall &middot; generated from <code>{html.escape(md_path.name)}</code>
 &middot; regenerate with <code>python docs/src/md_to_pdf.py {html.escape(str(md_path.name))}</code></footer>
 </body></html>"""
 
@@ -256,7 +256,7 @@ def main() -> int:
     html_path = build_dir / f"{md_path.stem}.html"
     html_path.write_text(html_doc, encoding="utf-8")
 
-    out_path = Path(args.out) if args.out else REPO_ROOT / "docs" / f"SokoLink_{md_path.stem}.pdf"
+    out_path = Path(args.out) if args.out else REPO_ROOT / "docs" / f"BiasharaMall_{md_path.stem}.pdf"
 
     subprocess.run(
         [

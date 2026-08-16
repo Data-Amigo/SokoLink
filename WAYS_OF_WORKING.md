@@ -1,4 +1,4 @@
-# SokoLink — Ways of Working
+# Biashara Mall — Ways of Working
 
 **Version 2 · 2026-08-05.** Replaces the TypeScript-era v1.
 **Companion docs:** [`docs/PRODUCTION_PLAN.md`](docs/PRODUCTION_PLAN.md) says *what* we build and in what order. This says *how* we work.

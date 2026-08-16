@@ -1,7 +1,7 @@
 """
-Generates the SokoLink end-to-end project flow deck.
+Generates the Biashara Mall end-to-end project flow deck.
 
-    content defined below  ──▶ python-pptx ──▶ SokoLink_Project_Flow.pptx
+    content defined below  ──▶ python-pptx ──▶ BiasharaMall_Project_Flow.pptx
 
 WHY a script rather than hand-built slides: the deck restates the same facts as
 docs/PRODUCTION_PLAN.md and the PDFs. Generating it means a plan change is a
@@ -18,7 +18,7 @@ from pptx.util import Inches, Pt
 
 OUT = Path(
     r"c:\Users\Administrator\OneDrive\Desktop\Portfolio Projects\Project Startup"
-    r"\SOKOLINK\docs\SokoLink_Project_Flow.pptx"
+    r"\BIASHARA MALL\docs\BiasharaMall_Project_Flow.pptx"
 )
 
 # ── Palette ──────────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ def header(s, eyebrow, title, accent=GREEN):
 
 
 def footer(s, n):
-    text(s, "SokoLink", 0.75, 6.95, 3, 0.3, size=9, color=MUTED)
+    text(s, "Biashara Mall", 0.75, 6.95, 3, 0.3, size=9, color=MUTED)
     text(s, str(n), 12.2, 6.95, 0.5, 0.3, size=9, color=MUTED, align=PP_ALIGN.RIGHT)
 
 
@@ -136,7 +136,7 @@ bar(s, 0, 0, 13.333, 7.5, GREEN)
 bar(s, 0, 0, 0.35, 7.5, RGBColor(0x02, 0x5A, 0x41))
 text(s, "PROJECT FLOW · END TO END", 1.3, 2.25, 10, 0.4, size=13,
      color=RGBColor(0xA7, 0xF3, 0xD0), bold=True)
-text(s, "SokoLink", 1.3, 2.75, 10, 1.3, size=62, color=WHITE, bold=True)
+text(s, "Biashara Mall", 1.3, 2.75, 10, 1.3, size=62, color=WHITE, bold=True)
 text(s, "Where your audience becomes your customers.", 1.3, 4.05, 10, 0.6,
      size=21, color=RGBColor(0xD1, 0xFA, 0xE5))
 bar(s, 1.3, 4.85, 2.2, 0.045, RGBColor(0x6E, 0xE7, 0xB7))
@@ -304,7 +304,7 @@ journey = [
     ("WhatsApp chat", "Buyer asks about\na product", BLUE),
     ("Browse products", "Agent answers,\nsends a link", BLUE),
     ("In-app browser", "WhatsApp opens the\nstorefront inline", BLUE),
-    ("SokoLink storefront", "Mobile-first,\nserver-rendered", GREEN),
+    ("Biashara Mall storefront", "Mobile-first,\nserver-rendered", GREEN),
     ("M-Pesa checkout", "STK push to the\nsame phone", GREEN),
     ("Return to WhatsApp", "Order confirmed\nin the thread", GREEN),
 ]

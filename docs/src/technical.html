@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SokoLink — Technical Document</title>
+<title>Biashara Mall — Technical Document</title>
 <style>
   @page { size: A4; margin: 20mm 18mm; }
   :root {
@@ -55,7 +55,7 @@
 
 <div class="cover">
   <div class="eyebrow">Technical Document</div>
-  <h1>SokoLink — Architecture &amp; Tech Stack</h1>
+  <h1>Biashara Mall — Architecture &amp; Tech Stack</h1>
   <div class="tagline">Python · FastAPI · Postgres · Gemini · WhatsApp Cloud API · M-Pesa Daraja</div>
   <div class="meta">Version 1.0 &nbsp;·&nbsp; August 2026 &nbsp;·&nbsp; Owner: Fredrick Muchoya</div>
 </div>
@@ -70,7 +70,7 @@
                       │  api/        │            WhatsApp in-app browser
    Apify  ◀──niche───▶│  agent/      │                    │
    (search)           │  services/   │                    ▼
-                      │  models/     │  ◀───────  SokoLink storefront
+                      │  models/     │  ◀───────  Biashara Mall storefront
    Daraja ◀──STK─────▶│              │            (server-rendered)
    (M-Pesa)           └──────┬───────┘
                              │
@@ -186,7 +186,7 @@ Tier 3  video: visual + AUDIO      expensive   → seller says the price in Shen
       ↓  buyer taps a signed storefront link
 WhatsApp in-app browser opens
       ↓
-SokoLink storefront (Jinja2, server-rendered, mobile-first)
+Biashara Mall storefront (Jinja2, server-rendered, mobile-first)
       ↓
 Product selection
       ↓
@@ -196,7 +196,7 @@ M-Pesa STK push  ──▶ buyer's phone prompts for PIN
       ↓
 Return to WhatsApp</div>
 
-<p>Rather than redirecting buyers to a separate website, SokoLink launches a mobile-first web experience directly from WhatsApp. <span class="tag">Design note</span> This uses the ordinary in-app browser, not WhatsApp Flows — which removes any dependency on Flows approval and gives full control of the interface.</p>
+<p>Rather than redirecting buyers to a separate website, Biashara Mall launches a mobile-first web experience directly from WhatsApp. <span class="tag">Design note</span> This uses the ordinary in-app browser, not WhatsApp Flows — which removes any dependency on Flows approval and gives full control of the interface.</p>
 
 <h3>The three hard parts</h3>
 
@@ -277,7 +277,7 @@ Return to WhatsApp</div>
 </div>
 
 <footer>
-  SokoLink — Technical Document v1.0 · August 2026 · Companion to <code>docs/PRODUCTION_PLAN.md</code> and <code>WAYS_OF_WORKING.md</code>.
+  Biashara Mall — Technical Document v1.0 · August 2026 · Companion to <code>docs/PRODUCTION_PLAN.md</code> and <code>WAYS_OF_WORKING.md</code>.
 </footer>
 
 </body>

@@ -1,0 +1,132 @@
+{# The buyer's storefront.
+
+   Opened inside the WhatsApp in-app browser, on a cheap Android handset, over
+   expensive data. Every decision here follows from that:
+
+     - server-rendered, no client framework
+     - lazy-loaded images below the fold
+     - the WhatsApp CTA is the largest thing on a card, because it is the
+       entire point of the page
+
+   PRICE IS NEVER RENDERED AS A BARE NUMBER. `price_display` carries the units,
+   because "KES 3,000" and "KES 3,000 for 30 pairs" mean very different things
+   to someone deciding whether to send money.
+#}
+{% extends "base.html" %}
+
+{% block title %}{{ seller.display_name }} · Biashara Mall{% endblock %}
+{% block description %}{{ seller.bio or "Shop " ~ seller.display_name ~ " on Biashara Mall." }}{% endblock %}
+
+{% block meta %}
+  {# Links get pasted into TikTok bios and WhatsApp chats. If the preview looks
+     broken, the link looks untrustworthy. #}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ seller.display_name }}">
+  <meta property="og:description" content="{{ seller.bio or 'Shop on Biashara Mall' }}">
+  {% if seller.avatar_url %}<meta property="og:image" content="{{ seller.avatar_url }}">{% endif %}
+  <meta name="twitter:card" content="summary_large_image">
+{% endblock %}
+
+{% block body %}
+<div class="mx-auto max-w-lg">
+
+  {# ── Shop header ─────────────────────────────────────────────────────── #}
+  <header class="px-5 pt-7 pb-5">
+    <div class="flex items-start gap-4">
+      {% if seller.avatar_url %}
+        <img src="{{ seller.avatar_url }}" alt=""
+             class="h-16 w-16 flex-none rounded-full object-cover ring-1 ring-black/5">
+      {% else %}
+        <div class="h-16 w-16 flex-none rounded-full bg-soko-100 grid place-items-center
+                    text-xl font-bold text-soko-700">
+          {{ seller.display_name[:1] | upper }}
+        </div>
+      {% endif %}
+
+      <div class="min-w-0 flex-1">
+        <h1 class="text-xl font-bold leading-tight">{{ seller.display_name }}</h1>
+
+        <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-muted">
+          {% if tiktok %}
+            <span class="inline-flex items-center gap-1">
+              {# Verified is a real claim here: the seller proved they control
+                 this account. It is not decoration. #}
+              <svg class="h-3.5 w-3.5 text-soko-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3.8 3.8 6.8-6.8a1 1 0 011.4 0z" clip-rule="evenodd"/>
+              </svg>
+              <span class="sr-only">Verified account:</span>@{{ tiktok.handle }}
+            </span>
+          {% endif %}
+          {% if tiktok and tiktok.follower_count %}
+            <span>{{ "{:,}".format(tiktok.follower_count) }} followers</span>
+          {% endif %}
+          {% if seller.location %}<span>{{ seller.location }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% if seller.bio %}
+      <p class="mt-4 text-sm leading-relaxed text-ink-muted">{{ seller.bio }}</p>
+    {% endif %}
+  </header>
+
+  {# ── Products ────────────────────────────────────────────────────────── #}
+  {% if products %}
+    <div class="border-t border-black/5 px-5 py-4">
+      <p class="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+        {{ products | length }} item{{ "s" if products | length != 1 }}
+      </p>
+    </div>
+
+    <ul class="grid grid-cols-2 gap-px bg-black/5">
+      {% for product in products %}
+        <li class="bg-white">
+          <a href="/{{ seller.slug }}/{{ product.id }}" class="block active:opacity-70">
+            <div class="relative aspect-square bg-gray-50">
+              {% if product.cover_url %}
+                {# Images below the fold load lazily — every kilobyte is the
+                   buyer's own money on a metered connection. #}
+                <img src="{{ product.cover_url | media }}" alt="{{ product.title }}"
+                     loading="{{ 'eager' if loop.index <= 2 else 'lazy' }}"
+                     class="h-full w-full object-cover">
+              {% else %}
+                <div class="grid h-full place-items-center text-ink-muted text-xs">No photo</div>
+              {% endif %}
+
+              {% if not product.is_buyable %}
+                <div class="absolute inset-0 grid place-items-center bg-white/70">
+                  <span class="rounded bg-ink px-2 py-1 text-xs font-semibold text-white">
+                    Sold out
+                  </span>
+                </div>
+              {% endif %}
+            </div>
+
+            <div class="p-3">
+              <h2 class="line-clamp-2 text-sm font-medium leading-snug">{{ product.title }}</h2>
+
+              {# NEVER a bare number for a bulk lot. #}
+              <p class="mt-1 text-sm font-bold text-soko-700">
+                {{ product.price_display or "Ask for price" }}
+              </p>
+
+              {% if product.sizes %}
+                <p class="mt-0.5 text-xs text-ink-muted">Sizes {{ product.sizes | join(", ") }}</p>
+              {% endif %}
+            </div>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="px-5 py-16 text-center">
+      <p class="font-medium">Nothing here yet</p>
+      <p class="mt-1 text-sm text-ink-muted">This shop hasn't published any items.</p>
+    </div>
+  {% endif %}
+
+  <footer class="px-5 py-10 text-center text-xs text-ink-muted">
+    Powered by <span class="font-semibold text-soko-700">Biashara Mall</span>
+  </footer>
+</div>
+{% endblock %}

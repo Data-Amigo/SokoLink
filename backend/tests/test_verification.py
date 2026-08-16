@@ -194,7 +194,7 @@ class TestStartingAClaim:
         check_claim(db, first, FakeScraper(bio=first.code))
 
         other = make_seller(db, slug="other-shop")
-        with pytest.raises(VerificationError, match="another SokoLink shop"):
+        with pytest.raises(VerificationError, match="another Biashara Mall shop"):
             start_claim(db, seller_id=other.id, platform=Platform.TIKTOK, handle="nairobithrift")
 
     def test_reclaiming_your_own_account_says_so_plainly(self, db: Session) -> None:

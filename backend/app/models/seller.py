@@ -3,7 +3,7 @@ Seller — a shop and its public identity.
 
     Seller ──┬──> SocialAccount[]   the platforms they have connected
              ├──> Product[]         everything in their catalogue
-             └──> slug              sokolink.shop/<slug>
+             └──> slug              biasharamall.com/<slug>
 
 WHY the slug is not derived from a platform handle: the handle belongs to
 TikTok (or Instagram, or Facebook) and the seller can change it there without

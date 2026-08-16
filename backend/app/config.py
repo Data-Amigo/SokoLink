@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     )
 
     # ── P0: application ──────────────────────────────────────────────────────
-    app_name: str = "SokoLink"
+    app_name: str = "Biashara Mall"
     app_env: Literal["dev", "test", "prod"] = "dev"
 
     #: Public base URL, no trailing slash. Used to build storefront links.

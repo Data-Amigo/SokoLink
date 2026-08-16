@@ -58,7 +58,7 @@ RESERVED_SLUGS = frozenset(
         "settings",
         "shop",
         "signup",
-        "sokolink",
+        "biashara",
         "static",
         "storefront",
         "support",
