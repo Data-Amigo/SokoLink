@@ -39,13 +39,13 @@ On Railway you set only `DATABASE_URL`. Leave `TEST_DATABASE_URL` unset there.
 
 | Step | Command |
 |---|---|
-| Build | Nixpacks default — `pip install -r requirements.txt` |
+| Build | Railpack default — detects Python, installs `requirements.txt` |
 | Start | `cd backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Healthcheck | `/health` |
 
 ### Why there is a `requirements.txt` at the repo root
 
-**Nixpacks decides which toolchain to install by looking for markers at the
+**The builder decides which toolchain to install by looking for markers at the
 repository root**, and the application lives in `backend/`. With nothing at the
 root it builds a generic image containing no Python at all, and the first build
 step dies with:
@@ -55,7 +55,10 @@ step dies with:
 exit code: 127
 ```
 
-That is not a dependency problem — it is Nixpacks never having installed Python.
+That is not a dependency problem — it is the builder never having installed
+Python. `builder` is set to **RAILPACK** (Railway's current builder, which
+succeeds Nixpacks) because its language detection is better; the root markers
+below make the detection unambiguous either way.
 
 So the root holds two markers:
 
@@ -63,12 +66,12 @@ So the root holds two markers:
   not a second list. Versions stay pinned in exactly one file.
 - **`.python-version`** — `3.11`, matching `pyproject.toml`.
 
-`railway.json` deliberately sets **no `buildCommand`**. Nixpacks' own Python
+`railway.json` deliberately sets **no `buildCommand`**. The builder's own Python
 install step is what proves the toolchain is present; overriding it was how the
 missing interpreter got hidden in the first place.
 
 > **The alternative, if you prefer it:** set the service's **Root Directory** to
-> `backend` in the Railway dashboard. Nixpacks then sees `backend/` as the root,
+> `backend` in the Railway dashboard. The builder then sees `backend/` as the root,
 > detects Python from `backend/requirements.txt`, and the two root markers become
 > unnecessary — but the start command must drop its `cd backend &&`, and the
 > setting lives in the dashboard rather than in the repo. Keeping it in
