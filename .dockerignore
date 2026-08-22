@@ -1,0 +1,22 @@
+# Keep the build context small and free of anything secret.
+#
+# .env FIRST and absolutely: it holds M-Pesa credentials, and a build context is
+# not a private place. It is gitignored too, but a Dockerfile copies from the
+# filesystem, not from git, so ignoring it here is a separate and necessary act.
+.env
+.env.*
+!.env.example
+
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Test-only and local-only material.
+backend/spikes
+backend/media
+docs/*.pdf
