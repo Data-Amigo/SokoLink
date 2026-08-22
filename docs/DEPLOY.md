@@ -39,9 +39,40 @@ On Railway you set only `DATABASE_URL`. Leave `TEST_DATABASE_URL` unset there.
 
 | Step | Command |
 |---|---|
-| Build | `pip install -r backend/requirements.txt` |
+| Build | Nixpacks default — `pip install -r requirements.txt` |
 | Start | `cd backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Healthcheck | `/health` |
+
+### Why there is a `requirements.txt` at the repo root
+
+**Nixpacks decides which toolchain to install by looking for markers at the
+repository root**, and the application lives in `backend/`. With nothing at the
+root it builds a generic image containing no Python at all, and the first build
+step dies with:
+
+```
+/bin/bash: line 1: pip: command not found
+exit code: 127
+```
+
+That is not a dependency problem — it is Nixpacks never having installed Python.
+
+So the root holds two markers:
+
+- **`requirements.txt`** — one line, `-r backend/requirements.txt`. A pointer,
+  not a second list. Versions stay pinned in exactly one file.
+- **`.python-version`** — `3.11`, matching `pyproject.toml`.
+
+`railway.json` deliberately sets **no `buildCommand`**. Nixpacks' own Python
+install step is what proves the toolchain is present; overriding it was how the
+missing interpreter got hidden in the first place.
+
+> **The alternative, if you prefer it:** set the service's **Root Directory** to
+> `backend` in the Railway dashboard. Nixpacks then sees `backend/` as the root,
+> detects Python from `backend/requirements.txt`, and the two root markers become
+> unnecessary — but the start command must drop its `cd backend &&`, and the
+> setting lives in the dashboard rather than in the repo. Keeping it in
+> `railway.json` means the deploy is reproducible from the code alone.
 
 **Migrations run on every boot, before the server starts.** Alembic is a no-op
 when the database is already at head, so this is safe to repeat — and it means a
