@@ -1,0 +1,48 @@
+{# The reassurance strip under the auth form.
+
+   Signing up is an act of trust, asked for before the product has proven
+   anything. These three lines answer the three questions a cautious Kenyan
+   seller actually has, in the order they occur to them:
+
+     1. "Do I have to sell straight away?"   — no, content first
+     2. "Are you after my account?"          — no, and we never ask
+     3. "Are you even from here?"            — yes
+
+   Copy is the brand's own, taken from biasharamall.com rather than written
+   fresh, so the signup page and the landing page make the same promises in the
+   same words. A promise that changes wording between pages reads as a promise
+   that might change meaning.
+
+   ONE FILE, included by both login and signup. Two copies would drift, and
+   these are commitments — drift here is not cosmetic.
+
+   Line-drawn icons rather than emoji: emoji render differently on every
+   Android skin, and the flag in particular was inconsistent.
+#}
+<div class="auth-trust">
+  <span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20 6 9 17l-5-5"/>
+    </svg>
+    Start with content. Open your store when you are ready.
+  </span>
+
+  <span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="4" y="10" width="16" height="11" rx="2"/>
+      <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+    </svg>
+    We never ask for your social passwords.
+  </span>
+
+  <span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="m8.5 12 2.5 2.5 4.5-5"/>
+    </svg>
+    Built in Kenya for Kenyan sellers.
+  </span>
+</div>

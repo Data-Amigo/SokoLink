@@ -1,0 +1,87 @@
+{# The dashboard.
+
+   Two states, and the empty one matters more. Every creator who ever signs up
+   sees it, and it has exactly one job: get them to connect an account. So it
+   holds one sentence, one reason, and one button — nothing to read past and
+   nothing else to click.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Dashboard · Biashara Mall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head">
+    {# Their own name, not "Dashboard". They know what page they are on. #}
+    <h1>{{ seller.display_name if seller else account.email }}</h1>
+    <p class="muted">Here is how your content is doing.</p>
+  </div>
+
+  {% if not accounts %}
+
+    <div class="card card-lg">
+      <div class="empty">
+        <div class="empty-icon" aria-hidden="true">📈</div>
+        <h3>Connect your TikTok to get started</h3>
+        <p>
+          We pull your views, followers and comments so you can see what is
+          actually working — and what is not.
+        </p>
+        <a href="/accounts/connect" class="btn btn-primary">Connect TikTok</a>
+        {# Answers the objection before it is raised. The single most common
+           reason a creator abandons this screen is fear of a password grab. #}
+        <p class="tiny subtle" style="margin-top: var(--s-4)">
+          No password needed — you paste a short code into your bio.
+        </p>
+      </div>
+    </div>
+
+  {% else %}
+
+    <div class="grid grid-3">
+      {% for social in accounts %}
+        <article class="card">
+          <div class="cluster cluster-between" style="margin-bottom: var(--s-3)">
+            <span class="badge badge-brand">{{ social.platform|capitalize }}</span>
+            {% if social.last_synced_at %}
+              <span class="tiny subtle">Synced {{ social.last_synced_at.strftime('%d %b') }}</span>
+            {% else %}
+              <span class="badge badge-warn">Never synced</span>
+            {% endif %}
+          </div>
+
+          <h3>@{{ social.handle }}</h3>
+          <p class="muted small">{{ social.display_name or '' }}</p>
+
+          <div class="cluster" style="margin-top: var(--s-4)">
+            <div>
+              <div class="tiny subtle">Followers</div>
+              {# Thousands separators, because 22000 and 220000 are the same
+                 shape at a glance and they are wildly different businesses. #}
+              <div class="strong">{{ "{:,}".format(social.follower_count or 0) }}</div>
+            </div>
+            <div>
+              <div class="tiny subtle">Posts</div>
+              <div class="strong">{{ "{:,}".format(social.post_count or 0) }}</div>
+            </div>
+          </div>
+
+          <div class="cluster" style="margin-top: var(--s-5); flex-wrap: nowrap">
+            <a href="/analytics" class="btn btn-secondary btn-sm" style="flex:1">View analytics</a>
+            <form method="post" action="/accounts/{{ social.id }}/sync" style="flex:1">
+              <button type="submit" class="btn btn-primary btn-sm btn-block">Sync now</button>
+            </form>
+          </div>
+        </article>
+      {% endfor %}
+
+      <a href="/accounts/connect" class="card cluster" style="justify-content:center; text-decoration:none; border-style:dashed">
+        <span class="strong muted">+ Connect another account</span>
+      </a>
+    </div>
+
+  {% endif %}
+
+</div>
+{% endblock %}

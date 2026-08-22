@@ -1,0 +1,97 @@
+{# Connected accounts, and anything still in flight.
+
+   A pending claim is shown FIRST and prominently. A seller who started
+   verifying, got distracted and came back has one question — "where was I?" —
+   and burying that under a connect button makes them start over, which mints a
+   new code and invalidates the one already in their bio.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Accounts · Biashara Mall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head">
+    <h1>Accounts</h1>
+    <p class="muted">The social accounts we read your content from.</p>
+  </div>
+
+  {% if pending %}
+    <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
+      <div class="cluster cluster-between">
+        <div>
+          <span class="badge badge-warn">Waiting for verification</span>
+          <h3 style="margin-top: var(--s-2)">@{{ pending.handle }}</h3>
+          <p class="muted small">
+            Your code <code class="mono strong">{{ pending.code }}</code> is waiting
+            to be added to the bio.
+          </p>
+        </div>
+        <a href="/accounts/claim/{{ pending.id }}" class="btn btn-primary btn-sm">Finish</a>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if accounts %}
+    <div class="grid grid-3">
+      {% for social in accounts %}
+        <article class="card">
+          <div class="cluster cluster-between" style="margin-bottom: var(--s-3)">
+            <span class="badge badge-brand">{{ social.platform|capitalize }}</span>
+            <span class="badge badge-neutral">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5"/>
+              </svg>
+              Verified
+            </span>
+          </div>
+
+          <h3>@{{ social.handle }}</h3>
+          <p class="muted small">{{ social.display_name or '' }}</p>
+
+          <div class="cluster" style="margin-top: var(--s-4)">
+            <div>
+              <div class="tiny subtle">Followers</div>
+              <div class="strong">{{ "{:,}".format(social.follower_count or 0) }}</div>
+            </div>
+            <div>
+              <div class="tiny subtle">Posts</div>
+              <div class="strong">{{ "{:,}".format(social.post_count or 0) }}</div>
+            </div>
+          </div>
+
+          <p class="tiny subtle" style="margin-top: var(--s-4)">
+            {# The method is recorded on every account and worth showing: when
+               OAuth lands, a seller can see which of theirs used which. #}
+            Verified {{ social.verified_at.strftime('%d %b %Y') }}
+            via {{ social.verification_method.replace('_', ' ') }}
+          </p>
+        </article>
+      {% endfor %}
+
+      {% if not pending %}
+        <a href="/accounts/connect" class="card cluster"
+           style="justify-content:center; text-decoration:none; border-style:dashed">
+          <span class="strong muted">+ Connect another account</span>
+        </a>
+      {% endif %}
+    </div>
+
+  {% elif not pending %}
+    <div class="card card-lg">
+      <div class="empty">
+        <div class="empty-icon" aria-hidden="true">🔗</div>
+        <h3>No accounts connected yet</h3>
+        <p>Connect your TikTok and we will start tracking how your content performs.</p>
+        <a href="/accounts/connect" class="btn btn-primary">Connect TikTok</a>
+        <p class="tiny subtle" style="margin-top: var(--s-4)">
+          No password needed — you paste a short code into your bio.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}

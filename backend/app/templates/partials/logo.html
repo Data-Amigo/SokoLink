@@ -1,0 +1,26 @@
+{# The logo lockup — the real mark, plus the wordmark.
+
+   THE ASSET IS THE BRAND'S OWN. `static/img/logo.png` was extracted from the
+   `--logo` custom property on biasharamall.com, where it ships as a base64
+   data URI. It is not a redrawing.
+
+   An earlier version approximated the mark in hand-written SVG and rendered
+   as a padlock at 30px — which is the last thing a signup page should
+   accidentally say. Do not reintroduce a drawn version; if the brand mark
+   changes, replace the file.
+
+   ONE FILE so the lockup cannot drift between the storefront, the auth screens
+   and the workspace. Include it; never paste it.
+
+   Usage:
+     {% include "partials/logo.html" %}                 → links to /
+     {% with logo_href = "/dashboard" %}…{% endwith %}  → links elsewhere
+#}
+<a href="{{ logo_href | default('/') }}" class="logo">
+  <span class="logo-mark">
+    {# Empty alt, not "Biasharamall": the wordmark beside it already says the
+       name, and a screen reader announcing it twice is noise. #}
+    <img src="/static/img/logo.png" alt="" width="120" height="120" decoding="async">
+  </span>
+  <span class="logo-word">Biasharamall</span>
+</a>

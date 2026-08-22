@@ -39,8 +39,10 @@ from app.db import Base
 from app.models.enums import Platform
 
 if TYPE_CHECKING:
+    from app.models.post import Post
     from app.models.product import Product
     from app.models.seller import Seller
+    from app.models.snapshot import AccountMetricSnapshot
 
 
 class SocialAccount(Base):
@@ -112,6 +114,16 @@ class SocialAccount(Base):
     )
 
     products: Mapped[list[Product]] = relationship(back_populates="social_account")
+
+    #: Every post we have seen on this account — product or not. This is the
+    #: corpus analytics reads; `products` is the commerce subset.
+    posts: Mapped[list[Post]] = relationship(
+        back_populates="social_account", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    snapshots: Mapped[list[AccountMetricSnapshot]] = relationship(
+        back_populates="social_account", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     __table_args__ = (
         CheckConstraint(

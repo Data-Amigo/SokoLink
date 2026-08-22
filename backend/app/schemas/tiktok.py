@@ -21,6 +21,7 @@ documentation.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -47,6 +48,11 @@ class TikTokAuthor(BaseModel):
 
     follower_count: int = Field(default=0, alias="fans")
     video_count: int = Field(default=0, alias="video")
+
+    #: Lifetime likes across the whole account, from ``authorMeta.heart``.
+    #: The smoothest account-level trend line there is — it only ever rises,
+    #: so a dip means we failed to scrape, not that the creator declined.
+    total_likes: int = Field(default=0, alias="heart")
     verified: bool = False
     private_account: bool = Field(default=False, alias="privateAccount")
 
@@ -56,7 +62,7 @@ class TikTokAuthor(BaseModel):
         """Lowercase and strip @, so one seller cannot exist twice."""
         return v.strip().lstrip("@").lower()
 
-    @field_validator("follower_count", "video_count", mode="before")
+    @field_validator("follower_count", "video_count", "total_likes", mode="before")
     @classmethod
     def _coerce_count(cls, v: Any) -> int:
         """Apify occasionally returns null for a count; treat it as zero."""
@@ -95,15 +101,46 @@ class TikTokVideo(BaseModel):
 
     hashtags: list[str] = Field(default_factory=list)
 
+    #: When the creator posted it. WITHOUT THIS THERE IS NO TIME AXIS — no
+    #: "your last ten posts", no chart, no "you posted less this week".
+    #: Apify supplies `createTimeISO`; verified against a real payload
+    #: (spike 01) rather than taken from documentation.
+    posted_at: datetime | None = Field(default=None, alias="createTimeISO")
+
+    #: Pinned posts sit at the top of a profile accumulating views for months.
+    #: Left in an average they make every new post look like a failure, so the
+    #: flag has to survive to the database for the average to exclude them.
+    is_pinned: bool = Field(default=False, alias="isPinned")
+
     views: int = Field(default=0, alias="playCount")
     likes: int = Field(default=0, alias="diggCount")
     comments: int = Field(default=0, alias="commentCount")
     shares: int = Field(default=0, alias="shareCount")
 
-    @field_validator("views", "likes", "comments", "shares", mode="before")
+    #: Saves. The strongest purchase-intent signal TikTok exposes — someone
+    #: bookmarking a bale to come back to it is much closer to buying than
+    #: someone liking it.
+    saves: int = Field(default=0, alias="collectCount")
+
+    reposts: int = Field(default=0, alias="repostCount")
+
+    @field_validator("views", "likes", "comments", "shares", "saves", "reposts", mode="before")
     @classmethod
     def _coerce_metric(cls, v: Any) -> int:
         return int(v) if v is not None else 0
+
+    @field_validator("posted_at", mode="before")
+    @classmethod
+    def _parse_posted_at(cls, v: Any) -> Any:
+        """
+        Accept Apify's ISO string, and tolerate its absence.
+
+        A post with no timestamp is still worth storing — it simply cannot
+        appear on a time axis — so this returns None rather than raising.
+        """
+        if v in (None, ""):
+            return None
+        return v
 
     @classmethod
     def from_apify(cls, item: dict[str, Any]) -> TikTokVideo:
@@ -156,7 +193,18 @@ class ScrapedProfile(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     author: TikTokAuthor
-    videos: list[TikTokVideo]
+
+    #: May legitimately be EMPTY. A brand-new account, or one that has only
+    #: private posts, is a real state — and the profile is still worth having,
+    #: because bio-code verification reads the bio and nothing else.
+    videos: list[TikTokVideo] = Field(default_factory=list)
+
+    #: Individual posts that could not be parsed, with the reason.
+    #:
+    #: Mirrors ``SyncResult.warnings`` rather than inventing a second channel:
+    #: one unparseable post must not cost us the other twenty-nine, but it must
+    #: not vanish silently either. Ingestion folds these into its own warnings.
+    warnings: list[str] = Field(default_factory=list)
 
     @property
     def video_count(self) -> int:

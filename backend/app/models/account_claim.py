@@ -81,6 +81,14 @@ class AccountClaim(Base):
     #: Verification attempts so far. Each one is a paid scrape.
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    #: When the last attempt was made, so attempts can be spaced out.
+    #:
+    #: MAX_ATTEMPTS caps the total; this caps the RATE. A seller editing their
+    #: bio in another tab will press Verify every few seconds to see whether it
+    #: has taken — that is normal, human behaviour, and without this it is ten
+    #: billable scrapes in half a minute.
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

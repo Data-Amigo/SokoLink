@@ -230,18 +230,30 @@ class ApifyEngine:
         """
         Validate raw items into a ScrapedProfile.
 
-        An empty result is NOT an error — a private or empty profile is a real
-        state the seller needs told about, and raising here would make it
-        indistinguishable from a broken scrape.
+        THREE OUTCOMES, and telling them apart is the whole job here:
+
+          1. **Nothing at all** — no items. A wrong handle, or a profile so
+             private even its metadata is hidden. An error the seller can act on.
+          2. **A profile with no posts** — Apify returns ONE row carrying
+             ``authorMeta`` and no video fields at all. That row is the profile,
+             not a video, and a new account is a perfectly ordinary state. It
+             must not be mistaken for a broken payload: bio-code verification
+             reads the bio and never touches the video list.
+          3. **A shape change** — rows that clearly ARE videos but no longer
+             parse. That must fail loudly, or a renamed field quietly becomes a
+             catalogue of empty products.
+
+        Outcome 2 used to raise, which meant a seller connecting a fresh TikTok
+        account was told the actor had changed. Reported from the field,
+        2026-08-19, on an account with zero posts.
 
         Raises:
-            ScraperError: If the payload is present but unparseable, which means
-                the actor's shape changed and we must notice loudly.
+            ScraperError: On outcome 1, on an unusable author, or on outcome 3.
         """
         if not items:
             raise ScraperError(
-                f"No videos found for {context}. The profile may be private, "
-                "empty, or the handle may be wrong."
+                f"Could not find {context}. Check the handle is spelled correctly "
+                "and the account is public."
             )
 
         author_data = items[0].get("authorMeta") or {}
@@ -250,14 +262,39 @@ class ApifyEngine:
 
         try:
             author = TikTokAuthor.model_validate(author_data)
-            videos = [TikTokVideo.from_apify(item) for item in items]
         except Exception as exc:  # noqa: BLE001 — re-raised with context below
             raise ScraperError(
-                f"Apify payload for {context} did not match the expected shape — "
+                f"Apify profile data for {context} did not match the expected shape — "
                 f"the actor may have changed: {exc}"
             ) from exc
 
-        return ScrapedProfile(author=author, videos=videos)
+        videos: list[TikTokVideo] = []
+        warnings: list[str] = []
+        video_rows = 0
+
+        for item in items:
+            # No post id means this row is not a post. It is the profile
+            # placeholder Apify emits for an account with nothing to return.
+            if not item.get("id"):
+                continue
+
+            video_rows += 1
+            try:
+                videos.append(TikTokVideo.from_apify(item))
+            except Exception as exc:  # noqa: BLE001 — recorded, not swallowed
+                # One bad post must not cost us the other twenty-nine, but it
+                # is never dropped in silence — the caller surfaces these.
+                warnings.append(f"post {item.get('id')}: {type(exc).__name__}: {exc}")
+
+        # Everything that looked like a post failed to parse. That is a shape
+        # change, not bad luck, and it is the case we must notice loudly.
+        if video_rows and not videos:
+            raise ScraperError(
+                f"Apify payload for {context} did not match the expected shape — "
+                f"the actor may have changed: {warnings[0]}"
+            )
+
+        return ScrapedProfile(author=author, videos=videos, warnings=warnings)
 
 
 def get_scraper() -> ScraperEngine:

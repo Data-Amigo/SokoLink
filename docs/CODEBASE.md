@@ -83,12 +83,14 @@ HTTP response is in the wrong layer.** That is the whole convention.
 
 | File | Lines | What it does |
 |---|---:|---|
-| `app/main.py` | 36 | Builds the app, registers routers, mounts media. **Owns nothing else.** |
+| `app/main.py` | 73 | Builds the app, registers routers, mounts static + media. **Owns nothing else.** |
 | `app/config.py` | 142 | Typed settings. **The only file that reads the environment.** |
 | `app/db.py` | 53 | Engine, session factory, `Base`. **Never build an engine elsewhere.** |
 | `app/security.py` | 129 | Argon2id hashing and JWT sessions. **Nothing else touches a password.** |
+| `app/dependencies.py` | 180 | The session layer — cookies, `current_account`, the login wall. |
+| `app/templating.py` | 42 | One Jinja environment and its filters, shared by every router. |
 
-Four details that are easy to undo by accident:
+Five details that are easy to undo by accident:
 
 - **`config.py` normalises the database driver.** Providers hand out bare
   `postgresql://` URLs; SQLAlchemy reads that as *psycopg2*, which we don't
@@ -102,7 +104,12 @@ Four details that are easy to undo by accident:
 - **The storefront router is registered LAST in `main.py`, and must stay last.**
   It owns `/{slug}`, which would otherwise swallow `/health`, `/docs` and every
   future route. FastAPI matches in registration order, so anything added below
-  that line is unreachable.
+  that line is unreachable. The other half of that guard is `RESERVED_SLUGS` in
+  `services/accounts.py` — **a new top-level route needs a new entry there**, or
+  a seller can claim the name and end up with an unreachable shop.
+- **`dependencies.py` sets the session cookie's `Secure` flag from the
+  environment**, not hardcoded. A `Secure` cookie is silently dropped over plain
+  http, so hardcoding it on makes localhost log you in and immediately forget.
 
 ### Models — where the rails live
 
@@ -136,12 +143,33 @@ Four details that are easy to undo by accident:
 
 | File | Lines | What it does |
 |---|---:|---|
-| `services/accounts.py` | 188 | Signup, login, slug reservation. **Anti-enumeration is the point.** |
-| `services/verification.py` | 255 | Proving a seller owns the account they claim. |
-| `services/storefront.py` | 97 | What a buyer may see, and the WhatsApp handoff. |
-| `api/storefront.py` | 79 | The two public routes. Thin: parse, delegate, render. |
+| `services/accounts.py` | 190 | Signup, login, slug reservation. **Anti-enumeration is the point.** |
+| `services/verification.py` | 319 | Proving a seller owns the account they claim. |
+| `services/storefront.py` | 126 | What a buyer may see, and the WhatsApp handoff. |
+| `api/storefront.py` | 87 | The two public routes. Thin: parse, delegate, render. |
 | `api/health.py` | 54 | Liveness and readiness, deliberately separate. |
-| `templates/` | 257 | `base.html`, `storefront/shop.html`, `storefront/product.html` |
+
+### The web layer — the creator's workspace
+
+| File | Lines | What it does |
+|---|---:|---|
+| `api/auth.py` | 214 | signup / login / logout. **Renders the service's error, never its own.** |
+| `api/dashboard.py` | 72 | The shell, and the empty state that asks for a first account. |
+| `static/css/app.css` | 540 | The design system. **One `:root` block owns every colour.** |
+| `templates/app_base.html` | 74 | Workspace shell — topbar, nav, skip link. |
+| `templates/auth/` | 187 | `login.html`, `signup.html` |
+| `templates/app/` | 85 | `dashboard.html` |
+| `templates/base.html` + `storefront/` | 297 | The buyer's storefront, on its own stylesheet |
+
+> **Two base templates, on purpose.** `base.html` serves a stranger who arrives
+> once from a WhatsApp chat on the cheapest data bundle available;
+> `app_base.html` serves someone who signed up and comes back weekly. Keeping
+> them apart means a change to the dashboard cannot slow down the storefront.
+>
+> **No Tailwind in the workspace.** Its build step is one more thing to break in
+> the deploy, and its CDN ships ~3MB of JS to generate CSS in the browser.
+> `app.css` is 20.7KB uncompressed. Reversible: the components map onto utility
+> classes, so adopting Tailwind later is a rewrite of one file.
 
 ---
 
@@ -414,17 +442,37 @@ documentation bug worth fixing.
 | Ingestion — sync, guards, re-sync rail | ✅ |
 | Media storage | ✅ |
 | **Buyer storefront** — shop + product + WhatsApp handoff | ✅ |
-| Signup / login **pages** | ❌ service layer only, no routes |
-| **Seller dashboard** — connect, review queue, publish | ❌ next |
+| Design system | ✅ |
+| Session layer — cookies, login wall, safe redirects | ✅ |
+| Signup / login / logout **pages** | ✅ |
+| Dashboard shell + empty state | ✅ |
+| **Connect-an-account screens** — claim, show the code, check it | ❌ next |
+| `Post` model + metric snapshots (the time series) | ❌ |
+| Analytics sync + analytics page | ❌ |
+| Review queue + publish UI | ❌ |
 | Manual upload path | ❌ |
 | Single-link ingestion path | ❌ scraper supports it; nothing calls it |
+| Deploy to Railway | ❌ no start command committed yet |
 | WhatsApp channel | ⏳ gated on Meta verification |
 | Orders + M-Pesa | ❌ P4 |
 | Soko AI, Soko Intel | ❌ P5–P8 |
 
-**The gap that matters:** a seller can be created, verified and synced — but only
-through Python, not through a browser. There is no signup page, no connect
-screen, and no review queue. The storefront works and is browsable; getting
-products *into* it currently requires `scripts/seed_demo_shop.py`.
+**The gap that matters:** a creator can now sign up, sign in and reach a
+dashboard in a browser — but the dashboard's one button goes nowhere.
+Connecting an account still requires Python, so nothing real appears on that
+page yet. The storefront works and is browsable; getting products *into* it
+currently requires `scripts/seed_demo_shop.py`.
 
-That dashboard is the next thing built.
+**Two things are being thrown away right now, and only one is recoverable.**
+
+`services/ingestion.py` discards every post the model judges not a product —
+correct for a catalogue, wrong for analytics, where a talking-head video still
+has views a creator is paying to understand. And `Product.views` is *overwritten*
+on each sync, so nothing can answer "am I growing?".
+
+The first is a filter to relax. The second is history that cannot be
+backfilled — every day without `PostMetricSnapshot` is a day of data gone
+permanently. That is why Step 5 of [`PHASE_0.md`](PHASE_0.md) is a migration
+with no UI attached.
+
+Connect-an-account is the next thing built.

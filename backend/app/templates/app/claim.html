@@ -1,0 +1,116 @@
+{# The code, and what to do with it.
+
+   THE HARDEST SCREEN IN THE PRODUCT. It asks someone to leave, do something in
+   another app, and come back — and every one of those is a chance to lose them.
+   So it does three things and nothing else:
+
+     1. Shows the code, large, with one tap to copy
+     2. Numbers the steps, in the order they happen
+     3. Says honestly where they stand — attempts left, when it expires
+
+   A limit the seller cannot see is indistinguishable from a broken button,
+   which is why the counters are on the page rather than in a log.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Verify @{{ claim.handle }} · Biashara Mall{% endblock %}
+
+{% block body %}
+<div class="container page">
+  <div style="max-width: 560px; margin-inline: auto">
+
+    <div class="page-head center">
+      <p class="eyebrow">Step 2 of 2</p>
+      <h1>Prove @{{ claim.handle }} is yours</h1>
+    </div>
+
+    {% if error %}
+      <div class="alert alert-error" role="alert" style="margin-bottom: var(--s-4)">
+        {{ error }}
+      </div>
+    {% endif %}
+
+    {% if not_found %}
+      {# Deliberately NOT styled as an error. The overwhelmingly likely cause is
+         that they have not pressed Save in TikTok yet, and calling that a
+         failure makes a working product feel broken. #}
+      <div class="alert alert-info" role="status" style="margin-bottom: var(--s-4)">
+        <strong>Not there yet.</strong> We could not find the code in your bio.
+        If you have just saved it, TikTok can take a minute to update — try again.
+      </div>
+    {% endif %}
+
+    <div class="card card-lg">
+
+      {# ── The code ──────────────────────────────────────────────────────── #}
+      <p class="label center">Your code</p>
+      <div class="code-block">
+        <code class="code-value" data-copy-value>{{ claim.code }}</code>
+        <button type="button" class="btn btn-secondary btn-sm" data-copy-button
+                aria-label="Copy code to clipboard">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="12" height="12" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span data-copy-label>Copy</span>
+        </button>
+      </div>
+
+      {# ── The steps ─────────────────────────────────────────────────────── #}
+      <ol class="steps-list">
+        <li><span class="step-n">1</span> Open TikTok and go to <strong>Edit profile</strong></li>
+        <li><span class="step-n">2</span> Paste the code anywhere in your <strong>bio</strong></li>
+        <li><span class="step-n">3</span> Press <strong>Save</strong></li>
+        <li><span class="step-n">4</span> Come back here and press the button below</li>
+      </ol>
+
+      <p class="field-hint" style="margin-bottom: var(--s-5)">
+        You can remove the code from your bio as soon as you are verified.
+      </p>
+
+      {# ── The check ─────────────────────────────────────────────────────── #}
+      <form method="post" action="/accounts/claim/{{ claim.id }}/check">
+        <button type="submit" class="btn btn-primary btn-block"
+                style="padding-block: 0.9rem"
+                {% if cooldown_seconds %}disabled data-cooldown="{{ cooldown_seconds }}"{% endif %}>
+          <span data-cooldown-label>
+            {% if cooldown_seconds %}
+              Try again in {{ cooldown_seconds }}s
+            {% else %}
+              I&rsquo;ve added it — check now
+            {% endif %}
+          </span>
+        </button>
+      </form>
+
+      {# Honest about where they stand. Each check is a real, paid call, which
+         is why there is a limit at all — but a limit nobody can see just looks
+         like the product giving up on them. #}
+      <p class="field-hint center" style="margin-top: var(--s-3)">
+        {{ attempts_left }} check{{ '' if attempts_left == 1 else 's' }} left ·
+        code expires {{ claim.expires_at.strftime('%d %b at %H:%M') }} UTC
+      </p>
+
+      <div class="auth-trust">
+        <span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>
+          </svg>
+          Wrong handle, or lost the code?
+          <form method="post" action="/accounts/claim/{{ claim.id }}/cancel"
+                style="display:inline">
+            <button type="submit" class="link-button">Start again</button>
+          </form>
+        </span>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/auth.js" defer></script>
+{% endblock %}

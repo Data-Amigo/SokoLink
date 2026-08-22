@@ -26,6 +26,7 @@ from app.models.account_claim import MAX_ATTEMPTS
 from app.schemas.tiktok import ScrapedProfile, TikTokAuthor
 from app.services.scraper import ScraperError
 from app.services.verification import (
+    CHECK_COOLDOWN,
     CODE_PREFIX,
     VerificationError,
     check_claim,
@@ -272,8 +273,40 @@ class TestCheckingAClaim:
     def test_attempts_are_counted(self, db: Session) -> None:
         claim = claim_for(db)
         check_claim(db, claim, FakeScraper(bio="no"))
+        # Clear the pacing stamp between attempts. Counting attempts and
+        # spacing them out are separate rules with separate tests, and this one
+        # is about the counter — a real seller simply waits.
+        claim.last_checked_at = None
         check_claim(db, claim, FakeScraper(bio="still no"))
         assert claim.attempts == 2
+
+    def test_two_checks_in_quick_succession_are_refused(self, db: Session) -> None:
+        """
+        MAX_ATTEMPTS caps how MANY checks; CHECK_COOLDOWN caps how FAST.
+
+        A seller who has just pasted the code into their bio in another tab will
+        press Verify every few seconds to see whether it has taken. Without this
+        that is ten billable scrapes in half a minute.
+        """
+        claim = claim_for(db)
+        check_claim(db, claim, FakeScraper(bio="no"))
+
+        scraper = FakeScraper(bio="no")
+        with pytest.raises(VerificationError, match="try again in"):
+            check_claim(db, claim, scraper)
+
+        assert scraper.calls == 0, "the cooldown must be checked BEFORE the paid call"
+        assert claim.attempts == 1, "a refused check must not consume an attempt"
+
+    def test_the_cooldown_expires(self, db: Session) -> None:
+        claim = claim_for(db)
+        check_claim(db, claim, FakeScraper(bio="no"))
+        claim.last_checked_at = datetime.now(UTC) - CHECK_COOLDOWN - timedelta(seconds=1)
+
+        scraper = FakeScraper(bio="no")
+        check_claim(db, claim, scraper)
+
+        assert scraper.calls == 1
 
     def test_attempts_are_capped_because_each_one_is_billable(self, db: Session) -> None:
         claim = claim_for(db)

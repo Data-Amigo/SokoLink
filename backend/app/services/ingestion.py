@@ -28,7 +28,7 @@ Nothing in this module publishes anything. Everything arrives as DRAFT.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,11 +46,16 @@ from app.schemas.tiktok import TikTokVideo
 from app.services.drafting import Drafter
 from app.services.media import store_cover
 from app.services.scraper import DEFAULT_PROFILE_LIMIT, ScraperEngine, ScraperError
+from app.services.sync import SYNC_COOLDOWN as _SYNC_COOLDOWN
+from app.services.sync import cooldown_remaining as _cooldown_remaining
 from app.services.verification import require_syncable
 
-#: How long a sync's results stay fresh. Apify bills per post; a seller
-#: refreshing the dashboard must not re-scrape.
-SYNC_COOLDOWN = timedelta(hours=24)
+#: Re-exported from services/sync.py, which owns it.
+#:
+#: Both paths scrape the same account and both stamp ``last_synced_at``, so two
+#: constants would be two answers to one question. Kept importable from here so
+#: existing callers do not have to move.
+SYNC_COOLDOWN = _SYNC_COOLDOWN
 
 
 class IngestionError(Exception):
@@ -75,21 +80,6 @@ class SyncResult:
     @property
     def total_touched(self) -> int:
         return len(self.created) + len(self.updated)
-
-
-def _cooldown_remaining(account: SocialAccount) -> timedelta | None:
-    """How long until this account may be scraped again, or None if it may now."""
-    if account.last_synced_at is None:
-        return None
-
-    last = account.last_synced_at
-    # Rows can come back naive depending on driver history; treat as UTC
-    # rather than crashing on the comparison.
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=UTC)
-
-    elapsed = datetime.now(UTC) - last
-    return None if elapsed >= SYNC_COOLDOWN else SYNC_COOLDOWN - elapsed
 
 
 def sync_account(
@@ -162,6 +152,10 @@ def sync_account(
 
     job.video_count = profile.video_count
     result = SyncResult(job=job)
+
+    # Posts the scraper could not parse. Carried through rather than dropped:
+    # the scrape succeeded, so nothing else would ever mention them.
+    result.warnings.extend(profile.warnings)
 
     # Refresh the profile from the platform — the seller confirms rather than
     # retypes, and follower counts feed Soko Intel later.

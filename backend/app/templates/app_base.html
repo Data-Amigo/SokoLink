@@ -1,0 +1,82 @@
+{# The shell for every page BEHIND the login wall.
+
+   WHY THIS IS NOT base.html. There are two audiences with nothing in common:
+
+     base.html      the buyer's storefront — opened from a WhatsApp chat, often
+                    by someone who has never heard of us, on the cheapest data
+                    bundle available. Currently on the Tailwind CDN.
+
+     app_base.html  the creator's workspace — someone who signed up, comes back
+                    weekly, and needs tables, forms and charts.
+
+   Keeping them separate means a change to the dashboard cannot slow down the
+   storefront, which is the page that has to be fastest. The storefront moves
+   onto this stylesheet when it is next touched; until then it works, and
+   rewriting a working page to satisfy a consistency rule is not a good trade.
+
+   NO CLIENT FRAMEWORK. HTMX for the few places that need partial updates, and
+   nothing else. Every page here renders complete from the server.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  {# Zoom stays enabled. Disabling it is an accessibility failure, and the
+     people using this squint at phone screens in daylight. #}
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <title>{% block title %}Biashara Mall{% endblock %}</title>
+  <meta name="description" content="{% block description %}Grow your shop on TikTok, Instagram and WhatsApp.{% endblock %}">
+
+  {# The workspace is private. Keep it out of search results entirely. #}
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#059669">
+
+  {# The brand's own pairing, from the same URL the landing page uses — so a
+     creator arriving from biasharamall.com hits a warm cache rather than a
+     download. `display=swap` means text paints immediately in the system
+     fallback and swaps when the font lands; it never blocks. #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="icon" href="/static/img/logo.png" type="image/png">
+
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {# Keyboard and screen-reader users get past the navigation in one keystroke. #}
+  <a href="#main" class="sr-only">Skip to content</a>
+
+  {% block chrome %}
+    <header class="topbar">
+      <div class="container topbar-inner">
+        {% with logo_href = "/dashboard" %}{% include "partials/logo.html" %}{% endwith %}
+
+        {% if account %}
+          <nav class="nav" aria-label="Main">
+            <a href="/dashboard" {% if nav == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+            <a href="/analytics" {% if nav == 'analytics' %}aria-current="page"{% endif %}>Analytics</a>
+            <a href="/accounts"  {% if nav == 'accounts'  %}aria-current="page"{% endif %}>Accounts</a>
+            <a href="/orders"    {% if nav == 'orders'    %}aria-current="page"{% endif %}>Orders</a>
+            <a href="/settings/payment" {% if nav == 'settings' %}aria-current="page"{% endif %}>Payments</a>
+            {# Logout is a POST. A GET logout can be triggered by any image tag
+               on any site, which is a real (if petty) way to annoy a user. #}
+            <form method="post" action="/logout">
+              <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
+            </form>
+          </nav>
+        {% endif %}
+      </div>
+    </header>
+  {% endblock %}
+
+  <main id="main">
+    {% block body %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

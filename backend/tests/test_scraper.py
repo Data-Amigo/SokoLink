@@ -241,10 +241,15 @@ class TestFetchProfile:
     def test_an_empty_result_raises_a_readable_error(
         self, engine: ApifyEngine, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A private or empty profile must be explained, never silently empty."""
+        """
+        Nothing at all means the handle is wrong or the account is hidden.
+
+        Distinct from an account that EXISTS but has no posts — see
+        TestProfilesWithNoPosts. That one returns a row and must succeed.
+        """
         monkeypatch.setattr(httpx, "post", lambda *a, **k: FakeResponse(json_data=[]))
 
-        with pytest.raises(ScraperError, match="private"):
+        with pytest.raises(ScraperError, match="handle is spelled correctly"):
             engine.fetch_profile("nobody")
 
     def test_a_provider_error_carries_its_message(
@@ -277,8 +282,14 @@ class TestFetchProfile:
         """
         The failure mode this border exists to prevent: the actor changes, and
         we notice at the edge instead of storing a catalogue of empty products.
+
+        NOTE ON THE PAYLOAD. This test used to assert on a row with no ``id``
+        at all. That turned out to be what Apify returns for a real account
+        with no posts, so it failed a seller connecting a fresh TikTok on
+        2026-08-19. A shape change is now a row that IS a post — it has an id —
+        whose fields no longer parse.
         """
-        broken = {"authorMeta": REAL_AUTHOR, "text": "no id field here"}
+        broken = item(playCount="not-a-number")
         monkeypatch.setattr(httpx, "post", lambda *a, **k: FakeResponse(json_data=[broken]))
 
         with pytest.raises(ScraperError, match="did not match the expected shape"):
@@ -375,3 +386,82 @@ class TestDownloadMedia:
         )
 
         assert len(engine.download_media("https://api.apify.com/x.mp4", expect="video")) == 60_000
+
+
+class TestProfilesWithNoPosts:
+    """
+    A brand-new account is an ordinary state, not a broken payload.
+
+    Apify returns ONE row for a profile with nothing to show: it carries
+    ``authorMeta`` and no video fields at all. Parsing that row as a video
+    raised "the actor may have changed" and blocked verification entirely —
+    reported from the field on 2026-08-19 against a freshly created account.
+
+    Bio-code verification reads the bio and never touches the video list, so a
+    seller with zero posts must still be able to prove they own the account.
+    """
+
+    def author_row(self, **overrides: Any) -> dict[str, Any]:
+        """The placeholder row: real authorMeta, no post id."""
+        row: dict[str, Any] = {
+            "authorMeta": {
+                "id": "7612345678901234567",
+                "name": "biasharahooks",
+                "nickName": "Biashara Hooks",
+                "signature": "bmall-C6N7B6",
+                "fans": 0,
+                "video": 0,
+            },
+            "text": None,
+            "hashtags": [],
+        }
+        row.update(overrides)
+        return row
+
+    def test_a_profile_with_no_posts_parses(self) -> None:
+        profile = ApifyEngine._to_profile([self.author_row()], context="@biasharahooks")
+
+        assert profile.videos == []
+        assert profile.author.handle == "biasharahooks"
+
+    def test_the_bio_survives_so_verification_can_still_work(self) -> None:
+        """The whole point: an empty account can still prove ownership."""
+        profile = ApifyEngine._to_profile([self.author_row()], context="@biasharahooks")
+
+        assert profile.author.bio == "bmall-C6N7B6"
+
+    def test_no_items_at_all_is_still_an_error(self) -> None:
+        """A wrong handle needs to be reported, and says what to check."""
+        with pytest.raises(ScraperError, match="handle is spelled correctly"):
+            ApifyEngine._to_profile([], context="@nobody")
+
+
+class TestPartiallyBadPayloads:
+    def test_one_unparseable_post_does_not_lose_the_others(self) -> None:
+        """Twenty-nine good posts are worth more than a clean failure."""
+        good = item(id="7100000000000000001")
+        bad = item(id="7100000000000000002", playCount="not-a-number")
+
+        profile = ApifyEngine._to_profile([good, bad], context="@seller")
+
+        assert len(profile.videos) == 1
+        assert profile.videos[0].video_id == "7100000000000000001"
+
+    def test_a_dropped_post_is_recorded_rather_than_swallowed(self) -> None:
+        good = item(id="7100000000000000001")
+        bad = item(id="7100000000000000002", playCount="not-a-number")
+
+        profile = ApifyEngine._to_profile([good, bad], context="@seller")
+
+        assert len(profile.warnings) == 1
+        assert "7100000000000000002" in profile.warnings[0]
+
+    def test_every_post_failing_is_still_a_loud_error(self) -> None:
+        """
+        That is a shape change, not bad luck. Silently returning zero videos
+        would turn a renamed field into a catalogue of empty products.
+        """
+        bad = item(id="7100000000000000001", playCount="not-a-number")
+
+        with pytest.raises(ScraperError, match="actor may have changed"):
+            ApifyEngine._to_profile([bad], context="@seller")

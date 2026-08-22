@@ -56,12 +56,32 @@ CODE_LENGTH = 6
 
 #: Prefixed so the seller can see at a glance what the string is for, and so we
 #: can find it in a bio full of hashtags and phone numbers.
-CODE_PREFIX = "soko-"
+#:
+#: Was ``soko-`` until 2026-08-18, left over from the SokoLink name. Changed
+#: while no code existed in any real bio — changing it later would invalidate
+#: every code in flight.
+#:
+#: ``bmall-`` rather than ``bm-``: this string sits in a public bio where the
+#: seller's own customers read it, and a two-letter prefix has an unfortunate
+#: second reading in English. Four extra characters is a cheap way not to find
+#: that out from a seller.
+CODE_PREFIX = "bmall-"
 
 #: Long enough to switch apps, edit a bio and come back on a slow connection.
 #: Short enough that an abandoned claim cannot be resumed months later by
 #: whoever controls that account by then.
 CLAIM_LIFETIME = timedelta(hours=24)
+
+#: Minimum gap between two verification attempts.
+#:
+#: MAX_ATTEMPTS caps the TOTAL; this caps the RATE, and they guard different
+#: things. A seller who has just pasted the code into their bio in another tab
+#: will press Verify every few seconds to see whether it has taken — ordinary,
+#: human behaviour that without this is ten billable scrapes in half a minute.
+#:
+#: Twenty seconds is long enough to matter and short enough that the countdown
+#: does not feel like a punishment for being keen.
+CHECK_COOLDOWN = timedelta(seconds=20)
 
 
 class VerificationError(Exception):
@@ -83,6 +103,63 @@ def generate_code() -> str:
     """
     body = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(CODE_LENGTH))
     return f"{CODE_PREFIX}{body}"
+
+
+def check_cooldown_remaining(claim: AccountClaim) -> timedelta | None:
+    """
+    How long before this claim may be checked again.
+
+    Args:
+        claim: The pending claim.
+
+    Returns:
+        The wait remaining, or None if it may be checked now.
+
+    Notes:
+        Exposed rather than kept private because the page showing the code needs
+        the same number to render its countdown. Two implementations of one rule
+        would drift, and the drift would be a button that looks ready and then
+        refuses.
+    """
+    last = claim.last_checked_at
+    if last is None:
+        return None
+
+    # Rows can come back naive depending on driver history; treat as UTC rather
+    # than crashing on the comparison.
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=UTC)
+
+    elapsed = datetime.now(UTC) - last
+    return None if elapsed >= CHECK_COOLDOWN else CHECK_COOLDOWN - elapsed
+
+
+def get_claim(db: Session, claim_id: int, seller_id: int) -> AccountClaim | None:
+    """
+    Load a claim, but only if it belongs to this seller.
+
+    Args:
+        db: Session.
+        claim_id: From the URL, and therefore attacker-controlled.
+        seller_id: The signed-in seller.
+
+    Returns:
+        The claim, or None — which the caller renders as a 404.
+
+    Notes:
+        **The seller scope is the point of this function.** Claim ids are
+        sequential integers in a URL; without it, anyone signed in could check
+        or cancel somebody else's claim by guessing a number. Returning None
+        rather than raising keeps "not yours" and "does not exist"
+        indistinguishable from outside, so the endpoint cannot be used to count
+        how many claims exist.
+    """
+    return db.scalar(
+        select(AccountClaim).where(
+            AccountClaim.id == claim_id,
+            AccountClaim.seller_id == seller_id,
+        )
+    )
 
 
 def start_claim(db: Session, seller_id: int, platform: Platform | str, handle: str) -> AccountClaim:
@@ -171,14 +248,24 @@ def check_claim(db: Session, claim: AccountClaim, scraper: ScraperEngine) -> Soc
     if claim.is_expired:
         raise VerificationError("That code has expired. Start again to get a new one.")
 
-    # Checked BEFORE the scrape: each attempt is billable, and a seller
-    # hammering Verify should not be able to spend our credit.
+    # Both guards are checked BEFORE the scrape: each attempt is billable, and a
+    # seller hammering Verify should not be able to spend our credit. The order
+    # is deliberate — total cap first, because "start again" is a different
+    # instruction from "wait a moment".
     if claim.attempts_exhausted:
         raise VerificationError(
             f"Too many attempts ({MAX_ATTEMPTS}). Start again to get a new code."
         )
 
+    wait = check_cooldown_remaining(claim)
+    if wait is not None:
+        seconds = max(1, int(wait.total_seconds()))
+        raise VerificationError(
+            f"Just a moment — try again in {seconds} second{'s' if seconds != 1 else ''}."
+        )
+
     claim.attempts += 1
+    claim.last_checked_at = datetime.now(UTC)
 
     try:
         profile = scraper.fetch_profile(claim.handle, limit=1)
