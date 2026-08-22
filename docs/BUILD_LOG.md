@@ -587,3 +587,657 @@ ruff · format · mypy strict   clean
 pytest                        145 passed
 alembic                       d6cdd06e2776 (head)
 ```
+
+---
+
+## 2026-08-09 → 15 · Ownership, ingestion, and the buyer storefront
+
+Three milestones logged together, because they are one argument: a handle
+someone typed is worthless until it is proven, a proven account is worthless
+until it is synced, and a synced catalogue is worthless until a buyer can see it.
+
+### The security change that reshaped the schema
+
+Fredrick's recommendation, after reading the codebase: *"if you cannot verify we
+should not accept the account at all. The account should only be accepted if you
+can verify."*
+
+The obvious implementation is a nullable `verified_at` and a filter everywhere.
+That is a rule someone has to remember, on every query, forever — and the first
+query that forgets it publishes a storefront pointing at the wrong WhatsApp
+number.
+
+**What was built instead: an unverified connection is unrepresentable.**
+
+```
+AccountClaim              SocialAccount
+unproven, expires         verified_at           NOT NULL
+grants nothing            verification_method   NOT NULL
+```
+
+Two tables, not one table with a flag. `SocialAccount.verified_at` being NOT NULL
+means the database cannot hold an unproven connection, so nothing downstream
+filters for verified accounts — there is no other kind. `services/verification.py`
+has exactly one function that creates a `SocialAccount` (`_connect`), and every
+path to it goes through proof.
+
+**The attack this defeats** is not hypothetical: a stranger claims another
+seller's handle, we scrape her videos and her photos, and publish a shop pointing
+at *their* WhatsApp number. The buyer sees nothing wrong. That is sales
+diversion, and one incident reaching Kenyan seller groups would be very hard to
+come back from.
+
+**Why bio-code and not OAuth.** OAuth is better — one tap, the platform vouches,
+nothing to retype. It is unavailable until TikTok and Meta approve our app, on
+their clock, and reading a seller's posts needs a second scope with its own
+approval. Sellers arrive before either lands. `complete_via_oauth` is written and
+tested, so switching is a call-site change rather than a rewrite.
+
+**What bio-code does not prove:** someone with temporary access to the account
+could pass it. It defeats the realistic attack — a stranger typing a handle they
+have never touched — and that is the bar it is built to clear. Stated in the
+module docstring so nobody later mistakes it for something stronger.
+
+Small decisions inside it that came from picturing a phone keyboard:
+
+- **`_CODE_ALPHABET` drops `0 O 1 I L`.** The seller retypes this into a bio on a
+  phone. Ambiguous characters are exactly where that goes wrong.
+- **A `soko-` prefix**, so the string is identifiable in a bio full of hashtags
+  and phone numbers. *Still `soko-` after the rename — see Still open, below.*
+- **24-hour claim lifetime, capped attempts.** Both surfaced to the seller
+  honestly; a silent limit reads as a broken product.
+
+### Ingestion — three money guards
+
+`services/ingestion.py` is where the unit economics are enforced:
+
+1. **Once per day per account.** Apify bills per post. Syncing on every dashboard
+   load makes the economics fail *exactly when the product succeeds*. Checked
+   **before** the paid call, with a test asserting that ordering.
+2. **Skip posts already drafted.** A re-sync updates metrics but never re-runs
+   the AI on a post already processed — that work is done and paid for.
+3. **The video tier is opt-in per sync** (`allow_video_tier=False`). A bulk
+   import that watched every clip would be ruinous. The seller escalates
+   deliberately, per item.
+
+A regression in any of these arrives as a bill, not as a failing assertion —
+unless there is an assertion. There are nineteen.
+
+**The re-sync rail.** A sync may only touch products it created
+(`ingest_method == profile_sync`). Expressed as a query scope rather than a rule
+to remember: hand-uploaded stock is simply invisible to `_existing_by_post_id`.
+A seller who uploads stock, syncs their feed and watches it vanish does not come
+back.
+
+**A failed sync does not start the cooldown.** Otherwise one Apify hiccup locks
+the seller out for a day. The failed job is still recorded before raising,
+because a failure the seller cannot see is indistinguishable from "you have no
+videos" — which sends them away thinking we are broken.
+
+### Media — their URLs expire, so we keep our own copies
+
+Spike 02 flagged that TikTok cover URLs are signed and carry an `x-expires`
+timestamp. The demo storefront then proved it, rendering ten broken images a week
+after the scrape.
+
+`services/media.py` stores a copy keyed by post id, and products store a
+**relative** path — so moving to object storage later changes one constant.
+
+**A bug found while writing this milestone's tests:** `store_cover` promised in
+its own docstring never to let an image failure cost a product, but caught only
+`ScraperError`. A timeout, a full disk, or an engine that had not implemented the
+method took the whole sync down with it. The catch is now deliberately broad, and
+the reason is written above it — a function whose entire contract is "never let
+this cost us a product" cannot enumerate its failures in advance.
+
+### The buyer storefront
+
+`services/storefront.py` + `api/storefront.py` + two templates. Server-rendered,
+no client framework, lazy images below the fold, because it opens inside the
+WhatsApp in-app browser on a cheap Android over expensive data.
+
+- **Price is never a bare number.** `price_display` carries the units, because
+  "KES 3,000" and "KES 3,000 for 30 pairs" mean very different things to someone
+  deciding whether to send money.
+- **Unpublished shops 404 exactly like missing ones.** An unpublished shop is
+  full of half-parsed drafts nobody should see, and distinguishing the two cases
+  leaks which slugs are taken.
+- **No phone number in a URL path.** The WhatsApp handoff builds `wa.me` links at
+  render time from the seller record.
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        199 passed
+```
+
+---
+
+## 2026-08-16 · The web layer — a design system, and the login wall
+
+**Context: the product changed shape.** Fredrick's direction — lead with the AI
+content and growth engine, not the store. *"In order for the store to be
+successful we need a way for people to know that we have a store. The way to do
+that is to make social tools for creators."* And: a proper web platform
+**before** WhatsApp, not after it. Nothing in this phase depends on Meta.
+
+`docs/PHASE_0.md` is the seven-step plan that came out of that. This entry is
+steps 1–3.
+
+Also: **SokoLink became Biashara Mall.** `sokolink.com` was taken;
+`biasharamall.com` is live on a landing page.
+
+### Tailwind was dropped, deliberately
+
+The plan said Jinja2 + HTMX + Tailwind. Tailwind offers two options and both were
+wrong for this week:
+
+| Option | Why not |
+|---|---|
+| Build step (Node, or the standalone binary) | One more thing to break in the Railway deploy, and deploying early is the plan |
+| CDN runtime | Ships ~3MB of JS and generates the CSS **in the browser** |
+
+The users are on cheap Android handsets over expensive, patchy data. Every
+kilobyte is a creator who leaves before the page paints.
+`app/static/css/app.css` is **540 lines, 20.7KB uncompressed (~4KB gzipped)**,
+and the deploy stays `pip install` and nothing else.
+
+**It is reversible.** The components map closely onto utility classes, so
+adopting Tailwind later is a rewrite of one file.
+
+**Every colour lives in one `:root` block.** Rebranding to match the landing page
+is a single edit, not a hunt through templates. The palette is green because this
+market reads green as growth and money, and WhatsApp already trained the commerce
+association — but that choice is deliberately one edit deep.
+
+### Two base templates, on purpose
+
+```
+base.html       the buyer's storefront   — a stranger, one visit, cheapest data
+app_base.html   the creator's workspace  — signed up, weekly, tables and charts
+```
+
+They have nothing in common but the company name. Keeping them separate means a
+change to the dashboard cannot slow down the storefront, which is the page that
+has to be fastest. The storefront keeps its Tailwind CDN until it is next touched
+— rewriting a working page to satisfy a consistency rule is not a good trade with
+buyers already on it.
+
+### The session layer — `app/dependencies.py`
+
+`app/security.py` already minted and read signed tokens. What was missing was the
+HTTP wrapper, and four things that have to agree:
+
+- `HttpOnly` — so an XSS anywhere on the site is not account theft
+- `SameSite=Lax` — also our CSRF defence, since every form here is same-site
+- `Secure` **follows the environment**. Hardcoded on, and localhost silently
+  drops the cookie: "login works but nothing is remembered", which is a miserable
+  afternoon
+- `max-age` matching the token's own expiry
+
+Written once in `set_session_cookie`, not per route.
+
+**A redirect, not a 401.** Everything above this is a browser. A 401 leaves a
+seller staring at `{"detail":"Not authenticated"}` with no way forward. The
+`LoginRequired` exception carries `?next=` and is handled application-wide in
+`main.py`, so no page behind the wall can forget to do it.
+
+**303, not 302** — it guarantees the browser re-issues as GET, so a POST that hit
+an expired session is not replayed after login.
+
+### `?next=` is attacker-controlled
+
+The one genuinely dangerous thing in this layer. Reflecting it unchecked turns
+our login page into a phishing hop: a real `biasharamall.com` login URL that
+bounces to someone's clone with the credentials still fresh in mind.
+
+Only a **single** leading `/` is accepted. `//evil.example` is a
+protocol-relative URL and is the easy one to miss — it has its own test.
+Sanitised on the way *in* as well as on the way out, or the hidden form field
+carries the hostile value back to us on the next submit.
+
+### Anti-enumeration had to survive the round trip
+
+`services/accounts.py` refuses to say whether an email exists. A template
+rendering a friendlier message, or a status code that differs by cause, hands
+that straight back. `api/auth.py` renders `str(exc)` rather than a message of its
+own — one place decides what a failed login says, and it is the service. Tested
+at the HTTP layer: same status, same string, for unknown email and wrong
+password.
+
+Two smaller decisions from the same instinct:
+
+- **The typed email survives a failure; the password never does.** Retyping
+  everything after one mistake is how you lose a signup. A re-rendered password
+  lands in proxy logs, browser caches and the back button.
+- **No email confirmation before first use.** Verification earns its place when
+  there is something worth protecting behind it. Today it is a wall in front of
+  an empty dashboard.
+
+### Two things found while wiring it up
+
+**`api/storefront.py` was building its own Jinja environment.** The moment a
+second router rendered HTML that meant two environments, and a `| media` filter
+existing in only one of them — a dashboard image would render a raw database path
+and nobody would know why. Extracted to `app/templating.py`; a filter registered
+there cannot be forgotten, because no template has to apply it.
+
+**`RESERVED_SLUGS` was missing `analytics` and `accounts`.** Both are routes
+introduced this session. Not a security hole — routes register before the
+storefront's `/{slug}` — but a seller claiming either would have got a silently
+unreachable shop.
+
+### The empty state is the product's first impression
+
+Nearly every creator who ever signs up sees the dashboard with nothing on it, and
+what it says decides whether they take the one action that makes the product
+work. So it holds one sentence, one reason and one button — plus the line that
+answers the objection before it is raised:
+
+> No password needed — you paste a short code into your bio.
+
+Fear of a password grab is the most common reason a creator abandons this screen.
+
+### What was built
+
+| File | Lines | |
+|---|---:|---|
+| `app/static/css/app.css` | 540 | The design system. One `:root` block owns every colour |
+| `app/dependencies.py` | 180 | Session layer — cookies, `current_account`, the login wall |
+| `app/api/auth.py` | 214 | signup / login / logout |
+| `app/api/dashboard.py` | 72 | The shell and its empty state |
+| `app/templating.py` | 42 | One Jinja environment, shared |
+| `app/templates/app_base.html` | 74 | Workspace shell |
+| `app/templates/auth/login.html` | 92 | |
+| `app/templates/auth/signup.html` | 95 | |
+| `app/templates/app/dashboard.html` | 85 | |
+| `tests/test_web_auth.py` | 268 | 20 tests: pages, cookies, redirects, enumeration |
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        219 passed
+alembic                       0f28636c2759 (head)
+```
+
+No migration — this session added no columns.
+
+### Still open
+
+1. **Brand colours.** The palette was chosen, not matched: `biasharamall.com`
+   serves its CSS in a form `WebFetch` strips, so the hex codes could not be read
+   programmatically. One edit to `:root` when they arrive.
+2. **The verification code prefix is still `soko-`.** Changing it to `bm-` is a
+   one-line change that invalidates any code already sitting in a bio. Nobody has
+   one yet — this is the free moment, and it closes at Step 4.
+3. **No Railway deploy config.** No `railway.json` and no `Procfile`, so Railway
+   has no start command. It needs
+   `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Everything above is now
+   worth deploying.
+4. **Eight commits unpushed.**
+
+---
+
+## 2026-08-17 · The auth screens, rebuilt to the brand mockup
+
+Fredrick supplied a mockup of the signup screen from `biasharamall.com`. The
+first build was a centred card; this is a split screen with the product case
+beside the form. Rebuilt to match.
+
+### What the mockup settled that guesswork had not
+
+- **The brand green.** The palette had been guessed as emerald (`#059669`)
+  because the landing page's CSS could not be read programmatically. It is a
+  true green — the scale is now `#22c55e / #16a34a / #15803d`. One `:root` edit,
+  as designed.
+- **The naming.** The mockup reads **Biashara Intel** and **AI Content Brain**,
+  not Soko Intel. The pillar names in `CLAUDE.md` are now out of step with the
+  brand — flagged, not silently changed.
+- **The onboarding shape.** *Create account → Make content → Review & publish.*
+  That is not the flow `PHASE_0.md` planned (connect TikTok → sync → analytics).
+  The step meter is built and honest about being step 1 of 3; **steps 2 and 3 do
+  not exist yet**, and which flow wins is an open decision.
+
+### Why a marketing pane next to a form
+
+Most people reach `/signup` from an ad, a WhatsApp forward or a TikTok bio,
+having read no landing page. A bare form asks them to commit to something
+unexplained. The left pane is the explanation, placed where the hesitation is.
+
+**On mobile the form comes first.** `order` flips the panes: a phone shows one
+at a time, and someone who tapped "Sign up" has already decided. Making them
+scroll past a pitch taxes the people who need convincing least.
+
+### Two enhancements, neither of them a dependency
+
+**The live workspace-slug preview.** A creator who watches their web address
+form as they type chooses a better name than one told, after the fact, what we
+picked. It needs client-side slugification — which means **one rule with two
+implementations**, in `services/accounts.py` and `static/js/auth.js`.
+
+That drift is not cosmetic: a creator sees one address and gets another, at
+exactly the moment they are deciding whether to trust us. So
+`tests/test_slug_parity.py` extracts `slugify()` **from the shipped JS file**
+— not a copy, which would drift alongside it — and runs both over sixteen
+inputs chosen for disagreement: accents, emoji, Cyrillic, truncation landing on
+a separator, runs of punctuation. Skipped rather than failed when Node is
+absent, since CI is Python-only.
+
+The preview stays a preview: the server appends `-2`, `-3` on collision and
+alone knows what is taken.
+
+**A password reveal toggle**, because the alternative on a phone keyboard is a
+confirm-password field — one more thing to type, and a common place a signup is
+abandoned.
+
+Both are progressive enhancement. Both pages work with JavaScript blocked,
+failed or still downloading, which is the normal case on a patchy connection.
+
+### The logo read as a padlock
+
+First attempt: a uniformly rounded bag body under a wide handle arc. At 30px it
+was unmistakably a padlock — the last thing a signup page should accidentally
+say. Fixed by narrowing the handle relative to the bag and squaring the bag's
+top corners while keeping the base rounded, so it reads as a tote.
+
+Caught by screenshotting the rendered page rather than by reading the markup.
+Worth remembering: SVG at small sizes cannot be reviewed as source.
+
+The mark is an approximation of the real one. **Ask for the actual asset.**
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        220 passed
+app.css                       28.0KB uncompressed
+```
+
+Screenshotted at 1280px and at 520px before being called done.
+
+### Still open, from this session
+
+1. **The real logo file**, to replace the hand-drawn approximation in
+   `templates/partials/logo.html`.
+2. **The wordmark is "Biasharamall"**, one word, matching the mockup — while
+   `config.app_name` and every document say "Biashara Mall". One of them is
+   wrong.
+3. **Soko Intel vs Biashara Intel**, and whether Soko Commerce / Soko AI rename
+   with it.
+4. **Which onboarding flow is real** — the mockup's three steps, or Phase 0's
+   connect-then-analyse. The step meter currently promises the former.
+5. **The typeface.** The mockup uses a geometric sans; this uses the system
+   stack, because a web font is a render-blocking download on a slow connection.
+   Revisit if the brand look matters more than the first paint.
+
+---
+
+## 2026-08-18 · The real brand, read from the source
+
+The hand-drawn logo was wrong and Fredrick said so. The fix turned out to be
+much larger than a logo: **the landing page's stylesheet is fetchable, and it
+contains every token we had been guessing at.**
+
+```
+curl https://biasharamall.com  ──▶  126KB of HTML with inline CSS
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    ▼                   ▼                   ▼
+              :root palette      Google Fonts link      --logo data URI
+```
+
+No login, no browser automation, no account access — the page is public and
+serves its own design system.
+
+### The palette had been guessed twice, and corrected in the wrong direction
+
+| Attempt | Value | |
+|---|---|---|
+| First build | emerald `#059669` | guessed from memory — **right by luck** |
+| Second build | grass `#16a34a` | read off a screenshot — **wrong** |
+| Now | emerald `#059669` | read from the stylesheet |
+
+The screenshot looked like a truer green than emerald, so the palette was
+"corrected" away from the correct answer. **A rendered screenshot is not a
+colour source.** Anti-aliasing, the display profile and PNG quantisation all
+sit between the value and the pixel.
+
+What the real `:root` gave us, none of which was guessable:
+
+- **Green-tinted neutrals**, not grey ones — `--ink:#0a1712`,
+  `--muted:#5b6b63`, `--line:#e7ebe8`, `--canvas:#f7faf8`. Subtle, and the
+  reason the brand's whites look warm beside the emerald rather than clinical.
+- **Green-tinted shadows** — `rgba(4,54,31,…)`, never black. A neutral
+  drop-shadow under an emerald card reads muddy. This one detail did more for
+  the match than the hue did.
+- **A softer radius scale** — 10 / 16 / 24 / 32 against our 6 / 10 / 16.
+- `--maxw:1180px`, and an easing curve.
+
+### The typeface decision reversed
+
+The brand pairs **Sora** (display) with **Inter** (text), from Google Fonts.
+This file had argued for the system stack on the grounds that a web font is a
+render-blocking download on a slow connection.
+
+Two things changed the calculus:
+
+1. The brand actually has a typeface, and "close enough" typography is the
+   most visible way a product looks unfinished.
+2. A creator arriving from `biasharamall.com` has **already downloaded both**.
+   For the common path it is a cache hit, not a download.
+
+Loaded from the identical URL the landing page uses, with `preconnect` and
+`display=swap`, so text paints immediately in the fallback and swaps when the
+font lands. The worst case is a swap, never a blank screen.
+
+**Sora is on headings only.** It is a display face and gets tiring at
+paragraph sizes — which is exactly how the brand uses it.
+
+### The logo is now the brand's own file
+
+It ships on the landing page as a base64 PNG in a `--logo` custom property.
+Decoded to `static/img/logo.png` (120×120, 16.7KB): a green bag with a yellow
+map pin, forming a B.
+
+The hand-drawn SVG that replaced it twice is gone. Do not reintroduce a drawn
+version — if the mark changes, replace the file.
+
+### What the real font immediately broke
+
+Sora is wider than the system stack. Two things that fitted before did not:
+
+- The "About 1 minute" pill wrapped onto two lines — a pill that wraps stops
+  being a pill. Fixed with `white-space: nowrap`.
+- That wrap then stole a line from the heading beside it. `.auth-card-head h1`
+  is now sized to sit on one line at the narrowest column the split grid
+  allows (400px).
+
+Neither was visible in the markup. Both were caught by screenshotting the
+rendered page — the same way the padlock logo was caught. **Typography and
+small-format SVG cannot be reviewed as source.**
+
+### Verification
+
+```
+ruff · format · mypy strict   clean
+pytest                        220 passed
+app.css                       30.5KB uncompressed
+logo.png                      16.7KB
+```
+
+Screenshotted at 1280px and 520px.
+
+### Still open
+
+1. **Wordmark spelling.** The brand renders "Biasharamall", one word;
+   `config.app_name` and every document say "Biashara Mall". Unresolved.
+2. **Pillar names.** The landing nav reads **BiasharaIntel**; `CLAUDE.md`
+   declares Soko Intel / Soko Commerce / Soko AI. The brand has moved and the
+   docs have not.
+3. **Which onboarding is real** — the mockup's *Create account → Make content →
+   Review & publish*, or Phase 0's *connect → sync → analytics*. The step meter
+   currently promises the former, and steps 2 and 3 do not exist.
+4. **The storefront still runs on the Tailwind CDN** and now looks like a
+   different product from the workspace. It should adopt these tokens next
+   time it is touched.
+
+---
+
+## 2026-08-22 · The pivot: from pull to push
+
+### What changed
+
+We stopped scraping social media for catalogs. Sellers now forward posts to a
+WhatsApp bot, and that is the entire product-creation path.
+
+This reverses the central assumption of every plan written before today. The old
+`PRODUCTION_PLAN.md` said in as many words: *"WhatsApp is not a dependency. The
+web platform stands alone… WhatsApp is added later as a channel, not as the
+foundation."* That is now false in both halves — WhatsApp is the foundation, and
+the web is the reporting surface it opens.
+
+### Why
+
+The scraping path asked a seller to do five things before they had anything to
+sell: connect an account, prove they owned it, wait for a paid scrape, let an AI
+guess which of their videos were products, then review the guesses.
+
+**The observation that killed it:** sellers already run catalogs inside WhatsApp
+groups. The photo and the caption already exist, composed by the seller, in the
+app they already work in. We were paying Apify per scrape to reconstruct —
+badly — a thing they would hand us directly if asked.
+
+**A second gain, not anticipated.** Scraping forced the AI to answer *"is this a
+video even a product?"* A forwarded post carries that answer inside the act of
+forwarding. The model's job shrinks to *"read this product card"*, on a better
+image — a catalog post is composed to be read, unlike a video cover frame.
+
+### Decisions taken, with reasoning
+
+**Buyer identity is collected, never assumed.** The webview is a browser tab: a
+link opened from a status or channel carries no Meta user id and no phone
+number. Checkout asks for the phone, which serves as both the STK push target
+and — with an explicit checkbox — the opt-in for a WhatsApp receipt.
+
+> The on-page receipt is the **primary**, not the fallback: it is the only one
+> that works regardless of opt-in, network, or Meta's template rules.
+
+**Payments go straight to the seller. We are never in the money path.**
+
+A central paybill — buyers pay us, we settle out to sellers — was proposed
+first, on the grounds that asking an informal seller for Daraja consumer secrets
+is an onboarding funnel that ends at zero. That reasoning about friction was
+right, and it lost anyway.
+
+**Rejected within the hour, and rightly.** Aggregating buyers' money into our
+shortcode makes us a payment intermediary holding other people's funds, which in
+Kenya is a CBK / PSP licensing question. Onboarding friction is merely hard.
+Holding unlicensed float is the kind of problem that ends a company, and it is
+enormously cheaper to decline before there is money in the account than after.
+
+**What it cost us to say no, stated plainly:** a per-transaction commission
+requires being in the money path. We have left it, so **there is no transaction
+revenue — monetisation is the subscription tier.** `platform_fee`,
+`seller_payout_amount` and `payout_status` were removed from the schema before
+they were ever written; they described an aggregator we are not building. The
+only honest route back to a cut of sales is a *licensed* PSP doing the splitting,
+never our own shortcode doing it quietly.
+
+**Two payment paths, and the second one is not optional.**
+
+Fredrick supplied the domain knowledge that settled the design: **Daraja does
+not work with Pochi la Biashara.** STK Push and C2B are Paybill and Buy Goods
+only, and Pochi is neither. A large share of Kenyan micro-sellers run on Pochi
+precisely because it needs no business registration — which means:
+
+> **The manual confirmation path is permanent and first-class, not a shim.**
+> Any design treating STK as the real path and manual as a fallback is wrong for
+> the majority of our sellers.
+
+| Seller's method | Checkout | Confirmation |
+|---|---|---|
+| Pochi la Biashara | shows the number | manual — buyer enters code, seller confirms |
+| Till / Paybill, no credentials | shows the number | manual — same |
+| Till / Paybill + their own Daraja creds | STK push | automatic, via their callback |
+
+This forced a state that a single `paid` boolean could not express: an order
+where **someone says they paid and nobody has checked**. Hence
+`pending → awaiting_confirmation → paid`, with only the seller making the last
+move. A buyer-entered M-Pesa code is a claim, not a payment.
+
+Manual is built first — it needs no credentials from anyone, so it is the one
+path that cannot be blocked by Safaricom, Meta, or a seller who hasn't got round
+to it.
+
+**WhatsApp captures, the web reports.** Order tables and receipts render badly
+in a chat thread. Capture belongs where the seller is; reporting belongs on a
+screen that can hold a table.
+
+**One stock pool, variants as strings.** A micro-seller holds a pile of ten
+shoes and sells until it is gone; they do not track "Black 38" apart from
+"Black 40". Per-variant stock would impose an inventory discipline the seller
+does not have. The choice is recorded on the order line as `"Size 40 / Black"`.
+
+**Magic link auth, TikTok demoted to optional.** Social login was an
+authentication wall in front of people whose business runs in WhatsApp. The
+bio-code verification built on 2026-08-12 is not deleted — it becomes an opt-in
+connection from the dashboard.
+
+### What this cost
+
+Roughly 2,000 lines go quiet: `services/scraper.py`, `schemas/tiktok.py`,
+`services/sync.py`, `services/analytics.py`, `models/post.py`,
+`models/snapshot.py`. **Nothing is deleted** — it stays on `p1-catalog`.
+
+The snapshot tables deserve a note. They shipped urgently on 2026-08-19 because
+metric history cannot be backfilled, and that argument was correct at the time.
+It is now moot: we are not collecting metrics. The tables stay in the schema,
+empty, costing nothing.
+
+### What survived better than expected
+
+- **`agent/draft.py` is the forward-to-catalog parser.** The cover-image tier of
+  the price cascade already does "read a product and a price off an image and a
+  caption". The pivot points existing, tested code at an easier target.
+- **The schema already allows a WhatsApp-sourced product.** `platform='manual'`
+  + `ingest_method='upload'`, with `social_account_id` and `post_id` NULL,
+  satisfies every constraint on `Product`. No migration was needed to store a
+  forwarded item — the provenance model built on 2026-08-09 anticipated this
+  without knowing it.
+- **`services/media.py`** stores our own copy of a remote image, which is
+  precisely what WhatsApp media download requires.
+- **The job queue** exists, which matters more now than when it was built: Meta
+  retries any webhook that is slow, so media download and vision parsing must
+  not happen inside the request.
+
+### A gap found while assessing
+
+**There is no publish flow anywhere in the application.** Nothing in `api/` or
+`services/` ever sets `is_published = True` or `ProductStatus.PUBLISHED`. The
+only two places in the repo that do are in `scripts/seed_demo_shop.py`.
+
+Ingestion writes `DRAFT`; nothing promotes it. A real seller signing up today
+would add stock and get a 404 storefront. The rule *"publish is a human gate"*
+was written down in three documents and the gate itself was never built. It was
+invisible because the demo shop is seeded directly into Postgres.
+
+Scheduled for W4, and W1 is built assuming it will exist.
+
+### Also found
+
+- **`og:image` is broken on the product page.** It emits `product.cover_url`
+  raw, while the `<img>` two lines below correctly applies the `| media` filter.
+  `cover_url` holds a relative path, so a link pasted into WhatsApp gets a
+  preview with no image — the first impression, wasted, on the surface the whole
+  product now depends on. Fixed in W1.
+- **The storefront had no tests.** 308 tests across 14 files, and not one
+  covered the two public routes, the 404-identity rule, or the cross-seller
+  scoping rule. W1 adds them.
+
+### Documents rewritten
+
+- `PRODUCTION_PLAN.md` — rewritten around the W-phases
+- `CLAUDE.md` — direction, journeys, rules, branch naming
+- `BUILD_ORDER.md` — superseded; it argued for a content agent first
