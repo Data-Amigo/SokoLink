@@ -55,6 +55,7 @@ from app.db import Base
 from app.models.enums import IngestMethod, Platform, PriceSource, ProductStatus
 
 if TYPE_CHECKING:
+    from app.models.post import Post
     from app.models.seller import Seller
     from app.models.social_account import SocialAccount
 
@@ -90,6 +91,17 @@ class Product(Base):
     )
     social_account: Mapped[SocialAccount | None] = relationship(back_populates="products")
 
+    #: The post this product was created from, when there was one.
+    #:
+    #: NULLABLE, and it must stay that way: a manual photo upload is a real
+    #: product with no post behind it. Added 2026-08-19 alongside the Post
+    #: table, so the content and the commerce record can stop being the same
+    #: row without a big-bang migration — see docs/BUILD_ORDER.md step 2.
+    post_id: Mapped[int | None] = mapped_column(
+        ForeignKey("posts.id", ondelete="SET NULL"), unique=True
+    )
+    post: Mapped[Post | None] = relationship(back_populates="product")
+
     #: The platform's own id for the post. NULL for uploads.
     #:
     #: Unique per (platform, id) so re-scraping a feed updates rather than
@@ -121,6 +133,25 @@ class Product(Base):
     #: This is the price of ONE UNIT AS SOLD, which is not always one item —
     #: see unit_quantity below.
     price_kes: Mapped[int | None] = mapped_column(Integer)
+
+    #: What this used to cost, for a "was 3,500" strikethrough and the discount
+    #: badge on a product card. NULL means no discount is being claimed.
+    #:
+    #: Constrained to exceed ``price_kes`` because the only thing worse than no
+    #: discount badge is one reading "-0%" or, worse, a negative saving. A claim
+    #: about a price is a claim a buyer can feel cheated by, so the database
+    #: refuses an incoherent one rather than trusting every write path to check.
+    compare_at_price_kes: Mapped[int | None] = mapped_column(Integer)
+
+    #: The seller's own grouping — "Fashion", "Shoes", "Bags". Drives the filter
+    #: pills on the shop page.
+    #:
+    #: Free text and NOT normalised, for the same reason ``unit_label`` and
+    #: ``sizes`` are not: a fixed taxonomy invented here would be wrong for the
+    #: next trade we meet, and a seller forced to file mitumba bales under
+    #: "Clothing" has been made to describe their own stock in someone else's
+    #: words. The pills are built from what sellers actually typed.
+    category: Mapped[str | None] = mapped_column(String(40))
 
     # ── What the price actually buys ─────────────────────────────────────────
     # Discovered from real data, not designed up front: @zumamitumbabales sells
@@ -204,6 +235,14 @@ class Product(Base):
             "price_kes IS NULL OR price_kes <= 10000000",
             name="ck_products_price_plausible",
         ),
+        # A "was" price must actually be higher, and there must be a real price
+        # to compare it against. Otherwise the badge claims a saving that is
+        # zero, negative, or measured against nothing.
+        CheckConstraint(
+            "compare_at_price_kes IS NULL"
+            " OR (price_kes IS NOT NULL AND compare_at_price_kes > price_kes)",
+            name="ck_products_compare_at_exceeds_price",
+        ),
         CheckConstraint(
             "parse_confidence IS NULL OR (parse_confidence >= 0 AND parse_confidence <= 1)",
             name="ck_products_confidence_range",
@@ -257,6 +296,8 @@ class Product(Base):
         ),
         # The storefront query: this seller's published items.
         Index("ix_products_seller_status", "seller_id", "status"),
+        # The shop page's category pills: this seller's published items, filtered.
+        Index("ix_products_seller_category", "seller_id", "category"),
         # The dashboard review queue: this seller's drafts, worst parses first.
         Index("ix_products_seller_confidence", "seller_id", "parse_confidence"),
         # The re-sync guard: "which of this seller's products does a sync of
@@ -328,6 +369,30 @@ class Product(Base):
         if self.is_wholesale:
             return f"{price} for {self.unit_quantity} {self.unit_label}"
         return price
+
+    @property
+    def compare_at_display(self) -> str | None:
+        """The struck-through "was" price, or None when nothing is discounted."""
+        if self.compare_at_price_kes is None:
+            return None
+        return f"KES {self.compare_at_price_kes:,}"
+
+    @property
+    def discount_percent(self) -> int | None:
+        """
+        Whole-percent saving for the card badge, or None when not discounted.
+
+        Rounded DOWN, deliberately: a badge is a promise, and overstating the
+        saving by a fraction of a percent is the kind of small dishonesty a
+        buyer notices at checkout when the arithmetic does not match.
+
+        The constraint guarantees ``compare_at_price_kes > price_kes``, so the
+        result is always between 1 and 99.
+        """
+        if self.compare_at_price_kes is None or self.price_kes is None:
+            return None
+        saving = self.compare_at_price_kes - self.price_kes
+        return int(saving * 100 // self.compare_at_price_kes)
 
     def __repr__(self) -> str:
         return f"<Product id={self.id} title={self.title!r} status={self.status}>"

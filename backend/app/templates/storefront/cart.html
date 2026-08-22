@@ -1,0 +1,118 @@
+{# The basket.
+
+   Quantity changes are ordinary POST forms rather than fetch() calls: this page
+   runs inside the WhatsApp in-app browser, and a form that works without
+   JavaScript works everywhere.
+#}
+{% extends "base.html" %}
+
+{% set cart_count = cart.item_count if cart else 0 %}
+
+{% block title %}Basket · {{ seller.display_name }}{% endblock %}
+
+{% block body %}
+<div class="shell">
+
+  <header class="topbar">
+    <a class="icon-btn" href="/shop/{{ seller.slug }}" aria-label="Back to shop">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M15 5l-7 7 7 7"/>
+      </svg>
+    </a>
+    <div class="topbar-id">
+      <div class="topbar-name">Your basket</div>
+      <div class="topbar-verified">{{ seller.display_name }}</div>
+    </div>
+  </header>
+
+  <main id="main" class="section">
+
+    {% if error %}<p class="notice" style="margin-bottom:14px">{{ error }}</p>{% endif %}
+
+    {% if unavailable %}
+      {# A basket can sit for days. Discovering a sold-out item AFTER an M-Pesa
+         prompt means the buyer was asked for money under false pretences. #}
+      <p class="notice" style="margin-bottom:14px">
+        Some items are no longer available and have been marked below. Remove
+        them to continue.
+      </p>
+    {% endif %}
+
+    {% if cart and cart.items %}
+      {% for item in cart.items %}
+        {% set stale = item in unavailable %}
+        <div class="line">
+          <div class="line-media">
+            {% if item.product.cover_url %}
+              <img src="{{ item.product.cover_url | media }}" alt="" loading="lazy">
+            {% endif %}
+          </div>
+
+          <div class="line-body">
+            <h2 class="line-title">
+              <a href="/shop/{{ seller.slug }}/{{ item.product_id }}">{{ item.product.title }}</a>
+            </h2>
+
+            {% if item.selected_variant %}
+              <p class="line-variant">{{ item.selected_variant }}</p>
+            {% endif %}
+
+            {% if stale %}
+              <p class="line-variant stock-out">No longer available</p>
+            {% else %}
+              <p class="line-price">KES {{ '{:,}'.format(item.line_total_kes) }}</p>
+
+              <div class="qty">
+                <form method="post" action="/shop/{{ seller.slug }}/cart/update">
+                  <input type="hidden" name="item_id" value="{{ item.id }}">
+                  <input type="hidden" name="quantity" value="{{ item.quantity - 1 }}">
+                  <button type="submit" aria-label="Reduce quantity">−</button>
+                </form>
+                <span>{{ item.quantity }}</span>
+                <form method="post" action="/shop/{{ seller.slug }}/cart/update">
+                  <input type="hidden" name="item_id" value="{{ item.id }}">
+                  <input type="hidden" name="quantity" value="{{ item.quantity + 1 }}">
+                  <button type="submit" aria-label="Increase quantity">+</button>
+                </form>
+              </div>
+            {% endif %}
+
+            <form method="post" action="/shop/{{ seller.slug }}/cart/remove">
+              <input type="hidden" name="item_id" value="{{ item.id }}">
+              <button class="line-remove" type="submit">Remove</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+
+      <div class="totals">
+        <div class="total-row">
+          <span>Subtotal</span>
+          <span>KES {{ '{:,}'.format(cart.subtotal_kes) }}</span>
+        </div>
+        <div class="total-row">
+          <span>Delivery</span>
+          <span>Arranged with the seller</span>
+        </div>
+        <div class="total-row grand">
+          <span>Total</span>
+          <span>KES {{ '{:,}'.format(cart.subtotal_kes) }}</span>
+        </div>
+      </div>
+
+      <div class="actionbar">
+        <a class="btn btn-outline" href="/shop/{{ seller.slug }}">Keep shopping</a>
+        <a class="btn btn-green btn-block" href="/shop/{{ seller.slug }}/checkout">Checkout</a>
+      </div>
+
+    {% else %}
+      <div class="empty">
+        <h2>Your basket is empty</h2>
+        <p><a href="/shop/{{ seller.slug }}" style="text-decoration:underline">Browse the shop</a></p>
+      </div>
+    {% endif %}
+
+    <p class="footer">Powered by Biasharamall</p>
+  </main>
+</div>
+{% endblock %}

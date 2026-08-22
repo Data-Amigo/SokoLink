@@ -71,6 +71,10 @@ BALE_PRICE_KES = 3000
 BALE_QUANTITY = 30
 BALE_UNIT = "pairs"
 
+#: Rotated across the demo's products so the shop page has more than one
+#: category pill to draw. Free text on purpose — a seller types their own.
+DEMO_CATEGORIES = ("Fashion", "Shoes", "Bags", "Beauty")
+
 #: Taken from the seller's own bio, which really does carry it — spike 02 found
 #: three numbers in this profile.
 DEMO_WHATSAPP = "254105515839"
@@ -248,15 +252,26 @@ def main() -> int:
             product.reviewed_at = datetime.now(UTC)
             product.stock = 5
 
+            # Spread the demo across the storefront's states so the shop page
+            # actually exercises what it renders: category pills need more than
+            # one category, the discount badge needs a compare-at price, and the
+            # "Sold out" badge needs something with no stock. A demo where every
+            # card looks identical proves only that one card works.
+            product.category = DEMO_CATEGORIES[created % len(DEMO_CATEGORIES)]
+            if created % 3 == 0 and product.price_kes:
+                product.compare_at_price_kes = int(product.price_kes * 1.2)
+            if created % 5 == 0:
+                product.stock = 0
+
         db.commit()
 
         total = len(profile.videos)
-        print(f"\n  seller        /{seller.slug}  ({seller.display_name})")
+        print(f"\n  seller        /shop/{seller.slug}  ({seller.display_name})")
         print(f"  connected     @{social.handle}  ·  {social.follower_count:,} followers")
         print(f"  products      {total} ({created} new)")
         print(f"  covers stored {with_stored_cover}/{total}")
         print(f"  AI-read price {priced_by_ai}/{total}")
-        print(f"\n  Storefront:   http://localhost:8000/{seller.slug}")
+        print(f"\n  Storefront:   http://localhost:8000/shop/{seller.slug}")
 
     return 0
 

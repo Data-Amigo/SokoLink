@@ -126,3 +126,34 @@ def public_url(stored_path: str | None) -> str | None:
     if stored_path.startswith(("http://", "https://")):
         return stored_path
     return f"{MEDIA_URL_PREFIX}/{stored_path.lstrip('/')}"
+
+
+def absolute_url(stored_path: str | None) -> str | None:
+    """
+    The same URL, but fully qualified with the site's public origin.
+
+    WHY THIS EXISTS SEPARATELY FROM ``public_url``. A page renders images with a
+    root-relative path, which is correct and smaller. **A link preview cannot.**
+    When a seller pastes their shop link into WhatsApp, Meta's crawler fetches
+    the page from outside and reads ``og:image`` with no origin to resolve
+    against — a relative path there yields a preview with no picture at all.
+
+    That is the first thing a buyer sees of a shop, on the surface this whole
+    product now depends on, so it gets its own function rather than a filter
+    each template must remember to reach for.
+
+    Args:
+        stored_path: What ``store_cover`` returned, or a full URL.
+
+    Returns:
+        An absolute URL, or None.
+    """
+    relative = public_url(stored_path)
+    if relative is None or relative.startswith(("http://", "https://")):
+        return relative
+
+    # Imported here, not at module scope: config is lazy on purpose, and a
+    # top-level read would resolve settings at import time.
+    from app.config import get_settings
+
+    return f"{get_settings().app_base_url}{relative}"

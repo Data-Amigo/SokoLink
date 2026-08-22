@@ -35,34 +35,29 @@ from app.security import (
 MIN_SLUG_LENGTH = 3
 MAX_SLUG_LENGTH = 40
 
-#: Words that must never become a storefront slug, because they either collide
-#: with our own routes or let a seller impersonate the platform.
+#: Words that must never become a storefront slug, because a seller using one
+#: could impersonate the platform: a buyer who lands on a shop called "support"
+#: or "billing" has no way to tell it is not us asking.
+#:
+#: THIS LIST USED TO BE TWICE AS LONG. Storefronts once lived at `/{slug}`, so
+#: it also had to name every route we had or might ever add — "health", "docs",
+#: "login" — and adding a route without adding a word here would silently make
+#: some seller's shop unreachable. Moving the storefront to `/shop/{slug}` made
+#: collisions impossible, so the list now does one job instead of two.
 RESERVED_SLUGS = frozenset(
     {
-        "about",
-        "account",
         "admin",
-        "api",
-        "auth",
-        "blog",
-        "contact",
-        "dashboard",
-        "docs",
-        "health",
-        "help",
-        "home",
-        "login",
-        "logout",
-        "media",
-        "privacy",
-        "settings",
-        "shop",
-        "signup",
+        "administrator",
         "biashara",
-        "static",
-        "storefront",
+        "biasharamall",
+        "billing",
+        "help",
+        "moderator",
+        "official",
+        "security",
+        "staff",
         "support",
-        "terms",
+        "system",
         "www",
     }
 )

@@ -1,8 +1,8 @@
 """
 What a buyer is allowed to see, and the WhatsApp handoff.
 
-    /{slug}            ──> published, in-stock-first products
-    /{slug}/{id}       ──> one product + a pre-filled WhatsApp link
+    /shop/{slug}       ──> published, in-stock-first products
+    /shop/{slug}/{id}  ──> one product + a pre-filled WhatsApp link
 
 WHY A SERVICE RATHER THAN QUERIES IN THE ROUTE: "what is publicly visible" is a
 rule, and rules belong somewhere they can be tested once and reused. A route
@@ -16,9 +16,10 @@ opens a chat already knowing what is being asked about.
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import quote
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Platform, Product, ProductStatus, Seller
@@ -43,9 +44,28 @@ def get_public_shop(db: Session, slug: str) -> Seller | None:
     return db.scalar(select(Seller).where(Seller.slug == slug, Seller.is_published.is_(True)))
 
 
-def get_public_products(db: Session, seller: Seller) -> list[Product]:
+#: Sort orders the shop page offers, and the ORDER BY each one means.
+#:
+#: A whitelist rather than a column name from the query string: the value
+#: arrives from a URL a stranger controls, and "sort by this column" is one
+#: careless f-string away from being "run this SQL".
+SORT_OPTIONS = {
+    "newest": "Newest first",
+    "price_low": "Price: low to high",
+    "price_high": "Price: high to low",
+}
+DEFAULT_SORT = "newest"
+
+
+def get_public_products(
+    db: Session,
+    seller: Seller,
+    category: str | None = None,
+    search: str | None = None,
+    sort: str | None = None,
+) -> list[Product]:
     """
-    The shop's visible catalogue.
+    The shop's visible catalogue, optionally filtered.
 
     Sold-out items are INCLUDED, deliberately. A buyer who saw the item on
     TikTok and finds nothing here assumes the shop is dead; a "Sold out" badge
@@ -54,20 +74,76 @@ def get_public_products(db: Session, seller: Seller) -> list[Product]:
 
     Ordered in-stock first, then newest — because the first screen is the only
     one many buyers see.
+
+    Args:
+        db: Session.
+        seller: The shop.
+        category: Restrict to one category pill. None or "" means all.
+        search: Free text matched against title and description.
+        sort: One of ``SORT_OPTIONS``. Anything else falls back to newest,
+            silently — a buyer who edits the URL gets a sane page, not a 500.
+
+    Returns:
+        Published products, filtered and ordered.
     """
-    return list(
-        db.scalars(
-            select(Product)
-            .where(
-                Product.seller_id == seller.id,
-                Product.status == ProductStatus.PUBLISHED.value,
-            )
-            .order_by(
-                (Product.stock > 0).desc(),
-                Product.created_at.desc(),
-            )
-        ).all()
+    query = select(Product).where(
+        Product.seller_id == seller.id,
+        Product.status == ProductStatus.PUBLISHED.value,
     )
+
+    if category:
+        query = query.where(Product.category == category)
+
+    if search and search.strip():
+        # ILIKE, not a tsvector index: a shop holds tens of products, not
+        # millions, and a full-text index would be machinery bought with
+        # complexity we would never earn back. `%` and `_` are escaped so a
+        # buyer typing "50% off" searches for that rather than matching
+        # everything.
+        term = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{term}%"
+        query = query.where(
+            or_(
+                Product.title.ilike(pattern),
+                Product.description.ilike(pattern),
+            )
+        )
+
+    # In-stock always leads, whatever the sort. A sold-out item at the top of a
+    # price-sorted list is the cheapest thing the buyer cannot have.
+    ordering: list[Any] = [(Product.stock > 0).desc()]
+    if sort == "price_low":
+        ordering.append(Product.price_kes.asc().nulls_last())
+    elif sort == "price_high":
+        ordering.append(Product.price_kes.desc().nulls_last())
+    ordering.append(Product.created_at.desc())
+
+    return list(db.scalars(query.order_by(*ordering)).all())
+
+
+def get_categories(db: Session, seller: Seller) -> list[str]:
+    """
+    The category pills for this shop's header.
+
+    Built from what this seller actually typed rather than a fixed taxonomy —
+    a shop selling only shoes should not display four empty pills, and a shop
+    selling something we never anticipated should not be unlabelable.
+
+    Returns:
+        Distinct non-empty categories on published products, alphabetically.
+    """
+    rows = db.scalars(
+        select(Product.category)
+        .where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.PUBLISHED.value,
+            Product.category.is_not(None),
+            Product.category != "",
+        )
+        .distinct()
+        .order_by(Product.category)
+    ).all()
+    return [row for row in rows if row]
 
 
 def get_public_product(db: Session, seller: Seller, product_id: int) -> Product | None:
@@ -84,6 +160,26 @@ def get_public_product(db: Session, seller: Seller, product_id: int) -> Product 
             Product.status == ProductStatus.PUBLISHED.value,
         )
     )
+
+
+def build_shop_whatsapp_url(seller: Seller) -> str | None:
+    """
+    The "Chat with this seller" link on the shop page.
+
+    Deliberately vaguer than the product version: a buyer on the shop page has
+    not chosen anything yet, so naming an item would put words in their mouth.
+    It still says which shop, because a seller running two of them needs to know
+    which one the buyer is standing in.
+
+    Returns:
+        A ready link, or None when the seller has no number — the page must then
+        hide the button rather than show one that goes nowhere.
+    """
+    if not seller.whatsapp_number:
+        return None
+
+    message = f"Hi {seller.display_name}! I'm browsing your Biasharamall shop."
+    return f"{_WA_BASE}{seller.whatsapp_number}?text={quote(message)}"
 
 
 def build_whatsapp_url(seller: Seller, product: Product) -> str | None:
@@ -110,7 +206,7 @@ def build_whatsapp_url(seller: Seller, product: Product) -> str | None:
     price = product.price_display or "the price"
     message = (
         f"Hi {seller.display_name}! I saw {product.title} "
-        f"({price}) on your Biashara Mall shop. Is it available?"
+        f"({price}) on your Biasharamall shop. Is it available?"
     )
 
     return f"{_WA_BASE}{seller.whatsapp_number}?text={quote(message)}"
