@@ -128,3 +128,70 @@ class TestDriverNormalisation:
 def test_module_level_settings_loaded() -> None:
     """The imported singleton is usable — this is what the app actually runs on."""
     assert settings.app_name == "Biashara Mall"
+
+
+class TestProductionRefusesDevelopmentDefaults:
+    """
+    A prod deploy that forgot its secrets must fail at startup, not later.
+
+    SECRET_KEY is the serious one. Since W2 it signs sessions AND derives the
+    key encrypting sellers' Daraja credentials — and its default is a literal
+    string in a public repository. Booting on it would encrypt other people's
+    payment credentials with a key anyone can read.
+
+    A misconfiguration that boots happily is discovered by an incident. This one
+    is discovered by a deploy log, before a seller has trusted it.
+    """
+
+    def test_prod_refuses_the_default_secret_key(self) -> None:
+        with pytest.raises(ValidationError, match="SECRET_KEY"):
+            build(app_env="prod", app_base_url="https://shop.example.com")
+
+    def test_prod_refuses_a_localhost_base_url(self) -> None:
+        """It builds the M-Pesa callback. Pointing it at localhost means
+        Safaricom posts the verdict into the void."""
+        with pytest.raises(ValidationError, match="APP_BASE_URL"):
+            build(
+                app_env="prod",
+                secret_key="a-real-long-random-value",
+                app_base_url="http://localhost:8000",
+            )
+
+    def test_prod_boots_when_both_are_set(self) -> None:
+        cfg = build(
+            app_env="prod",
+            secret_key="a-real-long-random-value",
+            app_base_url="https://shop.example.com",
+        )
+        assert cfg.is_prod is True
+
+    def test_development_still_boots_on_defaults(self) -> None:
+        """The guard must not make local development harder."""
+        assert build().is_prod is False
+
+
+class TestMpesaKeysAcceptEitherPrefix:
+    """
+    Safaricom's API is called Daraja and its product is called M-Pesa, so both
+    prefixes are in circulation.
+
+    This is not cosmetic. ``extra="ignore"`` means a mismatched name is
+    discarded in SILENCE — credentials that look configured and are not, which
+    is the worst possible way to find out, on a live payment.
+    """
+
+    def test_the_daraja_prefix_is_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DARAJA_CONSUMER_KEY", "from-daraja")
+        assert build().daraja_consumer_key == "from-daraja"
+
+    def test_the_mpesa_prefix_is_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MPESA_CONSUMER_KEY", "from-mpesa")
+        assert build().daraja_consumer_key == "from-mpesa"
+
+    def test_the_environment_accepts_either_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MPESA_ENVIRONMENT", "production")
+        assert build().daraja_environment == "production"
+
+    def test_it_still_defaults_to_sandbox(self) -> None:
+        """A deploy that sets neither cannot move real money."""
+        assert build().daraja_environment == "sandbox"

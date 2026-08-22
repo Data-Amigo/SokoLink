@@ -21,7 +21,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, field_validator
+from pydantic import AliasChoices, Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The repo root holds the single .env shared by the app, Alembic and the tests.
@@ -55,6 +55,12 @@ def _with_psycopg_driver(dsn: str) -> str:
         # Some providers still emit the legacy scheme.
         return dsn.replace("postgres://", "postgresql+psycopg://", 1)
     return dsn
+
+
+#: The placeholder secret key. Named as a constant so the production guard
+#: below and the default can never drift apart — a guard comparing against
+#: a copy of the string would stop working the moment one was edited.
+DEV_SECRET_KEY = "dev-only-insecure-key-change-me"
 
 
 class Settings(BaseSettings):
@@ -113,19 +119,79 @@ class Settings(BaseSettings):
     # NOTE: in production the credentials used for an STK push are the SELLER's,
     # stored encrypted on their PaymentMethod — not these. We are never in the
     # money path. The keys below exist only for our own sandbox testing.
-    daraja_consumer_key: str | None = None
-    daraja_consumer_secret: str | None = None
-    daraja_shortcode: str | None = None
-    daraja_passkey: str | None = None
+    #
+    # EACH ACCEPTS TWO NAMES. Safaricom's API is called Daraja and its product is
+    # called M-Pesa, so both prefixes are in circulation and a .env written from
+    # either habit is correct. With `extra="ignore"` a mismatched name would be
+    # discarded in silence — credentials that look configured and are not, which
+    # is the worst way to find out on a live payment.
+    daraja_consumer_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DARAJA_CONSUMER_KEY", "MPESA_CONSUMER_KEY"),
+    )
+    daraja_consumer_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DARAJA_CONSUMER_SECRET", "MPESA_CONSUMER_SECRET"),
+    )
+    daraja_shortcode: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DARAJA_SHORTCODE", "MPESA_SHORTCODE"),
+    )
+    daraja_passkey: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DARAJA_PASSKEY", "MPESA_PASSKEY"),
+    )
 
     #: Which Daraja host to call. Defaults to sandbox so a deploy that forgets
     #: to set it cannot move real money; production is opted into, never
     #: inherited.
-    daraja_environment: Literal["sandbox", "production"] = "sandbox"
+    daraja_environment: Literal["sandbox", "production"] = Field(
+        default="sandbox",
+        validation_alias=AliasChoices("DARAJA_ENVIRONMENT", "MPESA_ENVIRONMENT"),
+    )
 
     # ── Security ─────────────────────────────────────────────────────────────
-    #: Signs storefront link tokens and sessions. Required outside dev.
-    secret_key: str = Field(default="dev-only-insecure-key-change-me")
+    #: Signs sessions AND derives the key that encrypts sellers' Daraja
+    #: credentials — see app/secrets_vault.py. Refused in prod if left at the
+    #: default; see the validator below.
+    secret_key: str = Field(default=DEV_SECRET_KEY)
+
+    @model_validator(mode="after")
+    def _production_must_not_use_development_defaults(self) -> Settings:
+        """
+        Refuse to boot a production deploy that is still on dev placeholders.
+
+        THE SECRET KEY IS THE SERIOUS ONE. It signs sessions and, since W2, also
+        derives the key that encrypts sellers' Daraja credentials. Its default
+        value is a literal string in a public repository — so a prod deploy that
+        forgot to set it would encrypt other people's payment credentials with a
+        key anyone can read, and every session cookie would be forgeable.
+
+        Failing at startup is deliberate. A misconfiguration that boots happily
+        and is discovered later is discovered by an incident; this one is
+        discovered by a deploy log, before a single seller has trusted it.
+
+        Raises:
+            ValueError: If ``APP_ENV=prod`` and either the secret key or the
+                base URL is still a development placeholder.
+        """
+        if self.app_env != "prod":
+            return self
+
+        if self.secret_key == DEV_SECRET_KEY:
+            raise ValueError(
+                "SECRET_KEY is still the development default. Set a long random "
+                "value in production — it signs sessions and encrypts sellers' "
+                "M-Pesa credentials, and changing it later invalidates both."
+            )
+
+        if "localhost" in self.app_base_url or "127.0.0.1" in self.app_base_url:
+            raise ValueError(
+                "APP_BASE_URL still points at localhost. Set it to the public "
+                "URL — it builds the M-Pesa callback and every link preview."
+            )
+
+        return self
 
     @field_validator("app_base_url")
     @classmethod
