@@ -1,0 +1,29 @@
+{# Base layout for the buyer's storefront.
+
+   Kept deliberately thin. Anything added here loads on the STOREFRONT, which is
+   the one surface where payload size costs a buyer real money in mobile data.
+
+   The Tailwind CDN that used to sit here shipped ~3MB of JavaScript to generate
+   CSS in the browser on every visit. It is now one small stylesheet, no build
+   step — the same trade already made for the workspace in app.css.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+  {# Zoom stays enabled on purpose: buyers squint at product photos on small
+     screens, and disabling it is an accessibility failure. #}
+
+  <title>{% block title %}Biasharamall{% endblock %}</title>
+  <meta name="description" content="{% block description %}Shop straight from WhatsApp.{% endblock %}">
+
+  {% block meta %}{% endblock %}
+
+  <link rel="stylesheet" href="/static/css/storefront.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  {% block body %}{% endblock %}
+</body>
+</html>

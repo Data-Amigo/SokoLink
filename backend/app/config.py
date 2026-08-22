@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     )
 
     # ── P0: application ──────────────────────────────────────────────────────
-    app_name: str = "SokoLink"
+    app_name: str = "Biashara Mall"
     app_env: Literal["dev", "test", "prod"] = "dev"
 
     #: Public base URL, no trailing slash. Used to build storefront links.
@@ -95,7 +95,13 @@ class Settings(BaseSettings):
 
     # ── P1: AI (Gemini) ──────────────────────────────────────────────────────
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+
+    #: Vision + reasoning model for the price cascade.
+    #:
+    #: gemini-2.5-flash was retired for new API keys (404 NOT_FOUND, 2026-08-08).
+    #: 3.6-flash is current and is also what Project TIKTOK validated on for
+    #: Sheng/Swahili in-image text, which is the hard part of this job.
+    gemini_model: str = "gemini-3.6-flash"
 
     # ── P2: WhatsApp Cloud API ───────────────────────────────────────────────
     whatsapp_phone_number_id: str | None = None
@@ -103,11 +109,19 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str | None = None
     whatsapp_app_secret: str | None = None
 
-    # ── P4: M-Pesa Daraja ────────────────────────────────────────────────────
+    # ── W2: M-Pesa Daraja ────────────────────────────────────────────────────
+    # NOTE: in production the credentials used for an STK push are the SELLER's,
+    # stored encrypted on their PaymentMethod — not these. We are never in the
+    # money path. The keys below exist only for our own sandbox testing.
     daraja_consumer_key: str | None = None
     daraja_consumer_secret: str | None = None
     daraja_shortcode: str | None = None
     daraja_passkey: str | None = None
+
+    #: Which Daraja host to call. Defaults to sandbox so a deploy that forgets
+    #: to set it cannot move real money; production is opted into, never
+    #: inherited.
+    daraja_environment: Literal["sandbox", "production"] = "sandbox"
 
     # ── Security ─────────────────────────────────────────────────────────────
     #: Signs storefront link tokens and sessions. Required outside dev.

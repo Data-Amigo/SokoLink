@@ -1,0 +1,90 @@
+{# Enter the handle you want to connect.
+
+   ONE FIELD. Everything else about the account — display name, avatar, bio,
+   follower count — arrives free from the platform once it is verified. Asking
+   for any of it here is asking someone to type what we are about to fetch.
+
+   The reassurance is placed BEFORE the field, not after. "We never ask for your
+   password" answers the question a seller has while deciding whether to type,
+   which is too late if it sits below the button.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Connect your TikTok · Biashara Mall{% endblock %}
+
+{% block body %}
+<div class="container page">
+  <div style="max-width: 520px; margin-inline: auto">
+
+    <div class="page-head center">
+      <p class="eyebrow">Step 1 of 2</p>
+      <h1>Connect your TikTok</h1>
+      <p class="muted">We read your public posts to show you how they are doing.</p>
+    </div>
+
+    <div class="card card-lg">
+
+      {% if error %}
+        <div class="alert alert-error" role="alert" style="margin-bottom: var(--s-4)">
+          {{ error }}
+        </div>
+      {% endif %}
+
+      <div class="callout" style="margin-bottom: var(--s-5)">
+        <span class="callout-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="10" width="16" height="11" rx="2"/>
+            <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+          </svg>
+        </span>
+        <span>
+          <strong>No password needed.</strong> You will paste a short code into
+          your bio so we know the account is yours.
+        </span>
+      </div>
+
+      <form method="post" action="/accounts/connect" novalidate>
+        <div class="field">
+          <label class="label" for="handle">Your TikTok handle</label>
+          <div class="input-group">
+            {# The @ is decorative — the service strips it either way, so a
+               seller who types it and one who does not both succeed. #}
+            <span class="input-icon" aria-hidden="true">@</span>
+            <input class="input" type="text" id="handle" name="handle"
+                   value="{{ handle or '' }}"
+                   autocomplete="off" autocapitalize="off" spellcheck="false"
+                   required autofocus
+                   placeholder="zumamitumbabales">
+          </div>
+          <p class="field-hint">Without the @ — we will add it.</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block"
+                style="margin-top: var(--s-5); padding-block: 0.9rem">
+          Get my code
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M5 12h14M13 6l6 6-6 6"/>
+          </svg>
+        </button>
+      </form>
+
+      <div class="auth-trust">
+        <span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>
+          </svg>
+          Instagram and Facebook are coming. TikTok first.
+        </span>
+      </div>
+    </div>
+
+    <p class="center small" style="margin-top: var(--s-5)">
+      <a href="/dashboard" class="muted">Back to dashboard</a>
+    </p>
+
+  </div>
+</div>
+{% endblock %}

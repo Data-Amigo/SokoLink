@@ -1,4 +1,4 @@
-# SokoLink backend dependencies — pinned exactly so every machine (dev, CI,
+# Biashara Mall backend dependencies — pinned exactly so every machine (dev, CI,
 # Railway) runs identical code. Update deliberately, never by accident.
 #
 # Install:  .venv\Scripts\python -m pip install -r requirements.txt
@@ -20,8 +20,16 @@ sqlalchemy==2.0.44
 psycopg[binary]==3.2.10          # Postgres driver; binary = no compiler needed
 alembic==1.16.5                  # schema migrations — see alembic/
 
-# ── Templating (P3 storefront; installed now so the surface is ready) ────────
+# ── Templating (P3 storefront + dashboard) ───────────────────────────────────
 jinja2==3.1.6
+python-multipart==0.0.20         # HTML form bodies and file uploads
+
+# ── Auth (P3) ────────────────────────────────────────────────────────────────
+argon2-cffi==25.1.0              # password hashing; memory-hard, GPU-resistant
+pyjwt==2.10.1                    # signed session tokens
+
+# ── AI (P1) ──────────────────────────────────────────────────────────────────
+google-genai==2.17.0             # Gemini: the vision + audio price cascade
 
 # ── Testing ──────────────────────────────────────────────────────────────────
 pytest==8.4.2
@@ -30,3 +38,8 @@ httpx==0.28.1                    # powers FastAPI's TestClient
 # ── Quality gates (also run in CI) ───────────────────────────────────────────
 ruff==0.14.2                     # linting + formatting, one tool
 mypy==1.18.2
+
+# ── Payments (W2) ────────────────────────────────────────────────────────────
+cryptography==50.0.0             # Fernet, for sellers' Daraja credentials at rest.
+                                 # Already present transitively via pyjwt; pinned
+                                 # explicitly because we now depend on it directly.

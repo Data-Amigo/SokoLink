@@ -1,0 +1,163 @@
+{# One order, and the confirm action.
+
+   THE CODE THE BUYER TYPED IS SHOWN AS A CLAIM, not as a fact. The wording
+   matters: the seller is being asked to check it against their own M-Pesa
+   messages, not to rubber-stamp something the system already believes. On the
+   manual path this human check is the only verification that exists.
+#}
+{% extends "app_base.html" %}
+
+{% set claim = order.payments[-1] if order.payments else None %}
+
+{% block title %}{{ order.reference }} · Biasharamall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head">
+    <p class="tiny subtle"><a href="/orders">← All orders</a></p>
+    <h1 class="mono">{{ order.reference }}</h1>
+    <p class="muted">{{ order.created_at.strftime('%d %B %Y, %H:%M') }}</p>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+  {% endif %}
+
+  {% if order.status == 'awaiting_confirmation' %}
+    <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
+      <span class="badge badge-warn">Waiting for you</span>
+      <h3 style="margin-top: var(--s-2)">The buyer says they have paid</h3>
+
+      {% if claim and claim.claimed_code %}
+        <p class="muted small">They entered this code:</p>
+        <p><code class="mono strong code-value">{{ claim.claimed_code }}</code></p>
+      {% endif %}
+
+      <p class="muted small">
+        Check it against your own M-Pesa messages for
+        <strong>KES {{ '{:,}'.format(order.total_kes) }}</strong>
+        to <strong>{{ order.paid_to_number }}</strong>.
+        Only confirm once you have seen the money.
+      </p>
+
+      <form method="post" action="/orders/{{ order.reference }}/confirm"
+            class="stack-sm" style="margin-top: var(--s-4)">
+        <label class="label" for="receipt">
+          M-Pesa code <span class="subtle">(leave blank to accept the code above)</span>
+        </label>
+        <div class="input-group">
+          <input class="input" id="receipt" name="receipt"
+                 placeholder="{{ claim.claimed_code if claim and claim.claimed_code else 'e.g. SLK7XA2B9C' }}">
+          <button class="btn btn-primary" type="submit">Confirm payment</button>
+        </div>
+      </form>
+    </div>
+
+  {% elif order.status == 'pending' %}
+    <div class="card" style="margin-bottom: var(--s-5)">
+      <span class="badge badge-neutral">Unpaid</span>
+      <h3 style="margin-top: var(--s-2)">The buyer has not paid yet</h3>
+      <p class="muted small">
+        They were told to send KES {{ '{:,}'.format(order.total_kes) }}
+        to {{ order.paid_to_number }}. If the money has arrived anyway, confirm it here.
+      </p>
+
+      <form method="post" action="/orders/{{ order.reference }}/confirm"
+            class="stack-sm" style="margin-top: var(--s-4)">
+        <label class="label" for="receipt">M-Pesa code</label>
+        <div class="input-group">
+          <input class="input" id="receipt" name="receipt" placeholder="e.g. SLK7XA2B9C" required>
+          <button class="btn btn-primary" type="submit">Confirm payment</button>
+        </div>
+      </form>
+    </div>
+
+  {% elif order.status == 'paid' %}
+    <div class="card" style="margin-bottom: var(--s-5)">
+      <span class="badge badge-brand">Paid</span>
+      <h3 style="margin-top: var(--s-2)">KES {{ '{:,}'.format(order.total_kes) }} confirmed</h3>
+      <p class="muted small">
+        {{ order.paid_at.strftime('%d %B %Y, %H:%M') }}
+        {% if claim and claim.mpesa_receipt %}
+          · <code class="mono">{{ claim.mpesa_receipt }}</code>
+        {% endif %}
+      </p>
+    </div>
+
+  {% else %}
+    <div class="card" style="margin-bottom: var(--s-5)">
+      <span class="badge badge-danger">{{ order.status|capitalize }}</span>
+      <h3 style="margin-top: var(--s-2)">This order is closed</h3>
+    </div>
+  {% endif %}
+
+  <div class="card" style="margin-bottom: var(--s-5)">
+    <div class="card-header"><h3>Items</h3></div>
+    <div class="table-wrap">
+      <table class="table">
+        <tbody>
+          {% for item in order.items %}
+            <tr>
+              <td>
+                {{ item.title }}
+                {% if item.selected_variant %}
+                  <div class="tiny subtle">{{ item.selected_variant }}</div>
+                {% endif %}
+                <div class="tiny subtle">{{ item.price_display }}</div>
+              </td>
+              <td class="num">×{{ item.quantity }}</td>
+              <td class="num strong">KES {{ '{:,}'.format(item.line_total_kes) }}</td>
+            </tr>
+          {% endfor %}
+          {% if order.delivery_fee_kes %}
+            <tr>
+              <td>Delivery</td><td></td>
+              <td class="num">KES {{ '{:,}'.format(order.delivery_fee_kes) }}</td>
+            </tr>
+          {% endif %}
+          <tr>
+            <td class="strong">Total</td><td></td>
+            <td class="num strong">KES {{ '{:,}'.format(order.total_kes) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: var(--s-5)">
+    <div class="card-header"><h3>Buyer</h3></div>
+    <p class="strong">{{ order.buyer_name }}</p>
+    <p class="muted small">{{ order.buyer_phone }}</p>
+    {% if order.delivery_address %}
+      <p class="muted small">{{ order.delivery_address }}</p>
+    {% endif %}
+    {% if order.delivery_note %}
+      <p class="muted small">“{{ order.delivery_note }}”</p>
+    {% endif %}
+    <p class="tiny subtle" style="margin-top: var(--s-3)">
+      {% if order.whatsapp_opt_in %}
+        Agreed to a WhatsApp receipt on this number.
+      {% else %}
+        Did not opt in to a WhatsApp receipt.
+      {% endif %}
+    </p>
+
+    {% if order.buyer_phone %}
+      <a class="btn btn-secondary btn-sm" style="margin-top: var(--s-3)"
+         href="https://wa.me/{{ order.buyer_phone | replace('+','') | replace(' ','') }}?text={{ ('Hi ' ~ order.buyer_name ~ '! About your order ' ~ order.reference ~ '.') | urlencode }}">
+        Message the buyer
+      </a>
+    {% endif %}
+  </div>
+
+  {% if order.status in ('pending', 'awaiting_confirmation') %}
+    <form method="post" action="/orders/{{ order.reference }}/cancel">
+      <button class="btn btn-ghost btn-sm" type="submit">
+        Cancel this order and return the stock
+      </button>
+    </form>
+  {% endif %}
+
+</div>
+{% endblock %}

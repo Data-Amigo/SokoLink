@@ -1,4 +1,4 @@
-"""SokoLink backend application package.
+"""Biashara Mall backend application package.
 
 Layering, enforced by convention:
 

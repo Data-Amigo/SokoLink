@@ -1,4 +1,4 @@
-# Tooling configuration for the SokoLink backend.
+# Tooling configuration for the Biashara Mall backend.
 #
 # Dependencies live in requirements.txt (pinned exactly); this file configures
 # the quality gates only. Both ruff and mypy run in CI, and a failure blocks

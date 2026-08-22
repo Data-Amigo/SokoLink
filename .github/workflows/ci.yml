@@ -1,4 +1,4 @@
-# Continuous integration for SokoLink.
+# Continuous integration for Biashara Mall.
 #
 # Runs on every pull request and every push to main. Per the working agreement,
 # a red build does not merge — this workflow is what makes "CI green" in the
@@ -38,9 +38,9 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: sokolink
-          POSTGRES_PASSWORD: sokolink
-          POSTGRES_DB: sokolink_test
+          POSTGRES_USER: biashara
+          POSTGRES_PASSWORD: biashara
+          POSTGRES_DB: biashara_test
         ports:
           - 5432:5432
         # Without the health check the job races the container and fails
@@ -53,9 +53,9 @@ jobs:
 
     env:
       # The app URL is never connected to in CI; only its shape is validated.
-      DATABASE_URL: postgresql://sokolink:sokolink@localhost:5432/sokolink_app
+      DATABASE_URL: postgresql://biashara:biashara@localhost:5432/biashara_app
       # The test URL is real — the suite creates tables and writes rows here.
-      TEST_DATABASE_URL: postgresql://sokolink:sokolink@localhost:5432/sokolink_test
+      TEST_DATABASE_URL: postgresql://biashara:biashara@localhost:5432/biashara_test
       APP_ENV: test
       SECRET_KEY: ci-only-not-a-real-secret
 
@@ -92,4 +92,4 @@ jobs:
         # works. A migration that cannot run from empty is a broken deploy.
         run: alembic upgrade head
         env:
-          DATABASE_URL: postgresql://sokolink:sokolink@localhost:5432/sokolink_test
+          DATABASE_URL: postgresql://biashara:biashara@localhost:5432/biashara_test

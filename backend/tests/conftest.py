@@ -79,28 +79,53 @@ def engine() -> Generator[Engine, None, None]:
 @pytest.fixture(scope="session")
 def _schema(engine: Engine) -> Generator[None, None, None]:
     """
-    Ensure the schema exists before any database-backed test runs.
+    Rebuild the test schema from the models, once per session.
 
-    Uses ``create_all`` rather than running migrations: this proves the models
-    are internally consistent, and it is fast. Migrations are verified
-    separately by applying them to a real database.
+    DROPS then creates. ``create_all`` alone only adds MISSING tables — it never
+    alters an existing one, so the moment a column is added to a model the test
+    database silently drifts and every insert fails with a baffling
+    "column does not exist". That cost real debugging time on 2026-08-08.
 
-    Deliberately NOT autouse — it must only fire for tests that actually asked
-    for a database, so the suite still runs without one.
+    Dropping guarantees the schema always matches the models exactly. It is safe
+    because this only ever runs against TEST_DATABASE_URL, which
+    ``_test_database_url()`` above refuses to let equal the application
+    database.
+
+    Uses the models rather than migrations deliberately: this proves the models
+    are internally consistent, and it is fast. That migrations apply cleanly to
+    an empty database is a separate guarantee, proved by the ``alembic upgrade
+    head`` step in CI.
+
+    Deliberately NOT autouse — it must only fire for tests that asked for a
+    database, so the suite still runs without one.
     """
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield
 
 
 @pytest.fixture
 def connection(engine: Engine, _schema: None) -> Generator[Connection, None, None]:
-    """A connection with an open transaction that is always rolled back."""
+    """
+    A connection with an open transaction that is always rolled back.
+
+    The ``is_active`` guard matters here specifically because many tests in this
+    suite deliberately trigger IntegrityError to prove a constraint refuses.
+    Postgres aborts the transaction on such an error, so by the time this
+    fixture tears down there may be nothing left to roll back — and calling
+    rollback() anyway raises a SAWarning that would otherwise appear on every
+    rail test and train us to ignore warnings.
+
+    Isolation is unaffected either way: the connection is closed regardless, and
+    each test gets a fresh one.
+    """
     conn = engine.connect()
     trans = conn.begin()
     try:
         yield conn
     finally:
-        trans.rollback()
+        if trans.is_active:
+            trans.rollback()
         conn.close()
 
 

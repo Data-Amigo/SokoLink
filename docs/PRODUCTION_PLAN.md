@@ -1,364 +1,433 @@
-# SokoLink — Production Plan (Python)
+# Biashara Mall — Production Plan
 
-> **Status:** draft, 2026-08-05. Supersedes the 14-day TypeScript plan.
-> Mirrored into Notion once the connector is re-authorized.
-
----
-
-## The product
-
-```
-SokoLink
-│
-├── Soko Commerce          selling
-│   ├── Catalog
-│   ├── Orders
-│   ├── Payments
-│   └── WhatsApp Storefront
-│
-├── Soko Intel             getting seen
-│   ├── Scripts
-│   ├── Captions
-│   ├── Market Insights
-│   └── Competitor Intelligence
-│
-└── Soko AI                the conversation
-    ├── Customer Support
-    ├── Sales Agent
-    ├── Follow-ups
-    └── Order Assistance
-```
-
-*SokoLedger is parked — Phase 2, not in this plan.*
+> **Rewritten 2026-08-22.** The direction changed: we no longer pull a catalog
+> from social media. Sellers push it to us over WhatsApp.
+>
+> The reasoning behind the change is in
+> [`BUILD_LOG.md`](BUILD_LOG.md). The previous plan — analytics-first, with
+> WhatsApp as a late channel — is superseded in full. So is
+> [`BUILD_ORDER.md`](BUILD_ORDER.md).
 
 ---
 
-## The decision
+## 1. The direction
 
-**Build SokoLink fresh, in Python. `Project TIKTOK` is a reference, not a foundation.**
+**The old bet:** a seller connects a TikTok account, we scrape their feed, an AI
+reads a price off each video, they review the drafts, a storefront appears.
 
-TIKTOK proved the hard mechanics — a vision model reads a price off a TikTok
-cover, Gemini hears one spoken in Sheng, Daraja callbacks can be made idempotent.
-That knowledge carries. The code does not get adopted wholesale, because
-production SokoLink is a different product.
+**Why it was the wrong bet.** Every word of that is work the seller has to be
+talked into before they see anything. Connect an account. Prove you own it.
+Wait for a scrape. Review what the AI guessed. Five steps of friction, paid for
+by us per scrape, before the seller has a single thing to sell.
 
-**Language: Python — FastAPI + SQLAlchemy + Alembic + Pydantic.** Chosen because
-Fredrick is materially stronger in Python and can debug it unaided; on a solo
-build the maintainer's fluency beats framework elegance. Pydantic does double
-duty as API-boundary validation *and* LLM structured-output schema.
+**What we actually observed:** sellers already run catalogs inside WhatsApp
+groups. The photo and the caption already exist, already written by them, in the
+place they already work. We were paying a scraper to reconstruct — badly — a
+thing the seller would hand us directly if we simply asked.
 
-### TIKTOK modules worth reading before writing the equivalent
+So we stopped pulling and started receiving.
 
-| Module | What it already solved |
+```
+   OLD                                  NEW
+   ───                                  ───
+   Connect account                      Forward a post to the bot
+   Prove ownership (bio code)                    │
+   Wait for Apify scrape                         ▼
+   AI guesses which posts are products    "Added! Your store: …"
+   Seller reviews drafts
+   Storefront appears                     One step. Zero AI guessing
+                                          about intent — a forwarded
+   5 steps · we pay per scrape            post IS the intent.
+```
+
+**The intent problem disappears.** Scraping forced us to guess whether a video
+was a product at all. A forwarded post carries that answer: the seller chose to
+send it. The AI's job shrinks from *"is this a product, and what is it?"* to
+*"read this product card"* — a far easier task, on a far better image, because a
+catalog post is composed to be read.
+
+---
+
+## 2. The MVP, in three steps
+
+### Step 1 — Forward-to-catalog
+
+```
+Seller forwards photo + caption ──▶ WhatsApp webhook
+                                          │
+                                    download media
+                                          │
+                                    vision parse (Gemini)
+                                          │
+                                    Product (draft)
+                                          │
+              "Added! View your store: biasharamall.com/shop/zuma"
+```
+
+The seller never opens a browser to add stock. They forward; we reply with a
+link. That is the entire onboarding.
+
+### Step 2 — The in-WhatsApp storefront
+
+The buyer taps the link in a chat, channel or status. The **WhatsApp in-app
+browser** opens our server-rendered pages — not WhatsApp Flows, so there is no
+Meta approval dependency and it debugs in an ordinary browser.
+
+Browse → pick size/colour → add to cart → checkout.
+
+### Step 3 — The M-Pesa handshake
+
+Two paths, chosen by the seller's registered payment method. The money always
+goes buyer → seller; we are never in the middle.
+
+```
+Checkout form ──▶ phone + delivery + WhatsApp opt-in ──▶ Order (pending)
+                          │
+        ┌─────────────────┴──────────────────┐
+        │                                    │
+  Till/Paybill WITH                    Pochi la Biashara,
+  Daraja credentials                   or a number with no credentials
+        │                                    │
+   STK push ──▶ handset               "Pay to Pochi 07XX XXX XXX"
+        │                                    │
+   seller's callback                  buyer pays in M-Pesa,
+   (the ONLY truth)                   enters the code
+        │                                    │
+        │                            Order (awaiting_confirmation)
+        │                                    │
+        │                            seller confirms  ← only the seller
+        │                                    │
+        └──────────────┬─────────────────────┘
+                       │
+                 Order (paid) ──▶ receipt on page (always)
+                              ──▶ receipt on WhatsApp (opt-in)
+                              ──▶ order alert to seller (always)
+```
+
+---
+
+## 3. Decisions taken, and what they close off
+
+Four questions were answered on 2026-08-22. Each closes a design space, so each
+is recorded here with its reasoning.
+
+### Buyer identity: collected, never assumed
+
+**The webview has no idea who the buyer is.** A link opened from a status or a
+channel is just a browser tab — no Meta user id, no phone number, browser
+sandbox boundary. Any design that assumed *"we know the buyer because they came
+from WhatsApp"* was wrong.
+
+So checkout **asks**. One phone field does double duty: it is the STK push
+target, and — with an explicit checkbox — the opt-in for a WhatsApp receipt.
+
+> **The on-page receipt is not the fallback. It is the primary.** It is the only
+> receipt that works for every buyer regardless of opt-in, network, or Meta's
+> template rules. The WhatsApp receipt is the bonus.
+
+### Payments: the buyer pays the seller directly. We never touch the money.
+
+**A central paybill was proposed and rejected on 2026-08-22.** Aggregating
+buyers' payments into our own shortcode and settling out to sellers would make
+us a payment intermediary holding other people's money — in Kenya, a CBK / PSP
+licensing question. That is not a risk worth carrying to remove onboarding
+friction, and it is far cheaper to decline before there is float in an account
+than after.
+
+So money goes buyer → seller, and we are never in the path.
+
+**The seller's registered method decides how a payment is confirmed**, and there
+are two paths because Safaricom gives us no choice:
+
+| Seller's method | Checkout | Confirmation |
+|---|---|---|
+| **Pochi la Biashara** | shows the number, buyer pays in M-Pesa | manual: buyer enters the code, seller confirms |
+| Till / Paybill, no credentials | shows the number, buyer pays in M-Pesa | manual: buyer enters the code, seller confirms |
+| Till / Paybill **+ Daraja credentials** | STK push to the buyer's handset | automatic, via the seller's callback |
+
+> **Pochi la Biashara can never do STK push.** Daraja's STK Push and C2B APIs
+> work with Paybill and Buy Goods shortcodes only — Pochi is not one. Since a
+> large share of micro-sellers run on Pochi, **the manual confirmation path is
+> permanent and first-class, not a shim we delete later.** Any design that
+> treats STK as the real path and manual as a fallback is wrong for the
+> majority of our sellers.
+
+**What this costs, recorded so nobody is surprised:**
+
+1. **No per-transaction commission is possible.** A fee requires being in the
+   money path, and we have deliberately left it. **Monetisation is the
+   subscription tier**, not a cut of sales. `platform_fee`, `seller_payout_amount`
+   and `payout_status` are therefore *not* in the schema — they described an
+   aggregator we are not building.
+2. **Daraja credentials are custody.** A seller who wants automatic STK hands us
+   their shortcode passkey and consumer secret. Encrypted at rest, never logged,
+   and a breach exposes a seller's payment credentials. The manual path exists
+   partly so no seller is *forced* into this.
+3. **A manual confirmation is a claim, not proof.** The buyer's M-Pesa code is
+   unverified text until the seller checks it. Order status must say so:
+   `awaiting_confirmation` is not `paid`, and only the seller moves it.
+
+### Seller surface: WhatsApp captures, the web reports
+
+| WhatsApp bot | Web dashboard |
 |---|---|
-| `services/scraper.py` | Apify behind our own adapter, so the engine swaps in one file |
-| `agent/draft.py` | The price cascade: cover image, then Gemini watches **and listens**. Live at KES 500/550/550/600 |
-| `agent/sales.py` | Grounded Sheng-aware chat via context injection, not RAG |
-| `services/mpesa.py` · `api/daraja.py` | Daraja OAuth, STK push, **idempotent** callback |
-| `models/` + Alembic | DB rails: stock ≥ 0, unique video id, publish-needs-price |
+| Forward-to-catalog | Order history, tabular |
+| Instant order alerts | Inventory adjustment |
+| Simple status toggles | Receipts and exports |
+| Magic link delivery | Deep analytics |
 
-Also read in full: TIKTOK's `docs/CONCEPTS.md` and `docs/WORKPLAN.md`.
+A financial summary table rendered into a chat thread is a bad experience for
+everyone. Capture belongs where the seller already is; reporting belongs on a
+screen that can hold a table.
+
+### Variants: one stock pool, choice recorded as text
+
+A Nairobi micro-seller holds a pile of ten shoes and sells until the pile is
+gone. They do not track "Black 38" separately from "Black 40". Modelling
+per-variant stock would impose an inventory discipline the seller does not have
+and does not want.
+
+So: `stock` stays a flat integer on `Product`. The buyer's choice is captured as
+a descriptive string on the order line — `selected_variant: "Size 40 / Black"`.
+
+> This is **spike before schema** applied honestly. If a real pilot seller turns
+> out to need per-variant stock, we will have their actual data to design from.
+> Guessing now costs a migration either way; guessing simple costs less.
+
+### Seller auth: WhatsApp-first, magic link, social optional
+
+```
+Seller sends "START" to the bot
+          │
+   Bot asks shop name + location
+          │
+   Shop provisioned: /shop/<slug>, bound to seller_phone
+          │
+   Magic link ──▶ web dashboard, one-time token, no password
+          │
+   (optional, later) connect TikTok / Instagram
+```
+
+**TikTok is not an authentication wall.** It is an optional connection a seller
+may add from the dashboard. The bio-code verification we already built stays,
+and becomes opt-in rather than mandatory.
 
 ---
 
-## The buyer journey
+## 4. What survives, what is parked
 
-```
-WhatsApp chat
-      ↓
-Browse products
-      ↓
-WhatsApp in-app browser opens
-      ↓
-SokoLink storefront          ← mobile-first web, server-rendered
-      ↓
-Product selection
-      ↓
-M-Pesa checkout
-      ↓
-Return to WhatsApp
-```
+Nothing is deleted. Parked code stays on `p1-catalog` and can be revived.
 
-Rather than pushing buyers to a separate website, SokoLink launches a mobile-first
-web experience **from inside WhatsApp**.
+### Survives, and gets more valuable
 
-### Why this is the right call
+| Asset | Why it matters more now |
+|---|---|
+| `agent/draft.py` + `schemas/draft.py` | The cover-image vision parse **is** the forward-to-catalog parser. Now aimed at a composed catalog post rather than a video frame — an easier read on a better image. |
+| `services/media.py` | Storing our own copy of an image is exactly what WhatsApp media download needs. |
+| `models/job.py`, `services/jobs.py`, `worker.py` | Media download and vision parse must not run inside a webhook. Meta retries anything slow. |
+| `Product` money rails | `published_requires_price`, `stock_non_negative`, `price_positive`, `price_plausible` — untouched, and now guarding real payments. |
+| Storefront service + slug rules | The buyer-visibility rules were right; only the URL shape and the UI change. |
+| Auth, sessions, dashboard shell | Magic link is additive — the cookie and session layer is reused as-is. |
 
-- **No dependency on WhatsApp Flows approval.** The in-app browser is an ordinary
-  webview; it works the day the Cloud API is live.
-- **Full control of the interface.** No Meta component vocabulary to design around.
-- **Debuggable in a normal browser** — which is half the reason we chose Python.
-- **One surface, two jobs.** The same server-rendered pages are the in-app
-  storefront *and* the publicly indexable web presence. No second app to maintain.
+### Parked
 
-### The three hard parts (design these deliberately)
+| Asset | Status |
+|---|---|
+| `services/scraper.py`, `schemas/tiktok.py` | Apify profile scraping. Parked; the single-post path may return for "paste a TikTok link". |
+| `services/sync.py`, `services/analytics.py` | Profile sync and metric recording. Parked whole. |
+| `models/post.py`, `models/snapshot.py` | The content corpus. Parked — but see the note below. |
+| `services/verification.py`, `models/account_claim.py` | **Not parked — demoted.** Still works, now optional. |
 
-**1. Identity across the hop.** The storefront must know which buyer and which
-shop opened it, without the buyer logging in. The link carries a **signed,
-short-lived token** minted when the chat sends it.
+> **On the snapshot tables:** they were built because metric history cannot be
+> backfilled. That argument was correct and is now moot — we are not collecting
+> metrics. Parking them costs nothing; the tables stay in the schema, empty.
 
-> Never put a raw phone number in the URL. URLs leak — through history, referrer
-> headers, and buyers forwarding links to friends. A forwarded link must not
-> carry someone else's identity. Sign it, scope it, expire it.
+### Deliberately reversed
 
-**2. M-Pesa interrupts the browser.** The STK prompt takes over the same phone the
-webview is on. When the buyer returns, the page must already know what happened —
-so checkout **polls order status** and renders paid / failed / timed-out states
-honestly. The Daraja callback remains the only payment truth; the page merely
-reflects it.
+The previous plan stated: *"WhatsApp is not a dependency. The web platform
+stands alone… WhatsApp is added later as a channel, not as the foundation."*
 
-**3. Getting back to WhatsApp.** The return hop is part of the design, not an
-afterthought — a confirmed order should land the buyer back in the conversation
-with the seller, not stranded on a success page.
+**That is now false.** WhatsApp is the foundation: it is how a seller signs up,
+how they add stock, how they are alerted, and where the buyer starts. The web is
+the reporting surface, and the storefront that WhatsApp opens.
 
 ---
 
-## Rules carried forward (non-negotiable)
+## 5. Schema additions
+
+Five new tables. Everything else is already in place.
+
+Six new tables. Everything else is already in place.
+
+```
+Seller ──┬──▶ Product ──────────┐
+         │                      │
+         ├──▶ PaymentMethod     │   pochi | till | paybill (+ optional creds)
+         │                      │
+         └──▶ Order ──▶ OrderItem
+                 │
+                 └──▶ Payment  (one attempt; STK callback OR a buyer's claim)
+
+WaContact ──▶ WaMessage        (inbound dedupe — Meta redelivers)
+MagicToken                     (one-time dashboard login)
+```
+
+| Table | Holds | The one hard rule |
+|---|---|---|
+| `PaymentMethod` | seller's kind + number, encrypted Daraja creds if any | **Pochi can never STK.** The kind decides the checkout path. |
+| `Order` | total, buyer phone, delivery, status | Money is integer KES. `total_amount = sum(items) + delivery_fee`. **No platform fee — we are not in the money path.** |
+| `OrderItem` | product, qty, **price at time of order**, `selected_variant` | Price is **copied, never joined**. A seller editing a price must not rewrite history. |
+| `Payment` | checkout id, M-Pesa code, raw callback, `confirmed_by` | An STK callback is truth. **A buyer-entered code is a claim** until the seller confirms. |
+| `WaMessage` | inbound message id | Meta redelivers. A forwarded post must not create two products. |
+| `MagicToken` | hash, expiry, used_at | Single use. Hashed at rest, like a password. |
+
+**Order status is not a boolean.** The manual path needs a state that means
+*"someone says they paid and nobody has checked"*:
+
+```
+pending ──▶ awaiting_confirmation ──▶ paid
+   │              (manual path)         ▲
+   │                                    │
+   └──────── STK callback ──────────────┘
+                                    (automatic path)
+   └──▶ cancelled / failed
+```
+
+---
+
+## 6. The phases
+
+Each ends in something demonstrable. `W` for the WhatsApp-first line, to keep
+them distinct from the superseded P-phases in older documents.
+
+### W0 — Documents `w0-docs`
+
+This file, `CLAUDE.md`, the build log entry, `BUILD_ORDER.md` superseded.
+
+### W1 — The storefront, rebuilt `w1-storefront`
+
+*Goal: the shop in the mockup exists and works, minus payment.*
+
+- Move to `/shop/{slug}` — retires the "register the router last" rule and `RESERVED_SLUGS`
+- Drop the Tailwind CDN for a compiled stylesheet; the buyer pays for that payload in mobile data
+- Product cards, category pills, search, filters
+- Product detail with size/colour choice
+- **Cart** — server-side, cookie-keyed, survives a page reload
+- Fix `og:image` to an absolute URL — a link pasted into WhatsApp with no preview image is a wasted first impression
+- The first real tests the storefront has ever had
+
+**Done when:** a buyer browses, filters, picks a size, fills a cart and reaches a checkout page.
+
+### W2 — Orders and M-Pesa `w2-payments`
+
+*Goal: money moves from a buyer to a seller, both paths, us never in between.*
+
+- `PaymentMethod`, `Order`, `OrderItem`, `Payment` + migrations
+- Checkout: phone, delivery, opt-in → `Order(pending)`
+- **Path A — manual (Pochi, or any number with no credentials).** Show the
+  seller's number, take the buyer's M-Pesa code, `awaiting_confirmation`, seller
+  confirms. **Build this first: it works for every seller and needs no
+  credentials, so it is the one path that cannot be blocked.**
+- **Path B — STK (Till/Paybill + the seller's own Daraja credentials).** Client
+  behind our adapter; credentials encrypted at rest and never logged
+- **Idempotent callback** — the only automatic payment truth, and it is retried
+- Polling page: the STK prompt interrupts the browser, so the page must survive being backgrounded
+- On-page receipt, on both paths
+
+**Done when:** a Pochi seller takes an order end to end with no credentials at
+all — and a Till seller's sandbox STK completes automatically, with the same
+callback replayed five times changing nothing.
+
+### W3 — The WhatsApp bot `w3-whatsapp` — *blocked on sandbox credentials*
+
+- Webhook: verify token, **signature verification**, idempotency via `WaMessage`
+- `START` → shop name → slug provisioned → magic link
+- **Forward-to-catalog**: media download → job → vision parse → draft product → reply
+- Order alerts to the seller; receipts to opted-in buyers
+
+**Done when:** forwarding a real catalog post to the bot creates a product and replies with a working link.
+
+### W4 — The seller dashboard `w4-dashboard`
+
+- Order table, receipts, exports
+- Inventory adjustment, publish gate
+- **The publish flow — which does not exist today in any form** (see §7)
+
+**Done when:** a seller takes a forwarded post to published and watches an order arrive.
+
+### W5 — Social as lookup `w5-social`
+
+- "Saw it on TikTok?" — the buyer pastes a link and we match it to a product in this shop
+- Optional TikTok/Instagram connection from the dashboard
+
+### W6 — Pilot `w6-pilot`
+
+Rate limits, AI cost caps, secrets audit. Real sellers. One real order end to end.
+
+---
+
+## 7. The gap nobody had noticed
+
+**There is no publish flow anywhere in the application.** Nothing in `api/` or
+`services/` ever sets `is_published = True` or `ProductStatus.PUBLISHED`. The
+only two places in the repo that do are in `scripts/seed_demo_shop.py`.
+
+Ingestion writes `DRAFT` and nothing ever promotes it. A real seller today would
+sign up, add stock, and get a 404 storefront. The rule *"publish is a human
+gate"* was written down, and the gate itself was never built.
+
+It lands in W4, and W1 is built assuming it will exist.
+
+---
+
+## 8. Rules that do not change
 
 - **The agent proposes, code disposes.** The LLM never decides price, stock,
-  payment status, or consent.
+  payment status or consent.
 - **Publish is a human gate**, and still requires a price.
-- **The payment callback is the only payment truth**, processed idempotently —
-  Daraja retries, and so does Meta.
-- **No RAG** unless a genuine similarity problem appears (see the hook corpus).
-- **No AI framework.** Provider SDKs directly, Pydantic as the guardrail.
-- **One database per application.** Learned in TIKTOK 0.2; nearly re-learned on
-  2026-08-05 when a shared Railway DB almost got reset.
+- **We are never in the money path.** The buyer pays the seller. We record that
+  it happened; we do not hold, split or forward funds.
+- **The payment callback is the only automatic payment truth**, processed
+  idempotently — Daraja retries, and so does Meta.
+- **A buyer-entered M-Pesa code is a claim, not a payment.** Only the seller
+  moves an order from `awaiting_confirmation` to `paid`.
 - **Rails before agent.** Payment paths are built and tested before an agent may
   call them.
-- **Spike before schema.** Let real payloads drive the data model.
-- **Every file opens with a header comment**; comments explain *why*. Tests ship
-  with the logic.
+- **Money is integer KES**, and the price is of one unit *as sold*.
+- **Order lines copy the price.** Never join to a live product for history.
+- **Cache anything that costs money.** Each forwarded image is parsed once,
+  keyed by WhatsApp media id.
+- **No AI framework, no RAG.** Provider SDKs directly, Pydantic as the guardrail.
+- **One database per application**, and tests get their own.
+- **Spike before schema.**
 
 ---
 
-# Phase 1 — Soko Commerce
+## 9. Open risks
 
-*Nothing else matters until a seller can sell.*
-
-### P0 — Foundation `p0-foundation`
-
-- FastAPI + SQLAlchemy + Alembic + Pydantic; **its own Railway Postgres**.
-- Typed config via `pydantic-settings`; secrets only in `.env`.
-- `/health` with liveness and DB readiness.
-- pytest with transactional fixtures; CI green on every PR.
-- Retire the TypeScript scaffold.
-
-**Done when:** the app boots against its own database and CI is green.
+| Risk | Standing |
+|---|---|
+| **No per-transaction revenue** | Accepted, and the direct consequence of not holding funds. Monetisation is the subscription tier. Revisit only via a *licensed* PSP — never by routing funds through us. |
+| **Manual confirmation is unverified** | A buyer's M-Pesa code is a claim. The seller checks it. Fraud surface is the seller's own, as it is today in their WhatsApp group. |
+| **Custody of seller Daraja credentials** | Encrypted at rest, never logged. The manual path exists so no seller is forced to hand them over. |
+| Pochi sellers can never have automatic confirmation | Safaricom's limitation, not ours. Manual path is permanent and first-class. |
+| Meta business verification | Blocks W3 only. W1 and W2 proceed regardless. |
+| WhatsApp receipt requires opt-in | Mitigated: the on-page receipt is primary. |
+| Wordmark: "Biasharamall" vs "Biashara Mall" | **Open.** The mockup says one word; every document says two. |
 
 ---
 
-### P1 — Catalog `p1-catalog`
+## Appendix — parked evidence
 
-- **Spike first**: re-validate the Apify actor and payload shape.
-- `services/scraper.py` — Apify behind our own interface. Thumbnails stored by us;
-  TikTok CDN URLs expire.
-- Seller and Product models with DB-level rails.
-- **The price cascade**: caption hints → cover image → Gemini watches and listens.
-  Structured output against a Pydantic schema; the model drafts, publish is human.
-- Each video processed **once ever**, keyed by video id, cached.
+The spikes below remain valid and their evidence is saved in
+`backend/spikes/out/`. They supported the analytics and content engine, which is
+deferred rather than abandoned.
 
-**Done when:** a real handle yields drafted products with prices read from covers or spoken audio.
+- **Spike 05** — own-account analytics via Apify: fully confirmed
+- **Spike 06** — competitor discovery by keyword/hashtag: confirmed
+- **Canva MCP** and **capcut-cli**: both evaluated and viable for the content
+  engine when it returns
 
----
-
-### P2 — WhatsApp channel `p2-wa-channel`
-
-- Cloud API webhook: signature verification, `hub.challenge` handshake, receive.
-- Send: text, media, interactive messages, and the storefront link.
-- **Idempotency at the channel edge** — Meta redelivers; a replay must never
-  double-charge or double-reply.
-- Conversation session state keyed by phone number.
-- **Signed storefront links** — mint the scoped, expiring token described above.
-- Structured logging, one correlation id per conversation.
-
-**Done when:** a real WhatsApp message gets a correct reply, and a replayed webhook changes nothing.
-
----
-
-### P3 — WhatsApp Storefront `p3-storefront`
-
-*The mobile web experience launched from the chat.*
-
-- Server-rendered, mobile-first. Minimal client JS — buyers are on cheap Android
-  handsets over expensive data.
-- Token-scoped: the page knows the shop and the buyer without a login.
-- Catalogue → product detail → selection.
-- Designed empty, error and sold-out states. A stale price must be impossible.
-- **Publicly indexable shop pages** with correct OG/Twitter metadata, so a link
-  pasted into TikTok or WhatsApp previews properly — this is also the SEO surface.
-
-**Done when:** a buyer taps a link in WhatsApp, browses the shop in the in-app browser, and selects a product.
-
----
-
-### P4 — Orders + Payments `p4-payments`
-
-- Order state machine; Kenyan phone normalisation; consent as explicit data.
-- Daraja client: OAuth, STK push, status query.
-- **Idempotent callback** — callback is truth, stock decrements exactly once.
-- Checkout page polls order status and survives the STK interruption.
-- Return-to-WhatsApp on completion.
-
-**Done when:** a buyer completes a sandbox M-Pesa payment from the storefront and lands back in the chat with the order confirmed.
-
----
-
-# Phase 2 — Soko AI
-
-*The conversation layer, on top of a working shop.*
-
-### P5 — Sales Agent + Customer Support `p5-soko-ai`
-
-- Agent grounded **only** in the shop's published catalogue — context injection,
-  not RAG. Sheng-aware.
-- Natural buyer questions answered in chat: sizes, colours, availability, price.
-- Honest about sold-out; never invents a variant that does not exist.
-- Handoff to the seller when the agent cannot answer.
-- Tools (`check_stock`, `create_order`, `send_stk_push`) only after P4's rails
-  exist and are tested.
-
-**Done when:** a buyer asks real questions in WhatsApp, gets grounded answers, and is guided to a completed purchase.
-
----
-
-### P6 — Follow-ups + Order Assistance `p6-followups`
-
-- Order status on request — "where is my order?" answered from real state.
-- Post-purchase follow-up; delivery and support conversation.
-- Re-engagement and restock notifications: **opt-in only, STOP honoured, paced**.
-  The agent drafts, the seller approves, code enforces the caps.
-
-**Done when:** a buyer can ask about an order and get a truthful answer, and a seller can send an approved restock nudge without touching the send button twice.
-
----
-
-# Phase 3 — Soko Intel
-
-*Getting the seller seen. Independent of Phases 1–2 — can run in parallel once
-Commerce is stable.*
-
-### P7 — Competitor Intelligence + Market Insights `p7-intel-insights`
-
-- **Spike first**: pin down which Apify actor does keyword/niche creator search,
-  its payload, and per-run cost. Feasibility already proven by hand; the spike
-  exists so the real payload drives the schema.
-- Keyword → creators in that niche.
-- Benchmarking: followers, views, comments per creator, against the seller's own.
-- Outlier detection: posts performing far above their profile's average.
-- Traction tracking: store the metrics already in every Apify payload (views,
-  likes, comments, shares, saves) on every scrape. Zero extra cost.
-- **Premium gating**, enforced in code. Per-seat quotas. Result caching.
-- **Persist results into the hook corpus from day one**, before generation exists.
-  The corpus compounds; starting late costs months of data.
-
-**Done when:** a paying seller searches a keyword and sees a ranked, benchmarked list of creators — and a repeat search costs nothing.
-
----
-
-### P8 — Scripts + Captions `p8-intel-generation`
-
-- **Hook corpus** — hooks extracted from P7's outliers, tagged by niche, language
-  register (English / Swahili / Sheng), and the performance that earned their place.
-- **Hook + caption generation** grounded in that corpus plus the seller's real
-  stock. Not "write a viral hook", but "here are hooks that demonstrably worked in
-  this niche in Kenya — write one for this product."
-- **Script generation** built on the chosen hook.
-- **Client reports** — per-seller performance over time.
-- **Weekly digest** over WhatsApp.
-- **Feedback loop** — record which generated hooks the seller filmed and how those
-  videos performed. This signal is what makes the corpus better than a scrape.
-
-**Done when:** a seller receives a digest naming a real trend, with a hook and script grounded in what is working in their niche.
-
----
-
-## Where the moat is
-
-Existing hook tools are not tailored to Kenya — hooks are culture- and
-language-bound, and English-market "viral formulas" do not transfer. That gap is
-the defensible position, and the architecture is a loop:
-
-```
-niche search ──▶ outlier posts ──▶ extract hooks ──▶ hook corpus
-                                                          │
-   seller's stock ──────────────────────────────────────┤
-                                                          ▼
-                              Gemini writes a hook that has actually
-                              worked, in this niche, in this market
-```
-
-Every premium search feeds the corpus. The corpus improves generation. Better
-generation sells more seats. **A competitor can copy the feature but not the corpus.**
-
-> **We are grounding, not training.** Fine-tuning means adjusting weights —
-> expensive, slow, and needing far more data than we will have for a long time.
-> Grounding retrieves real high-performing hooks into the prompt as examples: a
-> fraction of the cost, and it improves the moment a new hook lands, with no
-> retraining cycle. Revisit fine-tuning only if grounding measurably stops being
-> enough.
-
-> **Where RAG might finally earn its place.** Fetching hooks *by niche tag* is a
-> plain lookup. But "find hooks similar in spirit to this product" is a genuine
-> similarity problem — the first in the project. Recognise it if it arrives;
-> don't reach for it early.
-
----
-
-# Phase 4
-
-### P9 — Hardening + pilot `p9-pilot`
-
-- Rate limits, Gemini video cost caps, secrets audit, incident-grade logs.
-- Onboard 2–3 real Kenyan sellers.
-- One real order, end to end.
-
-**Done when:** money moves for real, unattended.
-
----
-
-## Cost rails
-
-- **Apify, per-seller scraping** — at most once per day per seller, cached.
-- **Apify, niche search (P7)** — the only cost a user can trigger repeatedly at
-  will. Three guards, all required: **premium tier only** (cost tracks revenue),
-  **per-seat quotas** (a paid seat is not unlimited), **result caching** (never
-  pay twice for a keyword).
-- **Gemini video** — the priciest tier of the cascade. Once ever per video id.
-  TIKTOK hit the free-tier cap (20/day) on 2026-07-25; billing stays enabled.
-- **Drafting is on-demand**, split out of ingest so ingest stays cheap.
-
-> Gating niche search behind premium makes the most expensive feature the one
-> that proves willingness to pay. Commerce acquires sellers free; Intel is the
-> upgrade.
-
----
-
-## Deliberately not in scope
-
-- **SokoLedger** — Phase 2. On-device M-Pesa SMS capture and the Kotlin agent.
-  Order-level payment rails (P4) are not the same thing.
-- **Generative virtual try-on** — Phase 2, feature-flagged, cost-capped.
-- **Marketplace search across sellers** — needs seller density that does not exist.
-- **Fine-tuning on Kenyan hooks** — ground first; revisit only if that stops working.
-- **WhatsApp Flows** — the in-app browser makes it unnecessary. Revisit only if
-  Flows would demonstrably beat the webview.
-
----
-
-## Open questions
-
-1. **Does Aug 19 still mean anything?** That date came from the 14-day plan. P2
-   depends on Meta's approval clock, which is outside our control.
-2. **Premium pricing** — the original tiers (Freemium / Pro KSh 499 / Growth
-   KSh 999) predate Intel being this large. Intel is now the main upgrade reason.
-3. **Seller surface** — sellers manage stock and review drafts. In the WhatsApp
-   chat, in the same webview, or both?
-
-### Answered
-
-- ~~**WhatsApp Flows vs webview**~~ — **webview**, via the WhatsApp in-app
-  browser (2026-08-05). Removes the Flows approval dependency entirely.
-- ~~**Web interface**~~ — it is the storefront. One server-rendered surface serving
-  both the in-app browser and public discoverability.
-- ~~**Niche search feasibility**~~ — confirmed by hand against Apify, 2026-08-05.
+The pricing intent also stands: **Starter** free (WhatsApp store, M-Pesa
+checkout), **Growth** paid (content and intel). The pivot does not change what
+is free — it changes what is built first.

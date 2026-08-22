@@ -1,0 +1,212 @@
+{# Analytics — the post list.
+
+   DELIBERATELY PLAIN. This is the minimal version: totals, and a table of
+   posts newest first. The charts, the sortable columns and "your average"
+   land in the full step 5.
+
+   It is honest about three different states, and the middle one matters most:
+
+     no account      ── connect one first
+     nothing synced  ── verified, but we have not pulled anything yet
+     posts           ── the real thing
+
+   A creator shown a chart of zeroes concludes their content is worthless and
+   leaves. One told "press Sync" presses Sync.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Analytics · Biashara Mall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head cluster cluster-between">
+    <div>
+      <h1>Analytics</h1>
+      <p class="muted">How your content is actually performing.</p>
+    </div>
+
+    {% if accounts %}
+      {% set primary = accounts[0] %}
+      {% set wait = waits.get(primary.id) %}
+      <form method="post" action="/accounts/{{ primary.id }}/sync">
+        <button type="submit" class="btn btn-primary"
+                {% if wait %}disabled title="Synced recently — Apify bills per post"{% endif %}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/>
+          </svg>
+          {% if wait %}Synced today{% else %}Sync now{% endif %}
+        </button>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if error %}
+    <div class="alert alert-error" role="alert" style="margin-bottom: var(--s-4)">{{ error }}</div>
+  {% endif %}
+
+  {% if already_queued %}
+    <div class="alert alert-info" role="status" style="margin-bottom: var(--s-4)">
+      A sync is already running for this account. It will finish shortly.
+    </div>
+  {% endif %}
+
+  {% if watch_job %}
+    {# The poller replaces this once the job finishes. Written as a real
+       message rather than a bare spinner: a seller who knows a scrape takes a
+       minute waits; one watching a spinner reloads and presses again. #}
+    <div class="alert alert-info" role="status" style="margin-bottom: var(--s-4)"
+         data-watch-job="{{ watch_job }}">
+      <strong>Syncing…</strong>
+      <span data-job-message>Reading your posts from TikTok. This can take a minute.</span>
+    </div>
+  {% endif %}
+
+  {% if not accounts %}
+
+    <div class="card card-lg">
+      <div class="empty">
+        <div class="empty-icon" aria-hidden="true">📊</div>
+        <h3>Connect an account first</h3>
+        <p>We need somewhere to read your posts from before we can show you anything.</p>
+        <a href="/accounts/connect" class="btn btn-primary">Connect TikTok</a>
+      </div>
+    </div>
+
+  {% else %}
+
+    {# ── Totals ───────────────────────────────────────────────────────────
+       Computed from what we hold, not from the platform's own counters, so
+       the numbers always agree with the table underneath them. #}
+    {% set total_views = posts | sum(attribute='views') %}
+    {% set total_engagement = posts | map(attribute='engagement') | sum %}
+    <div class="grid grid-4">
+      <div class="stat">
+        <div class="stat-label">Followers</div>
+        <div class="stat-value">{{ "{:,}".format(accounts[0].follower_count or 0) }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Posts tracked</div>
+        <div class="stat-value">{{ "{:,}".format(posts | length) }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Views</div>
+        <div class="stat-value">{{ "{:,}".format(total_views) }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Engagement</div>
+        <div class="stat-value">{{ "{:,}".format(total_engagement) }}</div>
+      </div>
+    </div>
+
+    {% if not posts %}
+
+      {# THREE states, not two. "Synced, and you genuinely have no posts" is
+         different from "never synced", and collapsing them tells a creator to
+         press a button that costs us money and cannot help them. Found by
+         running a real sync against a brand-new account, 2026-08-19. #}
+      <div class="card card-lg" style="margin-top: var(--s-5)">
+        {% if accounts[0].last_synced_at %}
+          <div class="empty">
+            <div class="empty-icon" aria-hidden="true">🌱</div>
+            <h3>No posts on @{{ accounts[0].handle }} yet</h3>
+            <p>
+              We checked
+              {{ accounts[0].last_synced_at.strftime('%d %b at %H:%M') }} UTC and
+              found nothing to track. Post a video on TikTok, then sync again.
+            </p>
+            <a href="https://www.tiktok.com/@{{ accounts[0].handle }}"
+               target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+              Open your TikTok
+            </a>
+          </div>
+        {% else %}
+          <div class="empty">
+            <div class="empty-icon" aria-hidden="true">⏳</div>
+            <h3>Nothing synced yet</h3>
+            <p>
+              <strong>@{{ accounts[0].handle }}</strong> is verified. Press
+              <strong>Sync now</strong> to pull your posts.
+            </p>
+            <p class="tiny subtle">
+              We sync once a day — reading your posts costs us money each time.
+            </p>
+          </div>
+        {% endif %}
+      </div>
+
+    {% else %}
+
+      <div class="card card-flush" style="margin-top: var(--s-5)">
+        <div class="card-header cluster cluster-between">
+          <h3>Your posts</h3>
+          <span class="tiny subtle">
+            Last synced {{ accounts[0].last_synced_at.strftime('%d %b %H:%M') }} UTC
+          </span>
+        </div>
+
+        {# Wide tables scroll inside their own box — the page must never
+           scroll sideways on a phone. #}
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Posted</th>
+                <th>Caption</th>
+                <th class="num">Views</th>
+                <th class="num">Likes</th>
+                <th class="num">Comments</th>
+                <th class="num">Saves</th>
+                <th class="num">Eng. rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for post in posts %}
+                <tr>
+                  <td class="tiny">
+                    {{ post.posted_at.strftime('%d %b') if post.posted_at else '—' }}
+                    {% if post.is_pinned %}
+                      {# Flagged because a pinned post gathers views for months
+                         and would otherwise look like a runaway success. #}
+                      <span class="badge badge-warn">Pinned</span>
+                    {% endif %}
+                  </td>
+                  <td style="max-width: 26rem">
+                    {% if post.post_url %}
+                      <a href="{{ post.post_url }}" target="_blank" rel="noopener noreferrer">
+                        {{ (post.caption or 'No caption')[:70] }}{% if post.caption and post.caption|length > 70 %}…{% endif %}
+                      </a>
+                    {% else %}
+                      {{ (post.caption or 'No caption')[:70] }}
+                    {% endif %}
+                  </td>
+                  <td class="num strong">{{ "{:,}".format(post.views) }}</td>
+                  <td class="num">{{ "{:,}".format(post.likes) }}</td>
+                  <td class="num">{{ "{:,}".format(post.comments) }}</td>
+                  <td class="num">{{ "{:,}".format(post.saves) }}</td>
+                  <td class="num">
+                    {# None, not 0% — a post nobody has seen has an UNKNOWN
+                       rate, and 0% would be a lie about their content. #}
+                    {{ "{:.1f}%".format(post.engagement_rate * 100) if post.engagement_rate is not none else '—' }}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="tiny subtle center" style="margin-top: var(--s-4)">
+        Charts and sorting are coming. Your daily history is already being kept.
+      </p>
+
+    {% endif %}
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/js/sync.js" defer></script>
+{% endblock %}

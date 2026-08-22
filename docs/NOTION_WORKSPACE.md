@@ -1,256 +1,203 @@
 # Notion Workspace — build/update specification
 
-> **Purpose.** The Notion MCP connector would not stay connected during the
-> 2026-08-05 session, so this file carries everything Notion needs. Hand it to a
-> Claude session that *does* have Notion access, or work through it by hand.
+> **Purpose.** The Notion MCP connector keeps dropping, so this file carries
+> everything Notion needs. Hand it to a Claude session that *does* have Notion
+> access, or work through it by hand.
 >
-> **Do not create new databases.** They already exist — the IDs are below. The
-> job is to *update* them, not duplicate them.
+> **Revised 2026-08-16** for the growth-engine pivot.
+>
+> **Do not create new databases.** They exist — IDs below. The job is to update.
 
 ---
 
 ## Existing workspace
 
 Workspace **Bonganabob's HQ** · account `hello@bonganabob.com`
-Hub page: **SokoLink — Mission Control** — `3b3772fd-4e22-8153-8f7d-e305ab5ba18e`
+Hub page: **Biashara Mall — Mission Control** — `3b3772fd-4e22-8153-8f7d-e305ab5ba18e`
 
 | Database | Data source ID |
 |---|---|
-| Projects (data source named "SOKO LINK") | `3b2772fd-4e22-808b-8932-000b69754912` |
+| Projects | `3b2772fd-4e22-808b-8932-000b69754912` |
 | Tasks | `3b2772fd-4e22-8066-b77a-000b98667aa5` |
 | Docs | `3b2772fd-4e22-803c-a78b-000b9b007caf` |
 | Decisions | `ff8cebf7-0994-4bb5-818a-f4d2ffda97e8` |
 | Backlog | `6bd6e3e1-7b3b-455c-9e75-ad51619234ca` |
 
-**Tasks schema** already has: `Name` (title), `Status` (Not started / Up next / In progress / Done), `Due date`, `Project` (relation), `Day` (number), `Branch` (text), `PR` (url), `Milestone` (checkbox).
+**Tasks schema:** `Name` (title), `Status`, `Due date`, `Project` (relation),
+`Milestone No.` (number), `Branch` (text), `PR` (url), `Milestone` (checkbox).
 
 ---
 
-## What changed and why
+## What changed, and why
 
-The workspace currently describes a **14-day TypeScript build that no longer exists**. On 2026-08-05 the project was re-based:
+The plan built the store first. **A store nobody can find is worth nothing**, and
+a new storefront has no audience to send to it.
 
-- **Language changed to Python** (FastAPI/SQLAlchemy/Pydantic). Fredrick is stronger in Python and can debug it unaided.
-- **Structure changed to three pillars** — Soko Commerce, Soko Intel, Soko AI.
-- **WhatsApp became the interface**, via the in-app browser (not Flows).
-- **`Project TIKTOK` was found** — an existing Python implementation, now a reference.
+So the order reverses: lead with an **AI content and growth engine** that solves
+a daily, felt pain, and let the store be what that audience graduates into. The
+live site (`biasharamall.com`) already positions it exactly this way — AI Content
+Engine available now, Store as the vision.
 
----
-
-## Step 1 — Rename the `Day` field
-
-Rename Tasks field **`Day` → `Milestone No.`** (stays a number). The plan is no longer day-based.
-
----
-
-## Step 2 — Projects database
-
-Update the two existing rows and add one.
-
-| Row | Action | Name | Stage | Timeline |
-|---|---|---|---|---|
-| `c351e0cc-bd13-4ac5-8fdb-3bd8c40b1f7a` | rename | **Soko Commerce** | In Progress | start 2026-08-06 |
-| `05a6afb4-5c1b-4935-8b74-2eeade871584` | rename | **Soko Intel** | Planning | — |
-| — | create | **Soko AI** | Planning | — |
-
-**Soko Commerce** page body:
-> Selling. Catalog · Orders · Payments · WhatsApp Storefront.
-> A seller's TikTok feed becomes a live catalogue; buyers browse and pay inside WhatsApp. Nothing else matters until a seller can sell.
-
-**Soko Intel** page body:
-> Getting seen. Scripts · Captions · Market Insights · Competitor Intelligence.
-> Independent of WhatsApp — can be built in parallel while Meta business verification is pending. The hook corpus is the moat.
-
-**Soko AI** page body:
-> The conversation. Customer Support · Sales Agent · Follow-ups · Order Assistance.
-> Sits on top of a working shop. The agent proposes; code disposes.
+**Nothing built is discarded.** The Apify adapter, the Gemini seam, ownership
+verification, auth, the models and the working storefront all transfer. The
+storefront moves from "the product" to "what Growth users graduate into".
 
 ---
 
-## Step 3 — Tasks database
+## Step 1 — Projects
 
-**Delete or archive all 14 existing `Day N —` rows.** They describe the retired TypeScript plan.
+Rename the three pillars to match the live brand and the new order.
 
-Create these 10, all Status = `Not started` except P0.
-
-| No. | Name | Project | Branch | Milestone |
-|---|---|---|---|---|
-| 0 | P0 — Foundation | Soko Commerce | `p0-foundation` | ☐ |
-| 1 | P1 — Catalog + draft agent | Soko Commerce | `p1-catalog` | ☐ |
-| 2 | P2 — WhatsApp channel | Soko Commerce | `p2-wa-channel` | ☐ |
-| 3 | P3 — Storefront | Soko Commerce | `p3-storefront` | ☐ |
-| 4 | P4 — Orders + Payments | Soko Commerce | `p4-payments` | ☑ |
-| 5 | P5 — Sales agent + support | Soko AI | `p5-soko-ai` | ☐ |
-| 6 | P6 — Follow-ups + order assistance | Soko AI | `p6-followups` | ☐ |
-| 7 | P7 — Competitor intelligence | Soko Intel | `p7-intel-insights` | ☐ |
-| 8 | P8 — Scripts + captions | Soko Intel | `p8-intel-generation` | ☐ |
-| 9 | P9 — Hardening + pilot | Soko Commerce | `p9-pilot` | ☑ |
-
-Set **P0 to `In progress`**.
-
-### Task page bodies
-
-Each uses the format: `## Tasks` bullets, `## Done when`, `## Notes`.
-
-**P0 — Foundation**
-- FastAPI + SQLAlchemy + Alembic + Pydantic
-- **Its own Railway Postgres** — the current one holds POC data
-- Typed config via `pydantic-settings`; secrets only in `.env`
-- `/health` with liveness and DB readiness
-- pytest with transactional fixtures; CI green on every PR
-- Retire the TypeScript scaffold
-
-*Done when:* the app boots against its own database and CI is green.
-*Notes:* One database per application. This rule was learned in TIKTOK 0.2 and nearly re-learned on 2026-08-05 when a shared Railway DB almost got reset.
-
-**P1 — Catalog + draft agent**
-- **Spike first**: re-validate the Apify actor and payload shape
-- Scraper behind our own adapter; store thumbnails ourselves (TikTok CDN URLs expire)
-- Seller and Product models with DB-level rails
-- **The price cascade**: caption hints → cover image → Gemini watches *and listens*
-- Each video processed **once ever**, keyed by video id, cached
-
-*Done when:* a real handle yields drafted products with prices read from covers or spoken audio.
-*Notes:* Captions carry no prices — verified against 24 real captions (0 mention KSh). The price must come from the media. Proven live in TIKTOK at KES 500/550/550/600.
-
-**P2 — WhatsApp channel**
-- Cloud API webhook: signature verification, `hub.challenge`, receive
-- Send text, media, interactive messages, storefront links
-- **Idempotency at the channel edge** — Meta redelivers
-- Conversation session state keyed by phone number
-- **Signed, scoped, short-lived storefront link tokens**
-
-*Done when:* a real WhatsApp message gets a correct reply, and a replayed webhook changes nothing.
-*Notes:* Blocked on Meta business verification. Developer account approved.
-
-**P3 — Storefront**
-- Server-rendered, mobile-first, minimal client JS
-- Token-scoped: knows shop and buyer without a login
-- Catalogue → product detail → selection
-- Designed empty / error / sold-out states
-- **Publicly indexable pages** with OG metadata — this is also the SEO surface
-
-*Done when:* a buyer taps a link in WhatsApp, browses in the in-app browser, and selects a product.
-*Notes:* Uses the ordinary WhatsApp in-app browser, **not** WhatsApp Flows — no approval dependency, full control of the UI.
-
-**P4 — Orders + Payments** 🏁
-- Order state machine; Kenyan phone normalisation; consent as data
-- Daraja client: OAuth, STK push, status query
-- **Idempotent callback** — callback is truth, stock decrements exactly once
-- Checkout polls order status and survives the STK interruption
-- Return-to-WhatsApp on completion
-
-*Done when:* a buyer completes a sandbox M-Pesa payment from the storefront and lands back in the chat confirmed.
-*Notes:* **Rails before agent.** Built and tested with a plain button before any agent may call it.
-
-**P5 — Sales agent + support**
-- Agent grounded **only** in the published catalogue — context injection, not RAG
-- Sheng-aware; honest about sold-out; never invents a variant
-- Handoff to the seller when it cannot answer
-- Tools (`check_stock`, `create_order`, `send_stk_push`) only after P4
-
-*Done when:* a buyer asks real questions, gets grounded answers, and is guided to a completed purchase.
-
-**P6 — Follow-ups + order assistance**
-- Order status on request, answered from real state
-- Post-purchase follow-up and delivery conversation
-- Re-engagement / restock: **opt-in only, STOP honoured, paced**; agent drafts, seller approves
-
-*Done when:* a buyer gets a truthful order answer, and a seller sends an approved restock nudge.
-
-**P7 — Competitor intelligence + market insights**
-- **Spike first**: which Apify actor does keyword/niche creator search, its payload, its cost
-- Keyword → creators in that niche
-- Benchmarking: followers, views, comments vs the seller's own
-- Outlier detection
-- Traction tracking — metrics already in every Apify payload, zero extra cost
-- **Premium gating enforced in code**, per-seat quotas, result caching
-- **Persist results into the hook corpus from day one**
-
-*Done when:* a paying seller searches a keyword and sees a ranked benchmarked list — and a repeat search costs nothing.
-*Notes:* Does **not** depend on Meta. This is the work that keeps moving while verification is pending. Feasibility already confirmed by hand.
-
-**P8 — Scripts + captions**
-- **Hook corpus** — hooks from P7's outliers, tagged by niche + language register + performance
-- Hook and caption generation grounded in the corpus + the seller's real stock
-- Script generation on the chosen hook
-- Client reports; weekly digest over WhatsApp
-- **Feedback loop** — which hooks were filmed, and how they performed
-
-*Done when:* a seller receives a digest with a hook and script grounded in what works in their niche.
-
-**P9 — Hardening + pilot** 🏁
-- Rate limits, Gemini video cost caps, secrets audit, incident-grade logs
-- Onboard 2–3 real Kenyan sellers
-- One real order, end to end
-
-*Done when:* money moves for real, unattended.
-
----
-
-## Step 4 — New Decisions rows
-
-Add these to the Decisions database (`Area`, `Status: Active`, `Date: 2026-08-05`).
-
-**1. Python, not TypeScript** — *Area: Infra / Deploy*
-> The two-week plan assumed a greenfield TypeScript build. Both assumptions were wrong: a working Python implementation already existed (`Project TIKTOK`), and Fredrick is materially stronger in Python.
-> On a solo build the maintainer's ability to debug unaided outweighs framework elegance. Pydantic replaces Zod and does double duty as the LLM structured-output schema.
-> The TypeScript scaffold built on 2026-08-05 was retired uncommitted.
-
-**2. WhatsApp in-app browser, not Flows** — *Area: Architecture*
-> The buyer journey is: WhatsApp chat → browse → **in-app browser opens** → SokoLink storefront → M-Pesa checkout → return to WhatsApp.
-> Chosen over WhatsApp Flows because it removes any dependency on Flows approval, gives full control of the interface, and debugs in an ordinary browser.
-> It also collapses two surfaces into one: the same server-rendered pages serve the in-app storefront *and* public search discoverability.
-> **Three hard parts:** identity across the hop (signed, scoped, short-lived token — never a phone number in a URL); M-Pesa interrupting the browser (checkout polls order status); and the return hop back into the conversation.
-
-**3. Grounding, not training** — *Area: AI / Parsing*
-> Hook generation is grounded on a corpus of real high-performing Kenyan hooks retrieved into the prompt as examples. We are **not** fine-tuning a model.
-> Fine-tuning is expensive, slow, and needs far more data than we will have. Grounding costs a fraction and improves the moment a new hook lands, with no retraining cycle.
-> Revisit only if grounding measurably stops being enough.
-
-**4. The hook corpus is the moat** — *Area: Product*
-> Existing hook tools are not tailored to Kenya — hooks are culture- and language-bound, and English-market "viral formulas" do not transfer.
-> The loop: niche search → outlier posts → extract hooks → corpus → generation grounded in what worked *here*. Every premium search feeds it.
-> A competitor can copy the feature but not the corpus.
-
-**5. Niche search is premium-only** — *Area: Product*
-> It is the only expensive operation a user can trigger repeatedly at will. Three guards, all required: **premium tier** (cost tracks revenue), **per-seat quotas**, **result caching**.
-> This also makes the most expensive feature the one that proves willingness to pay. Commerce acquires sellers free; Intel is the upgrade.
-
-**6. Project TIKTOK is a reference, not a foundation** — *Area: Architecture*
-> `Data-Amigo/PROJECT_TIKTOK` — 63 commits, 110 passing tests, live on Railway. It proved the hard mechanics: reading a price off a cover, hearing one in Sheng, idempotent Daraja callbacks.
-> Its code is **read and adapted, never copied blind and never reinvented**. Production SokoLink is a different product: WhatsApp is the interface rather than the exit, and Soko Intel does not exist in TIKTOK at all.
-> Modules worth opening first: `services/scraper.py`, `agent/draft.py`, `agent/sales.py`, `services/mpesa.py`, `api/daraja.py`. Its `docs/CONCEPTS.md` and `docs/WORKPLAN.md` are worth reading in full.
-
----
-
-## Step 5 — Backlog additions
-
-Existing Backlog rows stay. Add:
-
-| Item | Category | Priority | Source |
+| Row ID | New name | Stage | Body |
 |---|---|---|---|
-| Web frontend port to Python templates | Tech debt | Low | 2026-08-05 |
-| Fine-tuning on Kenyan hooks | Idea | Low | 2026-08-05 |
-| WhatsApp Flows (native screens) | Idea | Low | 2026-08-05 |
-
-**Web frontend port** — TIKTOK's Next.js frontend is small (10 routes, 4 components, ~71 kb, three dependencies). Frozen, not ported. Once WhatsApp is the primary surface the web UI's job shrinks. Revisit only if it still earns the work.
-
-**Fine-tuning** — see the grounding decision. Only if grounding measurably stops being enough.
-
-**WhatsApp Flows** — the in-app browser makes it unnecessary. Revisit only if Flows would demonstrably beat the webview.
+| `c351e0cc-bd13-4ac5-8fdb-3bd8c40b1f7a` | **Biashara Commerce** | Planning | The store. Catalog · Orders · Payments · WhatsApp Storefront. Largely built — storefront and handoff work. Now what Growth users graduate into, not the entry point. |
+| `05a6afb4-5c1b-4935-8b74-2eeade871584` | **BiasharaIntel** | In Progress | Analytics and competitor intelligence. **The paid tier.** Own-account trends, niche discovery, benchmarking, outliers. Feeds the hook corpus. |
+| `3b7772fd-4e22-81e4-9261-ea0ecd5857fb` | **AI Content Engine** | In Progress | Hooks · Scripts · Captions · CTAs · Content ideas. The reason people sign up. Grounded in the hook corpus — the moat. |
 
 ---
 
-## Step 6 — Docs database
+## Step 2 — Tasks
 
-Add links to the new documents (all in the repo under `docs/`):
+**Retire** the P0–P9 rows (prefix `[Retired — commerce-first plan]`, set Done).
+Keep P0/P1 marked Done rather than retired: that work shipped and still stands.
 
-| Name | Type |
-|---|---|
-| Production Plan (P0–P9) | Strategy |
-| Business Document | Spec |
-| Technical Document — Architecture & Stack | Spec |
-| Ways of Working v2 | Guideline |
+Create these. Statuses: G0 `In progress`, rest `Not started`.
 
-Mark the old **SokoLink — Two-Week Build Plan** as superseded.
+| No. | Name | Project | Branch |
+|---|---|---|---|
+| 0 | G0 — Dashboard foundation | AI Content Engine | `g0-dashboard` |
+| 1 | G1 — My Analytics | BiasharaIntel | `g1-analytics` |
+| 2 | G2 — BiasharaIntel: competitors | BiasharaIntel | `g2-intel` |
+| 3 | G3 — Hooks, scripts and captions | AI Content Engine | `g3-content` |
+| 4 | G4 — Reports and the weekly nudge | AI Content Engine | `g4-reports` |
+| 5 | C1 — Catalogue dashboard | Biashara Commerce | `c1-catalogue` |
+| 6 | C2 — Storefront polish | Biashara Commerce | `c2-storefront` |
+| 7 | C3 — WhatsApp channel ⏳ | Biashara Commerce | `c3-whatsapp` |
+| 8 | C4 — Orders and payments 🏁 | Biashara Commerce | `c4-payments` |
+| 9 | P — Hardening and pilot 🏁 | Biashara Commerce | `p-pilot` |
+
+### Task bodies
+
+**G0 — Dashboard foundation**
+- Signup / login / logout routes and pages (Jinja2 + HTMX + Tailwind)
+- Session cookie handling, `HttpOnly`, `current_account` dependency
+- Dashboard shell: navigation, empty states, account menu
+- Connect-account flow with bio-code verification wired to real screens
+- Apply the naming decision (Biashara Mall → Biashara Mall, if taken)
+
+*Done when:* a stranger signs up in a browser, verifies a TikTok account, and lands on a dashboard.
+
+*Note:* the auth **service layer exists and is tested — there are no pages.** Today a seller can only be created from Python. This is the gap.
+
+**G1 — My Analytics**
+- Metric snapshots: views, likes, comments, shares, followers — captured per sync **as history**
+- Account trend: followers and total views over time
+- Post table: best and worst performers, sortable
+- "Your average" baseline that everything else is measured against
+
+*Done when:* a verified creator sees their own numbers, and a second sync a day later shows a visible trend.
+
+⚠️ **START THE TIME SERIES IMMEDIATELY.** `Product.views` is a single number overwritten each sync. It answers "how many views?" but not **"is my traction growing?"** — which is the whole question a creator pays for. A `PostMetricSnapshot` table must start filling the day this ships: **history cannot be backfilled**, and every day without it is data we can never recover.
+
+**G2 — BiasharaIntel: competitors**
+- **Spike first, and it opens the milestone:** which Apify actor does keyword/hashtag creator search, what it returns, **what one search costs**
+- Keyword/hashtag → creators in that niche
+- Benchmark table against the creator's own G1 baseline
+- Outlier detection — the posts worth studying, and G3's input
+- **Persist results into the hook corpus from day one**, before generation exists
+
+*Done when:* a Growth user searches a keyword and sees a ranked benchmarked list — and the same search again costs nothing.
+
+⚠️ **Three cost guards, all required:** Growth tier only (in code, not the UI); per-seat monthly quota; result caching. Every guard is guesswork until the spike produces a real per-search cost.
+
+**G3 — Hooks, scripts and captions**
+- Hook corpus from G2's outliers, tagged by niche, language register, performance
+- Hook generation grounded in the corpus + the creator's own niche
+- Script generation with a shot list
+- Caption + CTA generation in the register the niche actually uses
+- Content ideas as a **queue**, not a one-shot — the question is "what do I post this week"
+- Feedback loop: which hooks got filmed, and how they performed
+
+*Done when:* a creator gets a hook, script and caption referencing real, recent, local performance — and can film from it without editing.
+
+**This is the moat.** Hooks are culture- and language-bound; an English-market "viral formula" does not transfer to Nairobi. Searches feed the corpus, the corpus improves generation, better generation sells seats. A competitor can copy the feature but not the corpus.
+
+**Grounding, not training** — real hooks retrieved into the prompt as examples. Fine-tuning is slower, costlier, needs data we will not have, and does not improve the instant a new hook lands.
+
+**G4 — Reports and the weekly nudge**
+- Weekly digest: your traction, one niche trend, one ready-to-film hook
+- Client-facing performance report
+- Email now; WhatsApp when Meta verification clears
+
+**C1 — Catalogue dashboard**
+The one genuinely missing piece of commerce. Ingestion, the price cascade, the storefront and the WhatsApp handoff all work.
+- Draft review queue — **low-confidence parses first**, because that is where a wrong price hides
+- Inline edit of price, title, sizes, stock without a reload
+- Publish gate visible and explained — a disabled button that says why
+- Manual upload path (photo → same vision agent)
+- Single-link ingestion (the scraper supports it; nothing calls it)
+
+**C2 — Storefront polish**
+Built and browsable. Remaining: OG metadata for shared links, empty/error states, the shop page as an SEO surface.
+
+**C3 — WhatsApp channel** ⏳ *Gated on Meta business verification — their clock.*
+Webhook + signature verification + **idempotency** (Meta redelivers). Conversation state, signed storefront links. Twilio evaluated if Meta stalls.
+
+**C4 — Orders and payments** 🏁
+Order state machine, Daraja client, **idempotent callback** — callback is truth. Checkout survives the STK prompt interrupting the browser.
+
+**P — Hardening and pilot** 🏁
+Rate limits, AI cost caps, secrets audit, incident-grade logs. Real Kenyan creators. One real order end to end.
+
+---
+
+## Step 3 — New Decisions rows
+
+**1. Lead with the growth engine, not the store** — *Product · 2026-08-16*
+> A store nobody can find is worth nothing, and a new storefront has no audience to send to it.
+>
+> A creator who needs to know what to post **today** needs it today; a creator who needs a store needs it eventually. Content is a daily felt pain with an obvious did-it-work signal. Commerce is a decision made once you already have attention to convert.
+>
+> So the product becomes an AI content and growth engine that ends in a store, rather than a store that offers content tools. Nothing built is discarded — the storefront becomes what Growth users graduate into, which is how the live site already positions it.
+
+**2. Intel is the paid tier, at $10/month** — *Product · 2026-08-16*
+> Published on biasharamall.com: Starter free forever (WhatsApp store + M-Pesa), Growth $10/month (AI content engine + BiasharaIntel + priority support).
+>
+> This settles a question the old plan left open. It matters because Intel is also the only feature a user can trigger repeatedly at will, so **cost now tracks revenue by design rather than by hope**.
+>
+> The economics still need proving: at $10/month a user running unlimited niche searches and video-tier drafts can cost more than they pay. G2 opens with a spike that measures the real per-search cost, because every guard is guesswork until that number exists.
+
+**3. Capture metric history from day one** — *Data model · 2026-08-16*
+> `Product.views` is a single number overwritten on every sync. It answers "how many views does this have?" but not **"is my traction growing?"** — which is the entire question a creator is paying to answer.
+>
+> A `PostMetricSnapshot` table (post, metric, value, captured_at) must start filling the day G1 ships. **History cannot be backfilled.** Every day without it is a day of data we can never recover.
+>
+> Same argument as the hook corpus, and it applies sooner.
+
+**4. Canva and CapCut are destinations, not integrations** — *Architecture · 2026-08-16*
+> The flow diagram shows Canva and CapCut, and it would be easy to read those as things we build.
+>
+> We produce the words and the plan — hook, script, caption, shot list, CTA — and the creator takes them into whichever tool they already use. Canva's API is limited and CapCut has no public one; building editor integrations is a separate and much larger project.
+>
+> Stated explicitly so nobody assumes it is in scope.
+
+---
+
+## Step 4 — Backlog additions
+
+| Item | Category | Priority |
+|---|---|---|
+| Canva / CapCut integrations | Idea | Low |
+| Fine-tuning on Kenyan hooks | Idea | Low |
+| Twilio as WhatsApp fallback | Feature | Medium |
+| Free-tier Intel allowance | Feature | High |
+
+**Free-tier Intel allowance** — a free tier with zero Intel may not convert; one with unlimited Intel cannot pay for itself. A small monthly allowance is the obvious middle, but the number needs the G2 cost spike first.
+
+---
+
+## Step 5 — Docs
+
+Update **Production Plan** with the revised content from `docs/PRODUCTION_PLAN.md`.
+Update **Codebase** — the storefront, ingestion, media and verification all shipped since it was last written.
+Add a **Naming decision** doc if the rename is taken.

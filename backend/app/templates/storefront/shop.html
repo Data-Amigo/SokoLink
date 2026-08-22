@@ -1,0 +1,230 @@
+{# The shop page — the first thing a buyer sees after tapping a WhatsApp link.
+
+   Server-rendered with no JavaScript framework: this opens inside the WhatsApp
+   in-app browser on a phone, and every kilobyte is the buyer's money. Search,
+   filters and sort are plain GET forms, so they work with JS unavailable and
+   leave a shareable URL behind.
+#}
+{% extends "base.html" %}
+
+{% set cart_count = cart.item_count if cart else 0 %}
+
+{% block title %}{{ seller.display_name }} · Biasharamall{% endblock %}
+{% block description %}{{ seller.bio or "Shop " ~ seller.display_name ~ " on Biasharamall." }}{% endblock %}
+
+{% block meta %}
+  {# Absolute URLs, always: Meta's crawler fetches this page from outside and
+     has no origin to resolve a relative path against. A preview with no image
+     is a wasted first impression in the chat that sent the buyer here. #}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ seller.display_name }}">
+  <meta property="og:description" content="{{ seller.bio or 'Shop on Biasharamall' }}">
+  {% if seller.avatar_url %}<meta property="og:image" content="{{ seller.avatar_url | media_abs }}">{% endif %}
+  <meta name="twitter:card" content="summary_large_image">
+{% endblock %}
+
+{% block body %}
+<div class="shell">
+
+  <header class="topbar">
+    {% if seller.avatar_url %}
+      <img class="topbar-logo" src="{{ seller.avatar_url | media }}" alt="">
+    {% endif %}
+    <div class="topbar-id">
+      <div class="topbar-name">{{ seller.display_name }}</div>
+      <div class="topbar-verified">
+        <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path d="M8.5 13.6 5 10.1l1.4-1.4 2.1 2.1 5-5L15 7.2z"/>
+          <path d="M10 1.7 12 3.3l2.5-.2.9 2.4 2.2 1.3-.7 2.4.7 2.4-2.2 1.3-.9 2.4-2.5-.2-2 1.6-2-1.6-2.5.2-.9-2.4-2.2-1.3.7-2.4-.7-2.4 2.2-1.3.9-2.4L8 3.3z" opacity=".18"/>
+        </svg>
+        Powered by Biasharamall
+      </div>
+    </div>
+
+    <details class="topbar-search">
+      <summary class="icon-btn" role="button" aria-label="Search this shop">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+        </svg>
+      </summary>
+      <form class="field-row" method="get" action="/shop/{{ seller.slug }}" style="padding:12px 0 0">
+        <input class="field" type="search" name="q" value="{{ search or '' }}"
+               placeholder="Search {{ seller.display_name }}" aria-label="Search products">
+        {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+        <button class="btn" type="submit">Search</button>
+      </form>
+    </details>
+  </header>
+
+  <main id="main">
+
+    <section class="section">
+      <div class="hero">
+        <a class="hero-cart" href="/shop/{{ seller.slug }}/cart" aria-label="Basket, {{ cart_count }} item{{ '' if cart_count == 1 else 's' }}">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/>
+          </svg>
+          {% if cart_count %}<span class="hero-cart-count">{{ cart_count }}</span>{% endif %}
+        </a>
+
+        <p class="hero-eyebrow">WhatsApp mini store</p>
+        <h1>{{ seller.bio or "Shop straight from WhatsApp." }}</h1>
+        <p>Browse, add what you like, checkout, then receive a shareable receipt.</p>
+
+        <div class="chips">
+          {% if seller.location %}<span class="chip">{{ seller.location }}</span>{% endif %}
+          <span class="chip">Delivery</span>
+          <span class="chip">M-Pesa</span>
+        </div>
+      </div>
+    </section>
+
+    {# Wired in W5. The card is here now because it is part of the page's
+       promise: a buyer who saw the video is the buyer most likely to convert. #}
+    <section class="section">
+      <div class="lookup">
+        <div class="lookup-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
+            <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>
+          </svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <h2>Saw it on TikTok?</h2>
+          <p>Paste the video link to find the product from this seller.</p>
+          <form class="field-row" method="get" action="/shop/{{ seller.slug }}">
+            <input class="field" type="url" name="video" placeholder="Paste TikTok video link"
+                   aria-label="TikTok video link">
+            <button class="btn" type="submit">Find</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    {% if categories %}
+      <nav class="pills" aria-label="Product categories">
+        <a class="pill" href="/shop/{{ seller.slug }}"
+           {% if not category %}aria-current="true"{% endif %}>All</a>
+        {% for name in categories %}
+          <a class="pill" href="/shop/{{ seller.slug }}?category={{ name | urlencode }}"
+             {% if category == name %}aria-current="true"{% endif %}>{{ name }}</a>
+        {% endfor %}
+      </nav>
+    {% endif %}
+
+    <section class="section" style="padding-top:16px">
+      <div class="list-head">
+        <div>
+          <p class="eyebrow">Shop products</p>
+          <h2>{{ category or ("Results" if search else "All products") }}</h2>
+          <p class="list-count">
+            {{ products | length }} item{{ '' if products | length == 1 else 's' }} available
+          </p>
+        </div>
+
+        <details>
+          <summary class="btn btn-outline" role="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M4 6h16M7 12h10M10 18h4"/>
+            </svg>
+            Filters
+          </summary>
+          <form method="get" action="/shop/{{ seller.slug }}" style="padding-top:10px">
+            {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+            {% if search %}<input type="hidden" name="q" value="{{ search }}">{% endif %}
+            <label class="field-label" for="sort">Sort by</label>
+            <div class="field-row">
+              <select class="field" id="sort" name="sort">
+                {% for value, label in sort_options.items() %}
+                  <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn" type="submit">Apply</button>
+            </div>
+          </form>
+        </details>
+      </div>
+
+      {% if products %}
+        <div class="grid">
+          {% for product in products %}
+            {% set sold_out = product.stock < 1 %}
+            <article class="card">
+              <a href="/shop/{{ seller.slug }}/{{ product.id }}">
+                <div class="card-media">
+                  {% if product.cover_url %}
+                    <img src="{{ product.cover_url | media }}" alt="{{ product.title }}" loading="lazy">
+                  {% else %}
+                    <div class="card-empty">No photo</div>
+                  {% endif %}
+
+                  {% if sold_out %}
+                    <span class="badge badge-soldout">Sold out</span>
+                  {% elif product.discount_percent %}
+                    <span class="badge badge-sale">-{{ product.discount_percent }}%</span>
+                  {% endif %}
+                </div>
+              </a>
+
+              {% if not sold_out and product.price_kes %}
+                <form method="post" action="/shop/{{ seller.slug }}/cart/add">
+                  <input type="hidden" name="product_id" value="{{ product.id }}">
+                  <button class="card-add" type="submit"
+                          aria-label="Add {{ product.title }} to basket">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                      <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                  </button>
+                </form>
+              {% endif %}
+
+              <div class="card-body">
+                <a href="/shop/{{ seller.slug }}/{{ product.id }}">
+                  <h3 class="card-title">{{ product.title }}</h3>
+                  <p class="card-price">
+                    {% if product.price_display %}
+                      {{ product.price_display }}
+                      {% if product.compare_at_display %}
+                        <span class="card-was">{{ product.compare_at_display }}</span>
+                      {% endif %}
+                    {% else %}
+                      <span class="card-ask">Ask for price</span>
+                    {% endif %}
+                  </p>
+                </a>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">
+          <h2>Nothing here yet</h2>
+          <p>
+            {% if search or category %}
+              Try a different search, or <a href="/shop/{{ seller.slug }}" style="text-decoration:underline">see everything</a>.
+            {% else %}
+              This shop has not published any items yet.
+            {% endif %}
+          </p>
+        </div>
+      {% endif %}
+    </section>
+
+    <p class="footer">Powered by Biasharamall</p>
+  </main>
+
+  <div class="actionbar">
+    {% if cart_count %}
+      <a class="btn btn-outline" href="/shop/{{ seller.slug }}/cart">Basket · {{ cart_count }}</a>
+    {% endif %}
+    {% if whatsapp_url %}
+      <a class="btn btn-green btn-block" href="{{ whatsapp_url }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2m0 2a8 8 0 1 1-4.1 14.9l-.3-.2-3 .8.8-2.9-.2-.3A8 8 0 0 1 12 4"/>
+        </svg>
+        Chat with this seller
+      </a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
