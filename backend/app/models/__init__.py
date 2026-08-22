@@ -19,25 +19,47 @@ see.
 from app.db import Base
 from app.models.account import Account
 from app.models.account_claim import AccountClaim
+from app.models.cart import Cart, CartItem
 from app.models.enums import (
     IngestMethod,
+    JobStatus,
+    OrderStatus,
+    PaymentMethodKind,
     Platform,
     PriceSource,
     ProductStatus,
     ScrapeStatus,
     VerificationMethod,
 )
+from app.models.job import Job
+from app.models.order import Order, OrderItem, Payment
+from app.models.payment_method import PaymentMethod
+from app.models.post import Post
 from app.models.product import Product
 from app.models.scrape_job import ScrapeJob
 from app.models.seller import Seller
+from app.models.snapshot import AccountMetricSnapshot, PostMetricSnapshot
 from app.models.social_account import SocialAccount
 
 __all__ = [
     "Account",
     "AccountClaim",
+    "AccountMetricSnapshot",
     "Base",
+    "Cart",
+    "CartItem",
     "IngestMethod",
+    "Job",
+    "JobStatus",
+    "Order",
+    "OrderItem",
+    "OrderStatus",
+    "Payment",
+    "PaymentMethod",
+    "PaymentMethodKind",
     "Platform",
+    "Post",
+    "PostMetricSnapshot",
     "PriceSource",
     "Product",
     "ProductStatus",

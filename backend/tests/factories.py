@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     IngestMethod,
+    PaymentMethod,
+    PaymentMethodKind,
     Platform,
     Product,
     Seller,
@@ -87,3 +89,24 @@ def make_product(db: Session, seller: Seller, **overrides: Any) -> Product:
     db.add(product)
     db.flush()
     return product
+
+def make_payment_method(db: Session, seller: Seller, **overrides: Any) -> PaymentMethod:
+    """
+    A seller's payment destination — Pochi unless overridden.
+
+    POCHI IS THE DEFAULT ON PURPOSE. It is the kind that cannot do STK, and a
+    large share of Kenyan micro-sellers use it, so it is the path most tests
+    should exercise. A test that wants automatic confirmation has to ask for a
+    till and supply credentials, which is exactly the shape of the real thing.
+    """
+    values: dict[str, Any] = {
+        "seller_id": seller.id,
+        "kind": PaymentMethodKind.POCHI.value,
+        "number": "254712345678",
+        "account_name": "Nairobi Thrift",
+    }
+    values.update(overrides)
+    method = PaymentMethod(**values)
+    db.add(method)
+    db.flush()
+    return method

@@ -133,6 +133,26 @@ class ScrapeStatus(StrEnum):
     FAILED = "failed"
 
 
+class JobStatus(StrEnum):
+    """
+    Lifecycle of one queued unit of background work.
+
+    Deliberately NOT reusing ``ScrapeStatus``: a scrape is one kind of job, and
+    sharing the enum would tie the queue's states to ingestion's. When a job
+    kind needs a state a scrape does not have, only this changes.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+    @property
+    def is_final(self) -> bool:
+        """Whether nothing further will happen to a job in this state."""
+        return self in (JobStatus.SUCCEEDED, JobStatus.FAILED)
+
+
 class PriceSource(StrEnum):
     """
     Which tier of the extraction cascade produced the price.
@@ -153,3 +173,83 @@ class PriceSource(StrEnum):
 
     SELLER = "seller"
     """Typed by a human. Always outranks anything a model produced."""
+
+
+class PaymentMethodKind(StrEnum):
+    """
+    How a seller takes money — and therefore how a payment gets confirmed.
+
+    THIS IS NOT A COSMETIC LABEL. It decides the entire checkout path, because
+    Safaricom gives us no choice: **Daraja's STK Push and C2B APIs work with
+    Paybill and Buy Goods shortcodes only.** Pochi la Biashara is neither, so a
+    Pochi seller can never have an automatic confirmation.
+
+    A large share of Kenyan micro-sellers run on Pochi precisely because it
+    needs no business registration. So the manual path is permanent and
+    first-class, not a shim we delete once STK works — any design treating STK
+    as the real path and manual as a fallback is wrong for most of our sellers.
+    """
+
+    POCHI = "pochi"
+    """Pochi la Biashara, on the seller's personal line. Manual confirmation only."""
+
+    TILL = "till"
+    """Buy Goods till. STK-capable, but only if the seller supplies credentials."""
+
+    PAYBILL = "paybill"
+    """Paybill shortcode. Same: STK-capable with credentials, manual without."""
+
+    @property
+    def supports_stk(self) -> bool:
+        """
+        Whether Daraja can push a prompt to this kind of destination at all.
+
+        Says nothing about whether it *will* — that also needs the seller to
+        have handed over credentials. This is the hard ceiling, not the setting.
+        """
+        return self in (PaymentMethodKind.TILL, PaymentMethodKind.PAYBILL)
+
+
+class OrderStatus(StrEnum):
+    """
+    Where an order sits between placed and paid.
+
+    ``AWAITING_CONFIRMATION`` is the state a boolean could not express, and it
+    exists because of the manual path: **somebody says they paid and nobody has
+    checked yet.** A buyer-entered M-Pesa code is a claim, not a payment.
+
+        pending ──▶ awaiting_confirmation ──▶ paid
+           │              (manual path)         ▲
+           │                                    │
+           └────────── STK callback ────────────┘
+           │
+           └──▶ cancelled / failed
+
+    Only the SELLER moves an order into ``PAID`` on the manual path. On the STK
+    path the callback does, and the callback is the only automatic truth.
+    """
+
+    PENDING = "pending"
+    """Placed, nothing paid yet. The STK prompt may still be on the handset."""
+
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    """A buyer has claimed an M-Pesa code. Unverified until the seller says so."""
+
+    PAID = "paid"
+    """Money confirmed — by a callback, or by the seller checking their phone."""
+
+    CANCELLED = "cancelled"
+    """Abandoned by the buyer, or withdrawn by the seller."""
+
+    FAILED = "failed"
+    """The payment attempt was rejected, timed out, or the buyer declined."""
+
+    @property
+    def is_final(self) -> bool:
+        """Whether nothing further will happen to an order in this state."""
+        return self in (OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.FAILED)
+
+    @property
+    def is_settled(self) -> bool:
+        """Whether the seller should act on it — i.e. money actually arrived."""
+        return self is OrderStatus.PAID

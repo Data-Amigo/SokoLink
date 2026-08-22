@@ -1,0 +1,150 @@
+{# Pay, then the receipt — one page, driven by order status.
+
+   ONE PAGE ON PURPOSE. The buyer lands here from checkout, leaves to pay in
+   M-Pesa, and comes back. Landing somewhere different on return would make them
+   doubt it is the same order, at exactly the moment they have just sent money.
+   The URL never changes; the status decides what it says.
+
+   The three states this renders:
+     pending                 → how to pay, and a box for the code
+     awaiting_confirmation   → we have your code, the seller is checking
+     paid                    → the receipt
+#}
+{% extends "base.html" %}
+
+{% set status = order.status %}
+
+{% block title %}Order {{ order.reference }} · {{ seller.display_name }}{% endblock %}
+
+{% block body %}
+<div class="shell">
+
+  <header class="topbar">
+    <a class="icon-btn" href="/shop/{{ seller.slug }}" aria-label="Back to shop">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M15 5l-7 7 7 7"/>
+      </svg>
+    </a>
+    <div class="topbar-id">
+      <div class="topbar-name">Order {{ order.reference }}</div>
+      <div class="topbar-verified">{{ seller.display_name }}</div>
+    </div>
+  </header>
+
+  <main id="main" class="section">
+
+    {% if error %}<p class="notice" style="margin-bottom:14px">{{ error }}</p>{% endif %}
+
+    {% if status == 'paid' %}
+      <div class="hero" style="background:var(--green)">
+        <p class="hero-eyebrow" style="color:#d1fae5">Payment received</p>
+        <h1 style="padding-right:0">KES {{ '{:,}'.format(order.total_kes) }} paid</h1>
+        <p style="color:#eafaf1">
+          {{ seller.display_name }} has confirmed your payment.
+          Keep this page — it is your receipt.
+        </p>
+      </div>
+
+    {% elif status == 'awaiting_confirmation' %}
+      <div class="hero">
+        <p class="hero-eyebrow">Checking</p>
+        <h1 style="padding-right:0">Waiting for {{ seller.display_name }}</h1>
+        <p>
+          We have your M-Pesa code. The seller is checking their phone and will
+          confirm shortly. Refresh this page, or message them below.
+        </p>
+      </div>
+
+    {% elif status in ('cancelled', 'failed') %}
+      <div class="hero">
+        <p class="hero-eyebrow">Closed</p>
+        <h1 style="padding-right:0">This order was {{ status }}</h1>
+        <p>Message the seller if you think this is wrong.</p>
+      </div>
+
+    {% else %}
+      {# pending — how to pay #}
+      <div class="hero">
+        <p class="hero-eyebrow">Pay with M-Pesa</p>
+        <h1 style="padding-right:0">KES {{ '{:,}'.format(order.total_kes) }}</h1>
+        <p>Send the exact amount, then enter the code you receive.</p>
+      </div>
+
+      <div class="lookup" style="margin-top:16px;display:block">
+        <h2>
+          {% if order.paid_to_kind == 'pochi' %}Send to Pochi la Biashara
+          {% elif order.paid_to_kind == 'till' %}Buy Goods — Till number
+          {% else %}Paybill number{% endif %}
+        </h2>
+        <p style="font-size:22px;font-weight:700;color:var(--ink);margin:6px 0 2px">
+          {{ order.paid_to_number }}
+        </p>
+        {% if order.paid_to_name %}
+          {# The name M-Pesa will show on the prompt. Checking it matches is the
+             single most effective anti-fraud step available to a buyer. #}
+          <p>Confirm the name reads <strong>{{ order.paid_to_name }}</strong> before you send.</p>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/shop/{{ seller.slug }}/order/{{ order.reference }}/claim"
+            style="margin-top:18px">
+        <label class="field-label" for="mpesa_code">M-Pesa confirmation code</label>
+        <div class="field-row">
+          <input class="field" id="mpesa_code" name="mpesa_code" required
+                 placeholder="e.g. SLK7XA2B9C" autocapitalize="characters"
+                 style="border-radius:var(--radius-sm)">
+          <button class="btn btn-green" type="submit">I have paid</button>
+        </div>
+        <p class="stock-note">
+          The seller checks this against their own M-Pesa messages before the
+          order is confirmed.
+        </p>
+      </form>
+    {% endif %}
+
+    <div class="totals" style="margin-top:20px">
+      {% for item in order.items %}
+        <div class="total-row">
+          <span>
+            {{ item.quantity }} × {{ item.title }}
+            {% if item.selected_variant %}<br><small>{{ item.selected_variant }}</small>{% endif %}
+          </span>
+          <span>KES {{ '{:,}'.format(item.line_total_kes) }}</span>
+        </div>
+      {% endfor %}
+
+      {% if order.delivery_fee_kes %}
+        <div class="total-row">
+          <span>Delivery</span>
+          <span>KES {{ '{:,}'.format(order.delivery_fee_kes) }}</span>
+        </div>
+      {% endif %}
+
+      <div class="total-row grand">
+        <span>Total</span>
+        <span>KES {{ '{:,}'.format(order.total_kes) }}</span>
+      </div>
+    </div>
+
+    <div class="totals">
+      <div class="total-row"><span>Name</span><span>{{ order.buyer_name }}</span></div>
+      <div class="total-row"><span>Phone</span><span>{{ order.buyer_phone }}</span></div>
+      {% if order.delivery_address %}
+        <div class="total-row"><span>Delivery</span><span>{{ order.delivery_address }}</span></div>
+      {% endif %}
+    </div>
+
+    <p class="footer">Powered by Biasharamall</p>
+  </main>
+
+  <div class="actionbar">
+    <a class="btn btn-outline" href="/shop/{{ seller.slug }}">Keep shopping</a>
+    {% if seller.whatsapp_number %}
+      <a class="btn btn-green btn-block"
+         href="https://wa.me/{{ seller.whatsapp_number }}?text={{ ('Hi ' ~ seller.display_name ~ '! About my order ' ~ order.reference ~ '.') | urlencode }}">
+        Message the seller
+      </a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

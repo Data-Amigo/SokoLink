@@ -109,11 +109,19 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str | None = None
     whatsapp_app_secret: str | None = None
 
-    # ── P4: M-Pesa Daraja ────────────────────────────────────────────────────
+    # ── W2: M-Pesa Daraja ────────────────────────────────────────────────────
+    # NOTE: in production the credentials used for an STK push are the SELLER's,
+    # stored encrypted on their PaymentMethod — not these. We are never in the
+    # money path. The keys below exist only for our own sandbox testing.
     daraja_consumer_key: str | None = None
     daraja_consumer_secret: str | None = None
     daraja_shortcode: str | None = None
     daraja_passkey: str | None = None
+
+    #: Which Daraja host to call. Defaults to sandbox so a deploy that forgets
+    #: to set it cannot move real money; production is opted into, never
+    #: inherited.
+    daraja_environment: Literal["sandbox", "production"] = "sandbox"
 
     # ── Security ─────────────────────────────────────────────────────────────
     #: Signs storefront link tokens and sessions. Required outside dev.

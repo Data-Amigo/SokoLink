@@ -1,0 +1,94 @@
+{# The seller's orders.
+
+   Orders awaiting confirmation lead the page, because that is the only thing
+   here that is actually a task. A buyer has said they paid and is waiting to be
+   believed; every hour it sits unconfirmed is an hour somebody wonders whether
+   their money went nowhere.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Orders · Biasharamall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head">
+    <h1>Orders</h1>
+    <p class="muted">Everything bought from your shop.</p>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+  {% endif %}
+
+  {% if awaiting %}
+    <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
+      <div class="cluster cluster-between">
+        <div>
+          <span class="badge badge-warn">Needs you</span>
+          <h3 style="margin-top: var(--s-2)">
+            {{ awaiting | length }}
+            order{{ '' if awaiting | length == 1 else 's' }} waiting to be confirmed
+          </h3>
+          <p class="muted small">
+            Check your M-Pesa messages, then confirm so the buyer knows it went through.
+          </p>
+        </div>
+        <a href="/orders/{{ awaiting[0].reference }}" class="btn btn-primary btn-sm">Review</a>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if orders %}
+    <div class="table-wrap card card-flush">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Order</th>
+            <th scope="col">Buyer</th>
+            <th scope="col">Items</th>
+            <th scope="col" class="num">Total</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <td>
+                <a href="/orders/{{ order.reference }}" class="mono strong">{{ order.reference }}</a>
+                <div class="tiny subtle">{{ order.created_at.strftime('%d %b, %H:%M') }}</div>
+              </td>
+              <td>
+                {{ order.buyer_name }}
+                <div class="tiny subtle">{{ order.buyer_phone }}</div>
+              </td>
+              <td>{{ order.item_count }}</td>
+              <td class="num strong">KES {{ '{:,}'.format(order.total_kes) }}</td>
+              <td>
+                {% if order.status == 'paid' %}
+                  <span class="badge badge-brand">Paid</span>
+                {% elif order.status == 'awaiting_confirmation' %}
+                  <span class="badge badge-warn">Confirm</span>
+                {% elif order.status == 'pending' %}
+                  <span class="badge badge-neutral">Unpaid</span>
+                {% else %}
+                  <span class="badge badge-danger">{{ order.status|capitalize }}</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card center">
+      <h3>No orders yet</h3>
+      <p class="muted small">
+        When someone buys from
+        <a href="/shop/{{ seller.slug }}">your shop</a>, it appears here.
+      </p>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}

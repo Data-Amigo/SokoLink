@@ -30,6 +30,8 @@ from app.models.enums import Platform
 if TYPE_CHECKING:
     from app.models.account import Account
     from app.models.account_claim import AccountClaim
+    from app.models.job import Job
+    from app.models.payment_method import PaymentMethod
     from app.models.product import Product
     from app.models.scrape_job import ScrapeJob
     from app.models.social_account import SocialAccount
@@ -91,6 +93,23 @@ class Seller(Base):
     )
     scrape_jobs: Mapped[list[ScrapeJob]] = relationship(
         back_populates="seller", cascade="all, delete-orphan"
+    )
+
+    #: Background work queued for this seller — see models/job.py.
+    jobs: Mapped[list[Job]] = relationship(
+        back_populates="seller", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    #: Where this shop's money goes. AT MOST ONE, enforced by a unique
+    #: constraint on the other side: checkout has to resolve to a single
+    #: destination, and "which of your three tills did you want?" is not a
+    #: question to ask a buyer mid-purchase.
+    #:
+    #: None until the seller sets it up, and until then the shop cannot take
+    #: orders — ``place_order`` refuses rather than collecting a buyer's details
+    #: and then admitting there is nowhere to send money.
+    payment_method: Mapped[PaymentMethod | None] = relationship(
+        back_populates="seller", cascade="all, delete-orphan", uselist=False
     )
 
     __table_args__ = (

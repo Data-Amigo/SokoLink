@@ -38,3 +38,8 @@ httpx==0.28.1                    # powers FastAPI's TestClient
 # ── Quality gates (also run in CI) ───────────────────────────────────────────
 ruff==0.14.2                     # linting + formatting, one tool
 mypy==1.18.2
+
+# ── Payments (W2) ────────────────────────────────────────────────────────────
+cryptography==50.0.0             # Fernet, for sellers' Daraja credentials at rest.
+                                 # Already present transitively via pyjwt; pinned
+                                 # explicitly because we now depend on it directly.

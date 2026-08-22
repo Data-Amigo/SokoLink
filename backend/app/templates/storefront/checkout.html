@@ -1,0 +1,99 @@
+{# Checkout — where the buyer identifies themselves.
+
+   The webview knows nothing about them: a link opened from a status or channel
+   is just a browser tab, with no Meta user id and no phone number. So we ask,
+   once, and the phone field does double duty as the M-Pesa line.
+
+   The WhatsApp receipt is a CHECKBOX, never an inference from "they came from
+   WhatsApp". An unticked box submits nothing, which is the right semantics for
+   consent. The on-page receipt does not depend on it.
+#}
+{% extends "base.html" %}
+
+{% block title %}Checkout · {{ seller.display_name }}{% endblock %}
+
+{% block body %}
+<div class="shell">
+
+  <header class="topbar">
+    <a class="icon-btn" href="/shop/{{ seller.slug }}/cart" aria-label="Back to basket">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M15 5l-7 7 7 7"/>
+      </svg>
+    </a>
+    <div class="topbar-id">
+      <div class="topbar-name">Checkout</div>
+      <div class="topbar-verified">{{ seller.display_name }}</div>
+    </div>
+  </header>
+
+  <main id="main" class="section">
+
+    {% if error %}<p class="notice" style="margin-bottom:14px">{{ error }}</p>{% endif %}
+
+    {% if unavailable %}
+      <p class="notice" style="margin-bottom:14px">
+        Some items are no longer available.
+        <a href="/shop/{{ seller.slug }}/cart" style="text-decoration:underline">Review your basket</a>.
+      </p>
+    {% endif %}
+
+    {% if not method %}
+      {# Said here rather than after the form: taking someone's details and then
+         admitting there is nowhere to send money wastes their time. #}
+      <p class="notice" style="margin-bottom:14px">
+        This shop has not set up payments yet. Message the seller to order.
+      </p>
+    {% endif %}
+
+    <div class="totals" style="padding-top:0">
+      {% for item in cart.items %}
+        <div class="total-row">
+          <span>{{ item.quantity }} × {{ item.product.title }}</span>
+          <span>KES {{ '{:,}'.format(item.line_total_kes) }}</span>
+        </div>
+      {% endfor %}
+      <div class="total-row grand">
+        <span>Total</span>
+        <span>KES {{ '{:,}'.format(cart.subtotal_kes) }}</span>
+      </div>
+    </div>
+
+    <form method="post" action="/shop/{{ seller.slug }}/checkout" style="margin-top:20px">
+      <label class="field-label" for="buyer_name">Your name</label>
+      <input class="field" id="buyer_name" name="buyer_name" required
+             autocomplete="name" style="border-radius:var(--radius-sm);width:100%">
+
+      <label class="field-label" for="buyer_phone">M-Pesa phone number</label>
+      <input class="field" id="buyer_phone" name="buyer_phone" required
+             type="tel" inputmode="tel" autocomplete="tel" placeholder="07XX XXX XXX"
+             style="border-radius:var(--radius-sm);width:100%"
+             aria-describedby="phone-help">
+      <p id="phone-help" class="stock-note">The number you will pay from.</p>
+
+      <label class="field-label" for="delivery_address">Delivery address</label>
+      <input class="field" id="delivery_address" name="delivery_address"
+             autocomplete="street-address" placeholder="Estate, street, landmark"
+             style="border-radius:var(--radius-sm);width:100%">
+
+      <label class="field-label" for="delivery_note">Anything else for the seller</label>
+      <input class="field" id="delivery_note" name="delivery_note"
+             placeholder="Optional" style="border-radius:var(--radius-sm);width:100%">
+
+      <label class="field-label" style="display:flex;gap:10px;align-items:flex-start;font-weight:500">
+        <input type="checkbox" name="whatsapp_opt_in" value="true" style="margin-top:3px">
+        <span>Send my receipt on WhatsApp to this number.</span>
+      </label>
+
+      <div class="actionbar">
+        <button class="btn btn-green btn-block" type="submit"
+                {% if not method or unavailable %}disabled{% endif %}>
+          Place order
+        </button>
+      </div>
+    </form>
+
+    <p class="footer">Powered by Biasharamall</p>
+  </main>
+</div>
+{% endblock %}

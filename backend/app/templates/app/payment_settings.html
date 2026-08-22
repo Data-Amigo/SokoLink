@@ -1,0 +1,144 @@
+{# How the seller gets paid.
+
+   POCHI IS THE DEFAULT AND IS LISTED FIRST. It is what a seller with no business
+   registration already has, needs nothing from Safaricom, and works the moment
+   they type their number. A setup flow that opened by asking for a shortcode
+   would lose most of our sellers at the first field.
+
+   SECRETS ARE NEVER RENDERED BACK. This page says whether credentials are saved,
+   never what they are, and a blank field on submit means "unchanged".
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Payments · Biasharamall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head">
+    <h1>Getting paid</h1>
+    <p class="muted">Where buyers send money when they order from your shop.</p>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+  {% elif saved %}
+    <div class="alert alert-success" style="margin-bottom: var(--s-5)">Saved.</div>
+  {% endif %}
+
+  {% if not method %}
+    <div class="callout" style="margin-bottom: var(--s-5)">
+      <div>
+        <strong>Your shop cannot take orders yet.</strong>
+        <p class="muted small">
+          Buyers can browse, but checkout is blocked until you say where the
+          money goes. Most sellers use Pochi la Biashara — just your Safaricom
+          number, nothing to apply for.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+
+  <form method="post" action="/settings/payment" class="card stack">
+
+    <div class="stack-sm">
+      <span class="label" id="kind-label">How do you want to be paid?</span>
+      <div class="chip-row" role="radiogroup" aria-labelledby="kind-label">
+        {% for kind in kinds %}
+          <label class="chip">
+            <input type="radio" name="kind" value="{{ kind.value }}"
+                   {% if (method and method.kind == kind.value) or (not method and kind.value == 'pochi') %}checked{% endif %}>
+            <span>
+              {% if kind.value == 'pochi' %}Pochi la Biashara
+              {% elif kind.value == 'till' %}Buy Goods (Till)
+              {% else %}Paybill{% endif %}
+            </span>
+          </label>
+        {% endfor %}
+      </div>
+      <p class="tiny subtle">
+        Pochi works with just your Safaricom number. Till and Paybill can also
+        confirm payments automatically, if you add API details below.
+      </p>
+    </div>
+
+    <div class="stack-sm">
+      <label class="label" for="number">Your number</label>
+      <input class="input" id="number" name="number" required
+             value="{{ method.number if method else '' }}"
+             placeholder="07XX XXX XXX, or a till / paybill number">
+    </div>
+
+    <div class="stack-sm">
+      <label class="label" for="account_name">Name shown to the buyer</label>
+      <input class="input" id="account_name" name="account_name"
+             value="{{ method.account_name or '' if method else '' }}"
+             placeholder="e.g. Nairobi Thrift">
+      <p class="tiny subtle">
+        We show this at checkout so buyers can check it matches the name on
+        their M-Pesa prompt before sending money.
+      </p>
+    </div>
+
+    <div class="stack-sm">
+      <label class="label" for="account_reference">Paybill account number <span class="subtle">(if yours needs one)</span></label>
+      <input class="input" id="account_reference" name="account_reference"
+             value="{{ method.account_reference or '' if method else '' }}">
+    </div>
+
+    <details {% if method and method.can_stk %}open{% endif %}>
+      <summary class="label" style="cursor:pointer">
+        Automatic confirmation <span class="subtle">— optional</span>
+      </summary>
+
+      <div class="stack-sm" style="margin-top: var(--s-3)">
+        <p class="muted small">
+          With Daraja API details, buyers get an M-Pesa prompt on their phone and
+          payment is confirmed automatically. Without them, you confirm each
+          order yourself from the Orders page — which is what most sellers do.
+        </p>
+        <p class="tiny subtle">
+          Not available for Pochi la Biashara: Safaricom's API cannot send
+          prompts to it.
+        </p>
+
+        {% if method and method.can_stk %}
+          <div class="alert alert-info">
+            API details are saved. Leave the boxes blank to keep them.
+          </div>
+        {% endif %}
+
+        <label class="label" for="stk_shortcode">Shortcode</label>
+        <input class="input" id="stk_shortcode" name="stk_shortcode"
+               value="{{ method.stk_shortcode or '' if method else '' }}">
+
+        <label class="label" for="consumer_key">Consumer key</label>
+        <input class="input" id="consumer_key" name="consumer_key" autocomplete="off"
+               placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+
+        <label class="label" for="consumer_secret">Consumer secret</label>
+        <input class="input" id="consumer_secret" name="consumer_secret" type="password"
+               autocomplete="off"
+               placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+
+        <label class="label" for="passkey">Passkey</label>
+        <input class="input" id="passkey" name="passkey" type="password" autocomplete="off"
+               placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+      </div>
+    </details>
+
+    <div class="cluster">
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+
+  {% if method and method.can_stk %}
+    <form method="post" action="/settings/payment/disable-stk" style="margin-top: var(--s-4)">
+      <button class="btn btn-ghost btn-sm" type="submit">
+        Remove my API details and confirm payments myself
+      </button>
+    </form>
+  {% endif %}
+
+</div>
+{% endblock %}
