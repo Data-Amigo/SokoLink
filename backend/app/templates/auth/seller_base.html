@@ -1,0 +1,136 @@
+{# The shell shared by the three sign-in steps.
+
+   MOBILE FIRST: on a phone the form is the entire screen and the dark pitch
+   panel does not render at all. Someone who tapped "sign in" wants the field,
+   not the argument. The panel appears from 900px, where there is room for both.
+
+   Each step fills `card` and nothing else — the pitch, the brand and the step
+   counter stay put, so the three pages read as one flow rather than three
+   pages that happen to look alike.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+  <title>{% block title %}Seller access · Biasharamall{% endblock %}</title>
+  <meta name="description" content="Sell on WhatsApp. Add what you sell, share one link, get paid by M-Pesa.">
+  {# Signing in is never a page a search engine should index or a preview
+     should render — it carries a phone number field and nothing of value. #}
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="/static/css/seller_auth.css">
+  <link rel="icon" href="/static/img/logo.png" type="image/png">
+</head>
+<body>
+<div class="sa-page">
+
+  {# ── The pitch. Desktop only. ────────────────────────────────────────── #}
+  <aside class="sa-pitch">
+    <div class="sa-brand">
+      <img src="/static/img/logo.png" alt="">
+      Biasharamall
+    </div>
+
+    <span class="sa-tag">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4L3 21l1.1-3.3A8.4 8.4 0 1 1 21 11.5z"/>
+      </svg>
+      Your shop, running through WhatsApp
+    </span>
+
+    <h1>Turn group interest into a store customers can buy from.</h1>
+
+    <p>
+      Forward catalogues, photos or social posts to Biasharamall. AI structures
+      the products, and your mini store opens naturally inside the WhatsApp
+      buying journey.
+    </p>
+
+    <div class="sa-steps">
+      <article class="sa-step">
+        <span class="sa-step-n">01</span>
+        <span class="sa-step-icon" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 3 10.5 13.5M21 3l-6.8 18-3.7-7.5L3 9.8z"/>
+          </svg>
+        </span>
+        <h2>Forward what you sell</h2>
+        <p>Send a catalogue, photo or WhatsApp group post.</p>
+      </article>
+
+      <article class="sa-step">
+        <span class="sa-step-n">02</span>
+        <span class="sa-step-icon" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+          </svg>
+        </span>
+        <h2>AI creates the product</h2>
+        <p>Names, prices and details become a clean listing.</p>
+      </article>
+
+      <article class="sa-step">
+        <span class="sa-step-n">03</span>
+        <span class="sa-step-icon" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
+            <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>
+          </svg>
+        </span>
+        <h2>Connect social demand</h2>
+        <p>Attach the TikTok link customers came from.</p>
+      </article>
+
+      <article class="sa-step">
+        <span class="sa-step-n">04</span>
+        <span class="sa-step-icon" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 8h16l-1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/>
+          </svg>
+        </span>
+        <h2>Sell through WhatsApp</h2>
+        <p>Customers browse, order, pay and receive a receipt.</p>
+      </article>
+    </div>
+  </aside>
+
+  {# ── The form. Always visible. ───────────────────────────────────────── #}
+  <main class="sa-form-pane">
+    <div class="sa-inner">
+
+      <div class="sa-brand-mobile">
+        <img src="/static/img/logo.png" alt="">
+        Biasharamall
+      </div>
+
+      <div class="sa-head">
+        <div>
+          <p class="sa-eyebrow">Seller access</p>
+          <p>Secure, simple and built around your WhatsApp number.</p>
+        </div>
+        <span class="sa-pill">Step {{ step }} of 3</span>
+      </div>
+
+      {% if error %}
+        <div class="sa-alert" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <div class="sa-card">
+        {% block card %}{% endblock %}
+      </div>
+
+      <p class="sa-legal">
+        By continuing, you agree to Biasharamall's seller terms and privacy policy.
+      </p>
+    </div>
+  </main>
+
+</div>
+  <script src="/static/js/auth.js" defer></script>
+</body>
+</html>

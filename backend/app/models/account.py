@@ -41,7 +41,12 @@ class Account(Base):
     #: Lowercased on write. Unique, so signup can tell a duplicate from a typo —
     #: but the SIGNUP RESPONSE must never reveal which, or it becomes an
     #: account-enumeration oracle.
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    #:
+    #: NULLABLE since 2026-08-23. A seller who signs up through WhatsApp proves
+    #: a phone number and has no reason to give an email — demanding one is the
+    #: friction that flow exists to remove. Either `email` or `phone` identifies
+    #: an account; the constraint below requires at least one.
+    email: Mapped[str | None] = mapped_column(String(255), unique=True)
 
     #: Argon2id. Never serialised, never logged, never compared outside
     #: `app.security`.
@@ -71,8 +76,19 @@ class Account(Base):
     __table_args__ = (
         # Lowercase enforced in the database, so "Guru@x.com" and "guru@x.com"
         # can never become two accounts no matter which code path inserts them.
-        CheckConstraint("email = lower(email)", name="ck_accounts_email_lowercase"),
-        CheckConstraint("position('@' in email) > 1", name="ck_accounts_email_shape"),
+        CheckConstraint(
+            "email IS NULL OR email = lower(email)", name="ck_accounts_email_lowercase"
+        ),
+        CheckConstraint(
+            "email IS NULL OR position('@' in email) > 1", name="ck_accounts_email_shape"
+        ),
+        # An account with neither is unreachable and unloggable-into — it could
+        # only ever be created by a bug, and it would be invisible to every
+        # lookup path we have.
+        CheckConstraint(
+            "email IS NOT NULL OR phone IS NOT NULL",
+            name="ck_accounts_has_an_identity",
+        ),
         # Kenyan E.164 without the +, matching what M-Pesa and wa.me expect.
         CheckConstraint(
             "phone IS NULL OR phone ~ '^254[17][0-9]{8}$'",

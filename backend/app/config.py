@@ -110,11 +110,23 @@ class Settings(BaseSettings):
     #: Sheng/Swahili in-image text, which is the hard part of this job.
     gemini_model: str = "gemini-3.6-flash"
 
-    # ── P2: WhatsApp Cloud API ───────────────────────────────────────────────
+    # ── WhatsApp: Meta Cloud API (not yet used) ──────────────────────────────
     whatsapp_phone_number_id: str | None = None
     whatsapp_access_token: str | None = None
     whatsapp_verify_token: str | None = None
     whatsapp_app_secret: str | None = None
+
+    # ── WhatsApp: Twilio (used today, for sending the login code) ────────────
+    # Twilio is the provider we can use NOW: sending needs no webhook and no
+    # Meta business verification. Meta's Cloud API is cheaper at volume and
+    # remains the likely destination — which is why both sets of keys live here
+    # and everything goes through services/messaging.py rather than either SDK.
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+
+    #: The WhatsApp-enabled number messages are sent FROM. Stored bare
+    #: (254…) or with a +; the adapter normalises it either way.
+    twilio_whatsapp_number: str | None = None
 
     # ── W2: M-Pesa Daraja ────────────────────────────────────────────────────
     # NOTE: in production the credentials used for an STK push are the SELLER's,

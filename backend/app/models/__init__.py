@@ -32,6 +32,7 @@ from app.models.enums import (
     VerificationMethod,
 )
 from app.models.job import Job
+from app.models.login_code import LoginCode
 from app.models.order import Order, OrderItem, Payment
 from app.models.payment_method import PaymentMethod
 from app.models.post import Post
@@ -51,6 +52,7 @@ __all__ = [
     "IngestMethod",
     "Job",
     "JobStatus",
+    "LoginCode",
     "Order",
     "OrderItem",
     "OrderStatus",

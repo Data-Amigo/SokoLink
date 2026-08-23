@@ -16,6 +16,7 @@ learn which email addresses are registered, by response text or by timing. See
 from __future__ import annotations
 
 import re
+import secrets
 import unicodedata
 
 from sqlalchemy import func, select
@@ -300,4 +301,59 @@ def get_account(db: Session, account_id: int) -> Account | None:
     account = db.get(Account, account_id)
     if account is None or not account.is_active:
         return None
+    return account
+
+
+def find_by_phone(db: Session, phone: str) -> Account | None:
+    """The account registered to this WhatsApp number, if any."""
+    return db.scalar(select(Account).where(Account.phone == phone))
+
+
+def create_account_for_phone(db: Session, *, phone: str, shop_name: str) -> Account:
+    """
+    Create a seller from a verified WhatsApp number. No password involved.
+
+    Args:
+        db: Session. The caller commits.
+        phone: 2547XXXXXXXX, already PROVEN by an OTP. This function does not
+            verify anything — it trusts its caller, which is why only the OTP
+            route may call it.
+        shop_name: Becomes the display name and the basis for the slug.
+
+    Returns:
+        The new account, with ``seller`` populated.
+
+    Raises:
+        SignupError: On an unusable shop name, or a number already registered.
+
+    Notes:
+        THE PASSWORD IS RANDOM AND DISCARDED. ``password_hash`` is NOT NULL, and
+        making it nullable would mean every login path has to handle the "no
+        password" case forever. A long random value nobody ever learns is
+        simpler and strictly safer: the account is unreachable by password until
+        the seller deliberately sets one.
+
+        EMAIL IS LEFT EMPTY. A Kenyan seller signing up through WhatsApp has no
+        reason to give one, and demanding it is the friction this flow exists to
+        remove. It stays available for anyone who wants it later.
+    """
+    clean_shop = shop_name.strip()
+    if not clean_shop:
+        raise SignupError("Please enter a shop name.")
+
+    if find_by_phone(db, phone) is not None:
+        raise SignupError("That WhatsApp number already has a shop. Try signing in.")
+
+    slug = reserve_slug(db, clean_shop)
+
+    account = Account(
+        email=None,
+        password_hash=hash_password(secrets.token_urlsafe(32)),
+        phone=phone,
+        is_active=True,
+    )
+    account.seller = Seller(slug=slug, display_name=clean_shop, whatsapp_number=phone)
+
+    db.add(account)
+    db.flush()
     return account

@@ -1,0 +1,49 @@
+{# Step 3 — name the shop.
+
+   Only reachable with a VERIFIED phone cookie. The number is already proven by
+   this point, so this asks for the one thing left: what the shop is called.
+
+   The link is shown forming as they type, because a seller who sees the address
+   they are about to share chooses a better name than one told afterwards what
+   we picked for them.
+#}
+{% extends "auth/seller_base.html" %}
+
+{% block title %}Name your shop · Biasharamall{% endblock %}
+
+{% block card %}
+  <span class="sa-card-icon" aria-hidden="true">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 8h16l-1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/>
+    </svg>
+  </span>
+
+  <h1>Name your shop</h1>
+  <p>
+    This is what customers see, and it becomes your link. You can change the
+    name later.
+  </p>
+
+  <form method="post" action="/seller/shop">
+    <label class="sa-label" for="shop_name">Shop name</label>
+    <input class="sa-input" type="text" id="shop_name" name="shop_name"
+           required autofocus autocomplete="organization"
+           placeholder="Zuma Fashion Store" data-slug-source>
+    <p class="sa-note" style="text-align:left;margin-top:8px">
+      Your link: <strong>biasharamall.com/shop/<span data-slug-preview>your-shop</span></strong>
+    </p>
+
+    <button class="sa-btn" type="submit">
+      Create my shop
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 12h14M13 6l6 6-6 6"/>
+      </svg>
+    </button>
+  </form>
+
+  <p class="sa-note">Signing in as +{{ phone }}</p>
+{% endblock %}
+
+{% block scripts %}{% endblock %}

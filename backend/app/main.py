@@ -27,6 +27,7 @@ from app.api import (
     health,
     orders,
     payments,
+    seller_auth,
     storefront,
 )
 from app.api import (
@@ -65,6 +66,7 @@ def _login_required(request: Request, exc: Exception) -> RedirectResponse:
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(seller_auth.router)
 app.include_router(dashboard.router)
 app.include_router(accounts.router)
 app.include_router(catalogue.router)
