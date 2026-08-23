@@ -16,6 +16,7 @@ learn which email addresses are registered, by response text or by timing. See
 from __future__ import annotations
 
 import re
+import secrets
 import unicodedata
 
 from sqlalchemy import func, select
@@ -119,12 +120,45 @@ def reserve_slug(db: Session, desired: str) -> str:
     return candidate
 
 
+def normalise_whatsapp(raw: str | None) -> str | None:
+    """
+    Normalise a Kenyan number to the 2547XXXXXXXX form wa.me and M-Pesa share.
+
+    Sellers type what they know — ``0712 345 678``, ``+254712345678``. Storing
+    it verbatim would mean every ``wa.me`` link built from it is a coin toss, so
+    it is normalised once, here, on the way in.
+
+    Args:
+        raw: Whatever was typed, or None.
+
+    Returns:
+        The normalised number, or None when nothing was given.
+
+    Raises:
+        SignupError: If it cannot be read as a Kenyan mobile number.
+    """
+    if raw is None or not raw.strip():
+        return None
+
+    # Imported inside the function: services/daraja.py pulls in httpx and the
+    # vault, and signup should not drag the payment stack in.
+    from app.services.daraja import DarajaError, normalise_phone
+
+    try:
+        return normalise_phone(raw)
+    except DarajaError as exc:
+        raise SignupError(
+            "Enter the WhatsApp number buyers should use, e.g. 0712 345 678."
+        ) from exc
+
+
 def create_account(
     db: Session,
     *,
     email: str,
     password: str,
     shop_name: str,
+    whatsapp_number: str | None = None,
     full_name: str | None = None,
 ) -> Account:
     """
@@ -135,6 +169,11 @@ def create_account(
         email: Lowercased before storage.
         password: Plaintext; hashed here and never stored otherwise.
         shop_name: Becomes the display name and the basis for the slug.
+        whatsapp_number: The number buyers reach the seller on, normalised to
+            2547XXXXXXXX. Optional here so an account can exist without one —
+            but a shop CANNOT OPEN without it, because ``published_needs_whatsapp``
+            refuses a live storefront nobody can contact. Collected at signup so
+            no seller reaches the publish step and finds themselves stuck.
         full_name: Optional.
 
     Returns:
@@ -166,25 +205,43 @@ def create_account(
 
     slug = reserve_slug(db, clean_shop)
 
+    clean_phone = normalise_whatsapp(whatsapp_number)
+
+    if clean_phone is not None:
+        taken = db.scalar(select(Account.id).where(Account.phone == clean_phone))
+        if taken is not None:
+            raise SignupError("That WhatsApp number is already registered. Try signing in.")
+
     account = Account(
         email=clean_email,
         password_hash=hash_password(password),
+        # The phone is the identity a seller actually remembers, and the one
+        # WhatsApp can verify. Stored on the account so it can be signed in
+        # with; mirrored onto the shop because that is what buyers contact.
+        phone=clean_phone,
         full_name=full_name.strip() if full_name else None,
     )
-    account.seller = Seller(slug=slug, display_name=clean_shop)
+    account.seller = Seller(
+        slug=slug,
+        display_name=clean_shop,
+        whatsapp_number=clean_phone,
+    )
 
     db.add(account)
     db.flush()
     return account
 
 
-def authenticate(db: Session, *, email: str, password: str) -> Account:
+def authenticate(db: Session, *, identifier: str, password: str) -> Account:
     """
     Verify credentials and return the account.
 
     Args:
         db: Session.
-        email: As typed; matched case-insensitively.
+        identifier: A WhatsApp number OR an email, as typed. The number is the
+            one a Kenyan seller actually remembers and the one WhatsApp can
+            verify, so it is tried first; email still works for anyone who
+            signed up with one.
         password: Plaintext, compared against the stored hash.
 
     Returns:
@@ -203,9 +260,23 @@ def authenticate(db: Session, *, email: str, password: str) -> Account:
            wrong password. Without it, response time is an oracle.
         3. **No early return** before that hash comparison.
     """
-    clean_email = email.strip().lower()
+    typed = identifier.strip()
 
-    account = db.scalar(select(Account).where(func.lower(Account.email) == clean_email))
+    # A phone lookup first, and only if the input can BE a phone. Trying both
+    # unconditionally would mean two queries on every login, and the timing
+    # difference between one and two is exactly the oracle note 2 exists to
+    # close.
+    account = None
+    if any(c.isdigit() for c in typed) and "@" not in typed:
+        try:
+            account = db.scalar(select(Account).where(Account.phone == normalise_whatsapp(typed)))
+        except SignupError:
+            # Not a readable Kenyan number — fall through to the email path
+            # rather than telling the caller which kind of thing they typed.
+            account = None
+
+    if account is None:
+        account = db.scalar(select(Account).where(func.lower(Account.email) == typed.lower()))
 
     # Always hash, even with no account — this is the timing equaliser and must
     # not be optimised away into a conditional.
@@ -213,7 +284,7 @@ def authenticate(db: Session, *, email: str, password: str) -> Account:
     password_ok = verify_password(password, stored_hash)
 
     if account is None or not password_ok or not account.is_active:
-        raise AuthError("Incorrect email or password.")
+        raise AuthError("Incorrect WhatsApp number, email, or password.")
 
     # The only moment the plaintext exists, so the only moment a rehash to
     # stronger parameters is possible.
@@ -230,4 +301,59 @@ def get_account(db: Session, account_id: int) -> Account | None:
     account = db.get(Account, account_id)
     if account is None or not account.is_active:
         return None
+    return account
+
+
+def find_by_phone(db: Session, phone: str) -> Account | None:
+    """The account registered to this WhatsApp number, if any."""
+    return db.scalar(select(Account).where(Account.phone == phone))
+
+
+def create_account_for_phone(db: Session, *, phone: str, shop_name: str) -> Account:
+    """
+    Create a seller from a verified WhatsApp number. No password involved.
+
+    Args:
+        db: Session. The caller commits.
+        phone: 2547XXXXXXXX, already PROVEN by an OTP. This function does not
+            verify anything — it trusts its caller, which is why only the OTP
+            route may call it.
+        shop_name: Becomes the display name and the basis for the slug.
+
+    Returns:
+        The new account, with ``seller`` populated.
+
+    Raises:
+        SignupError: On an unusable shop name, or a number already registered.
+
+    Notes:
+        THE PASSWORD IS RANDOM AND DISCARDED. ``password_hash`` is NOT NULL, and
+        making it nullable would mean every login path has to handle the "no
+        password" case forever. A long random value nobody ever learns is
+        simpler and strictly safer: the account is unreachable by password until
+        the seller deliberately sets one.
+
+        EMAIL IS LEFT EMPTY. A Kenyan seller signing up through WhatsApp has no
+        reason to give one, and demanding it is the friction this flow exists to
+        remove. It stays available for anyone who wants it later.
+    """
+    clean_shop = shop_name.strip()
+    if not clean_shop:
+        raise SignupError("Please enter a shop name.")
+
+    if find_by_phone(db, phone) is not None:
+        raise SignupError("That WhatsApp number already has a shop. Try signing in.")
+
+    slug = reserve_slug(db, clean_shop)
+
+    account = Account(
+        email=None,
+        password_hash=hash_password(secrets.token_urlsafe(32)),
+        phone=phone,
+        is_active=True,
+    )
+    account.seller = Seller(slug=slug, display_name=clean_shop, whatsapp_number=phone)
+
+    db.add(account)
+    db.flush()
     return account

@@ -1,0 +1,153 @@
+{# The money tracker — seller-only.
+
+   Replaced the social analytics page, which showed views and followers from the
+   content-first direction that was parked. A seller running a shop opens the app
+   asking one question: did I make any money, and is anyone waiting on me?
+
+   THERE IS NO BALANCE TILE, and that is deliberate. Buyers pay the seller's
+   Pochi or till directly — we are never in the money path and hold nothing, so
+   any balance shown here would be inferred. The first time it disagreed with
+   their own M-Pesa, they would stop trusting every other number on this page.
+   The tile in that position is "waiting on you", which is both honest and the
+   only number that is actually actionable.
+
+   PRIVATE TO THE SELLER. A buyer sees their own order and receipt, never this.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Money · Biasharamall{% endblock %}
+
+{% block body %}
+<div class="container ws-page">
+
+  <div class="ws-head-row">
+    <div class="ws-head">
+      <p class="ws-eyebrow">Your earnings</p>
+      <h1>Money</h1>
+      <p>Orders, M-Pesa payments, and what still needs you.</p>
+    </div>
+    <a class="ws-btn" href="/orders">{{ icon.orders(14) }} All orders</a>
+  </div>
+
+  {% if summary.awaiting_kes %}
+    {# Leads the page when it is non-zero: a buyer has said they paid and is
+       waiting to be believed. #}
+    <div class="ws-task">
+      <div>
+        <span class="ws-tag ws-tag-warn">{{ icon.clock(13) }} Needs you</span>
+        <h2>KSh {{ '{:,}'.format(summary.awaiting_kes) }} waiting to be confirmed</h2>
+        <p>Check your M-Pesa messages, then confirm so the buyer knows it went through.</p>
+      </div>
+      <div>
+        <a href="/orders" class="ws-btn ws-btn-primary">Review orders {{ icon.arrow(14) }}</a>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="ws-stats">
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Sales this month</span>
+        <span class="ws-stat-icon">{{ icon.money(15) }}</span>
+      </div>
+      <div class="ws-stat-value">KSh {{ '{:,}'.format(summary.sales_this_month) }}</div>
+      <p class="ws-stat-note">Confirmed payments only</p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Waiting on you</span>
+        <span class="ws-stat-icon">{{ icon.clock(15) }}</span>
+      </div>
+      <div class="ws-stat-value">KSh {{ '{:,}'.format(summary.awaiting_kes) }}</div>
+      <p class="ws-stat-note {% if summary.awaiting_kes %}ws-stat-note-warn{% endif %}">
+        {{ 'Confirm to release' if summary.awaiting_kes else 'Nothing pending' }}
+      </p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Paid orders</span>
+        <span class="ws-stat-icon">{{ icon.check(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.paid_orders }}</div>
+      <p class="ws-stat-note">All time</p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Average order</span>
+        <span class="ws-stat-icon">{{ icon.tag(15) }}</span>
+      </div>
+      <div class="ws-stat-value">KSh {{ '{:,}'.format(summary.average_order) }}</div>
+      <p class="ws-stat-note">Per paid order</p>
+    </div>
+  </div>
+
+  <div class="ws-section">
+    <h2>Recent transactions</h2>
+    <a href="/orders">View all {{ icon.arrow(13) }}</a>
+  </div>
+
+  {% if transactions %}
+    <div class="ws-rows">
+      {% for order in transactions %}
+        <div class="ws-row">
+          <div class="ws-row-main">
+            <div class="ws-row-title">
+              <a class="ws-mono" href="/orders/{{ order.reference }}">{{ order.reference }}</a>
+            </div>
+            <p class="ws-row-meta">
+              {{ order.buyer_name }} ·
+              {{ order.paid_to_kind|capitalize }} ·
+              {{ order.created_at.strftime('%d %b, %H:%M') }}
+            </p>
+          </div>
+
+          <div class="ws-row-num">
+            {% if order.status == 'paid' %}
+              <b class="ws-in">+KSh {{ '{:,}'.format(order.total_kes) }}</b>
+              <span>Paid</span>
+            {% elif order.status == 'awaiting_confirmation' %}
+              <b>KSh {{ '{:,}'.format(order.total_kes) }}</b>
+              <span style="color: var(--ws-warn); font-weight: 600">Confirm this</span>
+            {% elif order.status == 'pending' %}
+              <b class="ws-muted">KSh {{ '{:,}'.format(order.total_kes) }}</b>
+              <span>Unpaid</span>
+            {% else %}
+              <b class="ws-muted">KSh {{ '{:,}'.format(order.total_kes) }}</b>
+              <span>{{ order.status|capitalize }}</span>
+            {% endif %}
+          </div>
+
+          <div class="ws-row-end">
+            <a class="ws-btn ws-btn-sm" href="/orders/{{ order.reference }}">Open</a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="ws-empty">
+      <div class="ws-empty-icon">{{ icon.money(22) }}</div>
+      <h3>No money in yet</h3>
+      <p>
+        {% if seller.is_published %}
+          When someone buys from your shop, the payment shows up here.
+        {% else %}
+          Your shop is still closed, so nobody can buy yet.
+        {% endif %}
+      </p>
+      {% if not seller.is_published %}
+        <a class="ws-btn ws-btn-primary" href="/products">Open your shop</a>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# The honest footnote that the missing balance tile requires. #}
+  <p class="ws-fine" style="margin-top: 22px">
+    Buyers pay your M-Pesa number directly, so we cannot see your balance — only
+    the orders placed through your shop. Check M-Pesa for the real thing.
+  </p>
+
+</div>
+{% endblock %}

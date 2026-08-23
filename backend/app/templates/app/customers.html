@@ -1,0 +1,199 @@
+{# Who buys.
+
+   THE PAGE IS A LIST OF CONVERSATIONS, not a database view. Every row ends in a
+   Message button, because the seller already lives in WhatsApp and the useful
+   action is never "view customer" — it is "open this chat". There is no customer
+   detail page for the same reason.
+
+   THE SEGMENT COUNTS ARE LINKS. A number a seller cannot act on is decoration:
+   "7 repeat buyers" only earns its place next to the seven names and the seven
+   message buttons, which is what clicking it produces.
+
+   NOTHING HERE IS SAMPLE DATA. The design this was built from showed preview
+   records so the layout could be judged; a real seller with no orders gets the
+   empty state instead, which says where customers come from. Inventing buyers
+   on a seller's own dashboard would be the fastest way to lose their trust in
+   every other number we show them.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Customers · Biasharamall{% endblock %}
+
+{% block body %}
+<div class="container ws-page">
+
+  <div class="ws-head-row">
+    <div class="ws-head">
+      <p class="ws-eyebrow">Buyer relationships</p>
+      <h1>Customers</h1>
+      <p>
+        Know who buys, spot the ones who come back, and carry on the
+        conversation in WhatsApp.
+      </p>
+    </div>
+
+    {% if share_url %}
+      <a class="ws-btn ws-btn-primary" href="{{ share_url }}" target="_blank" rel="noopener">
+        {{ icon.send(15) }} Share your shop
+      </a>
+    {% endif %}
+  </div>
+
+  {# ── The four numbers ─────────────────────────────────────────────────── #}
+  <div class="ws-stats">
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Total customers</span>
+        <span class="ws-stat-icon">{{ icon.customers(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.total }}</div>
+      <p class="ws-stat-note">All time</p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">New this month</span>
+        <span class="ws-stat-icon">{{ icon.userplus(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.new_this_month }}</div>
+      <p class="ws-stat-note">From {{ summary.orders }} order{{ '' if summary.orders == 1 else 's' }}</p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Repeat buyers</span>
+        <span class="ws-stat-icon">{{ icon.repeat(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.repeat }}</div>
+      <p class="ws-stat-note">{{ summary.return_rate }}% return rate</p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">WhatsApp reachable</span>
+        <span class="ws-stat-icon">{{ icon.message(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.reachable }}</div>
+      <p class="ws-stat-note">{{ summary.reachable_percent }}% of customers</p>
+    </div>
+  </div>
+
+  <div class="ws-split">
+    {# ── The list ───────────────────────────────────────────────────────── #}
+    <div>
+      {# GET, so a search is a URL the seller can bookmark or reload. The
+         segment rides along in a hidden field, or searching would silently
+         throw away the filter they just clicked. #}
+      <form method="get" action="/customers" class="ws-search" role="search">
+        {{ icon.search(17) }}
+        <input type="search" name="q" value="{{ q }}"
+               placeholder="Search name, phone or location"
+               aria-label="Search customers">
+        {% if segment %}<input type="hidden" name="segment" value="{{ segment }}">{% endif %}
+      </form>
+
+      {% if segment %}
+        <p class="ws-fine" style="margin: 10px 0 12px">
+          Showing <strong>{{ segment_label|lower }}</strong> —
+          <a href="/customers{% if q %}?q={{ q }}{% endif %}">show everyone</a>
+        </p>
+      {% endif %}
+
+      {% if customers %}
+        <div class="ws-rows" style="margin-top: 14px">
+          {% for customer in customers %}
+            <div class="ws-row">
+              <span class="ws-face">{{ customer.initials }}</span>
+
+              <div class="ws-row-main">
+                <div class="ws-row-title">
+                  {{ customer.name }}
+                  {% set seg = customer.segment %}
+                  <span class="ws-tag
+                    {%- if seg == 'Payment pending' %} ws-tag-warn
+                    {%- elif seg == 'Repeat buyer' %} ws-tag-ok
+                    {%- elif seg == 'Returning' %} ws-tag-ok
+                    {%- else %} ws-tag-neutral{% endif %}">{{ seg }}</span>
+                </div>
+
+                <p class="ws-row-meta">
+                  {{ customer.display_phone }}
+                  {%- if customer.location %} · {{ customer.location }}{% endif %}
+                  · Last order {{ customer.last_order_at.strftime('%d %b') }}
+                </p>
+
+                <p class="ws-row-sub">
+                  {{ customer.orders }} order{{ '' if customer.orders == 1 else 's' }}
+                  {%- if customer.spent_kes %} · KSh {{ '{:,}'.format(customer.spent_kes) }} spent
+                  {%- else %} · nothing confirmed yet{% endif %}
+                </p>
+              </div>
+
+              <div class="ws-row-end">
+                <a class="ws-btn ws-btn-sm" href="{{ customer.whatsapp_url }}"
+                   target="_blank" rel="noopener">
+                  {{ icon.message(14) }} Message
+                </a>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+
+      {% elif searching or segment %}
+        {# A search that found nothing is not the same as a shop with no
+           customers, and the two need different words on screen. #}
+        <div class="ws-empty" style="margin-top: 14px">
+          <div class="ws-empty-icon">{{ icon.search(22) }}</div>
+          <h3>Nobody matches that</h3>
+          <p>Try part of a name or the last few digits of a phone number.</p>
+          <a class="ws-btn" href="/customers">Show all customers</a>
+        </div>
+
+      {% else %}
+        <div class="ws-empty" style="margin-top: 14px">
+          <div class="ws-empty-icon">{{ icon.customers(22) }}</div>
+          <h3>No customers yet</h3>
+          <p>
+            Everyone who orders from your shop appears here automatically —
+            buyers never sign up, so this list builds itself from your orders.
+          </p>
+          {% if share_url %}
+            <a class="ws-btn ws-btn-primary" href="{{ share_url }}"
+               target="_blank" rel="noopener">
+              {{ icon.send(15) }} Share your shop link
+            </a>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+
+    {# ── Sidebar ────────────────────────────────────────────────────────── #}
+    <aside class="ws-aside">
+      {% if summary.repeat %}
+        <div class="ws-promo">
+          <p class="ws-eyebrow" style="color: #4ade80">Best customers</p>
+          <h3>{{ summary.repeat }} {{ 'person has' if summary.repeat == 1 else 'people have' }} bought again</h3>
+          <p>Send them new stock before you post it publicly — they already trust you.</p>
+          <a class="ws-promo-btn" href="/customers?segment=repeat">
+            {{ icon.star(15) }} Show repeat buyers
+          </a>
+        </div>
+      {% endif %}
+
+      <div class="ws-card">
+        <p class="ws-eyebrow">Customer segments</p>
+        <ul class="ws-keys">
+          <li><a href="/customers?segment=repeat">Repeat buyers</a><b>{{ summary.repeat }}</b></li>
+          <li><a href="/customers?segment=new">New buyers</a><b>{{ summary.new_this_month }}</b></li>
+          <li><a href="/customers?segment=high">High value</a><b>{{ summary.high_value }}</b></li>
+          <li><a href="/customers?segment=pending">Payment pending</a><b>{{ summary.payment_pending }}</b></li>
+        </ul>
+        <p class="ws-fine" style="margin-top: 14px">
+          High value means KSh 10,000 or more confirmed.
+        </p>
+      </div>
+    </aside>
+  </div>
+
+</div>
+{% endblock %}

@@ -96,6 +96,12 @@ payments, W3 the bot. Phases in [`docs/PRODUCTION_PLAN.md`](docs/PRODUCTION_PLAN
   must never equal `DATABASE_URL`; the suite refuses to run if it does.
 - **Spike before schema.** Let a real payload drive the data model.
 - **Money is integer KES.** No floats near a price.
+- **The workspace is one design, not six pages.** Icons come from
+  `partials/icons.html`; shared parts live in `workspace.css` and earn their
+  place there once a second page needs them. Status wears one vocabulary
+  everywhere: green done, amber needs you, grey not yet, red over.
+- **Never show a seller invented data**, and never ship a control that cannot
+  work. A design mockup's sample rows are for judging layout, not for shipping.
 - **Cache anything that costs money.** Each forwarded image parsed once ever,
   keyed by WhatsApp media id.
 
@@ -154,7 +160,11 @@ backend/
     services/        business logic — providers behind our own adapters
     agent/           LLM-facing code — the only place a provider SDK is imported
     api/             HTTP routes — thin, delegate to services
-    templates/       Jinja2 — the storefront
+    templates/       Jinja2 — storefront, workspace, auth
+      app_base.html    the shell for every page behind the login wall
+      partials/icons.html  ONE icon set — never hand-write an SVG in a page
+    static/css/
+      workspace.css    the seller workspace skin, loaded by the shell
   alembic/           migrations, reviewed line by line
   tests/             pytest, mirrors app/
 docs/                plan, business + technical PDFs, Notion handoff

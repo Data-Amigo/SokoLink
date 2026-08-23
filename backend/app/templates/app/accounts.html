@@ -1,95 +1,91 @@
 {# Connected accounts, and anything still in flight.
 
-   A pending claim is shown FIRST and prominently. A seller who started
+   A PENDING CLAIM IS SHOWN FIRST and prominently. A seller who started
    verifying, got distracted and came back has one question — "where was I?" —
    and burying that under a connect button makes them start over, which mints a
    new code and invalidates the one already in their bio.
+
+   THIS PAGE IS OFF THE MAIN NAV ON PURPOSE. Connecting a social account no
+   longer builds the catalogue — sellers forward posts to the bot instead — so
+   it is optional and much later. The routes still work; they just no longer
+   take a slot in a six-item bar for something that cannot produce a sale.
 #}
 {% extends "app_base.html" %}
 
 {% block title %}Accounts · Biashara Mall{% endblock %}
 
 {% block body %}
-<div class="container page">
+<div class="container ws-page">
 
-  <div class="page-head">
-    <h1>Accounts</h1>
-    <p class="muted">The social accounts we read your content from.</p>
+  <div class="ws-head">
+    <p class="ws-eyebrow">Optional</p>
+    <h1>Connected accounts</h1>
+    <p>
+      Link a social account and we can read your posts. Not required to sell —
+      you can forward posts to WhatsApp instead.
+    </p>
   </div>
 
   {% if pending %}
-    <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
-      <div class="cluster cluster-between">
-        <div>
-          <span class="badge badge-warn">Waiting for verification</span>
-          <h3 style="margin-top: var(--s-2)">@{{ pending.handle }}</h3>
-          <p class="muted small">
-            Your code <code class="mono strong">{{ pending.code }}</code> is waiting
-            to be added to the bio.
-          </p>
-        </div>
-        <a href="/accounts/claim/{{ pending.id }}" class="btn btn-primary btn-sm">Finish</a>
+    <div class="ws-task">
+      <div>
+        <span class="ws-tag ws-tag-warn">{{ icon.clock(13) }} Waiting for verification</span>
+        <h2>@{{ pending.handle }}</h2>
+        <p>
+          Your code <strong class="ws-mono">{{ pending.code }}</strong> is waiting
+          to be added to the bio.
+        </p>
+      </div>
+      <div>
+        <a href="/accounts/claim/{{ pending.id }}" class="ws-btn ws-btn-primary">
+          Finish {{ icon.arrow(14) }}
+        </a>
       </div>
     </div>
   {% endif %}
 
   {% if accounts %}
-    <div class="grid grid-3">
+    <div class="ws-rows">
       {% for social in accounts %}
-        <article class="card">
-          <div class="cluster cluster-between" style="margin-bottom: var(--s-3)">
-            <span class="badge badge-brand">{{ social.platform|capitalize }}</span>
-            <span class="badge badge-neutral">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M20 6 9 17l-5-5"/>
-              </svg>
-              Verified
-            </span>
-          </div>
+        <div class="ws-row">
+          <span class="ws-face">{{ social.platform[:2]|upper }}</span>
 
-          <h3>@{{ social.handle }}</h3>
-          <p class="muted small">{{ social.display_name or '' }}</p>
-
-          <div class="cluster" style="margin-top: var(--s-4)">
-            <div>
-              <div class="tiny subtle">Followers</div>
-              <div class="strong">{{ "{:,}".format(social.follower_count or 0) }}</div>
+          <div class="ws-row-main">
+            <div class="ws-row-title">
+              @{{ social.handle }}
+              <span class="ws-tag ws-tag-ok">{{ icon.check(13) }} Verified</span>
             </div>
-            <div>
-              <div class="tiny subtle">Posts</div>
-              <div class="strong">{{ "{:,}".format(social.post_count or 0) }}</div>
-            </div>
+            <p class="ws-row-meta">
+              {%- if social.display_name %}{{ social.display_name }} · {% endif -%}
+              {{ "{:,}".format(social.follower_count or 0) }} followers ·
+              {{ "{:,}".format(social.post_count or 0) }} posts
+            </p>
+            <p class="ws-fine">
+              {# The method is recorded on every account and worth showing: when
+                 OAuth lands, a seller can see which of theirs used which. #}
+              Verified {{ social.verified_at.strftime('%d %b %Y') }}
+              via {{ social.verification_method.replace('_', ' ') }}
+            </p>
           </div>
-
-          <p class="tiny subtle" style="margin-top: var(--s-4)">
-            {# The method is recorded on every account and worth showing: when
-               OAuth lands, a seller can see which of theirs used which. #}
-            Verified {{ social.verified_at.strftime('%d %b %Y') }}
-            via {{ social.verification_method.replace('_', ' ') }}
-          </p>
-        </article>
+        </div>
       {% endfor %}
-
-      {% if not pending %}
-        <a href="/accounts/connect" class="card cluster"
-           style="justify-content:center; text-decoration:none; border-style:dashed">
-          <span class="strong muted">+ Connect another account</span>
-        </a>
-      {% endif %}
     </div>
 
+    {% if not pending %}
+      <a href="/accounts/connect" class="ws-btn" style="margin-top: 14px">
+        {{ icon.plus(15) }} Connect another account
+      </a>
+    {% endif %}
+
   {% elif not pending %}
-    <div class="card card-lg">
-      <div class="empty">
-        <div class="empty-icon" aria-hidden="true">🔗</div>
-        <h3>No accounts connected yet</h3>
-        <p>Connect your TikTok and we will start tracking how your content performs.</p>
-        <a href="/accounts/connect" class="btn btn-primary">Connect TikTok</a>
-        <p class="tiny subtle" style="margin-top: var(--s-4)">
-          No password needed — you paste a short code into your bio.
-        </p>
-      </div>
+    <div class="ws-empty">
+      <div class="ws-empty-icon">{{ icon.customers(22) }}</div>
+      <h3>No accounts connected yet</h3>
+      <p>
+        Connect your TikTok and we can read how your posts perform. No password
+        needed — you paste a short code into your bio.
+      </p>
+      <a href="/accounts/connect" class="ws-btn ws-btn-primary">Connect TikTok</a>
     </div>
   {% endif %}
 

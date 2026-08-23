@@ -12,86 +12,89 @@
 {% block title %}Add a product · Biasharamall{% endblock %}
 
 {% block body %}
-<div class="container page" style="max-width: 640px">
+<div class="container ws-page" style="max-width: 660px">
 
-  <div class="page-head">
-    <p class="tiny subtle"><a href="/products">← Products</a></p>
+  <div class="ws-head">
+    <p class="ws-eyebrow"><a href="/products" style="color: inherit">← Products</a></p>
     <h1>Add a product</h1>
-    <p class="muted">It saves as a draft. Nothing reaches a buyer until you publish it.</p>
+    <p>It saves as a draft. Nothing reaches a buyer until you publish it.</p>
   </div>
 
   {% if error %}
-    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+    <div class="ws-flash ws-flash-bad">{{ error }}</div>
   {% endif %}
 
-  <form method="post" action="/products/new" class="card stack">
+  <form method="post" action="/products/new" class="ws-card ws-form">
 
-    <div class="stack-sm">
-      <label class="label" for="title">What is it? <span class="subtle">(required)</span></label>
-      <input class="input" id="title" name="title" required autofocus
+    <div class="ws-field">
+      <label for="title">What is it? <span class="ws-muted">(required)</span></label>
+      <input id="title" name="title" required autofocus
              placeholder="e.g. Mixed Ladies Sandals">
     </div>
 
-    <div class="stack-sm">
-      <label class="label" for="price_kes">Price in KES</label>
-      <input class="input" id="price_kes" name="price_kes" inputmode="numeric"
+    <div class="ws-field">
+      <label for="price_kes">Price in KES</label>
+      <input id="price_kes" name="price_kes" inputmode="numeric"
              placeholder="3000" aria-describedby="price-help">
-      <p id="price-help" class="tiny subtle">
+      <p id="price-help" class="ws-hint">
         Whole shillings, no decimals. Leave blank if you are not sure yet — you
         can add it later, but the item cannot go live without one.
       </p>
     </div>
 
-    <div class="stack-sm">
-      <label class="label" for="stock">How many do you have?</label>
-      <input class="input" id="stock" name="stock" inputmode="numeric" value="1">
-      <p class="tiny subtle">Zero is fine — it shows as “Sold out” rather than disappearing.</p>
+    <div class="ws-field">
+      <label for="stock">How many do you have?</label>
+      <input id="stock" name="stock" inputmode="numeric" value="1">
+      <p class="ws-hint">Zero is fine — it shows as “Sold out” rather than disappearing.</p>
     </div>
 
-    <div class="stack-sm">
-      <label class="label" for="category">Category</label>
-      <input class="input" id="category" name="category"
+    <div class="ws-field">
+      <label for="category">Category</label>
+      <input id="category" name="category"
              placeholder="e.g. Shoes, Bags, Fashion">
-      <p class="tiny subtle">Your own words. This becomes a filter button on your shop.</p>
+      <p class="ws-hint">Your own words. This becomes a filter button on your shop.</p>
     </div>
 
-    <div class="stack-sm">
-      <label class="label" for="sizes">Sizes</label>
-      <input class="input" id="sizes" name="sizes" placeholder="e.g. 38, 39, 40  or  S, M, L">
-      <p class="tiny subtle">Separated by commas, written however you write them.</p>
+    <div class="ws-field">
+      <label for="sizes">Sizes</label>
+      <input id="sizes" name="sizes" placeholder="e.g. 38, 39, 40  or  S, M, L">
+      <p class="ws-hint">Separated by commas, written however you write them.</p>
     </div>
 
-    <div class="stack-sm">
-      <label class="label" for="description">Description</label>
-      <input class="input" id="description" name="description" placeholder="Optional">
+    <div class="ws-field">
+      <label for="description">Description</label>
+      <input id="description" name="description" placeholder="Optional">
     </div>
 
     <details>
       <summary class="label" style="cursor:pointer">
-        Selling in bulk? <span class="subtle">— optional</span>
+        Selling in bulk? <span class="ws-muted">— optional</span>
       </summary>
 
       <div class="stack-sm" style="margin-top: var(--s-3)">
         {# Discovered from a real seller: @zumamitumbabales sells mitumba BALES.
            "KES 3,000" alone makes a buyer expect one pair. #}
-        <p class="muted small">
+        <p class="ws-hint">
           If one purchase contains several items — a bale, a dozen, a pack — say so
           here. Your shop will show “KES 3,000 for 30 pairs” instead of just the
           number, so nobody is surprised at checkout.
         </p>
 
-        <label class="label" for="unit_quantity">How many in one purchase?</label>
-        <input class="input" id="unit_quantity" name="unit_quantity"
-               inputmode="numeric" placeholder="30">
+        <div class="ws-field">
+          <label for="unit_quantity">How many in one purchase?</label>
+          <input id="unit_quantity" name="unit_quantity" inputmode="numeric" placeholder="30">
+        </div>
 
-        <label class="label" for="unit_label">What are they called?</label>
-        <input class="input" id="unit_label" name="unit_label" placeholder="pairs">
+        <div class="ws-field">
+          <label for="unit_label">What are they called?</label>
+          <input id="unit_label" name="unit_label" placeholder="pairs">
+        </div>
       </div>
     </details>
 
-    <div class="cluster">
-      <button class="btn btn-primary" type="submit">Save as draft</button>
-      <a class="btn btn-ghost" href="/products">Cancel</a>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap">
+      <button class="ws-btn ws-btn-primary" type="submit">Save as draft</button>
+      <a class="ws-btn" href="/products">Cancel</a>
     </div>
   </form>
 

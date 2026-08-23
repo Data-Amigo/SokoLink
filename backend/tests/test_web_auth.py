@@ -55,7 +55,21 @@ class TestPagesRender:
         response = client.get("/signup")
 
         assert response.status_code == 200
-        assert "Create your workspace" in response.text
+        assert "Create your shop" in response.text
+
+    def test_the_signup_page_sells_the_shop_not_the_content_engine(
+        self, client: TestClient
+    ) -> None:
+        """
+        This page carried the parked content-first pitch for a week after the
+        product became store-first — hooks, scripts, captions, Canva, CapCut —
+        and it was the first thing every seller saw. The assertion is negative
+        on purpose: it guards a regression nobody would notice by reading.
+        """
+        body = client.get("/signup").text.lower()
+
+        for parked in ("hook", "caption", "content brain", "canva", "capcut"):
+            assert parked not in body, f"signup still mentions {parked!r}"
 
     def test_the_password_rule_is_stated_before_it_is_hit(self, client: TestClient) -> None:
         """The minimum comes from the constant, so the page cannot drift from it."""
@@ -156,8 +170,8 @@ class TestLogin:
         unknown_email = sign_in(client, email="nobody@example.com")
 
         assert wrong_password.status_code == unknown_email.status_code == 401
-        assert "Incorrect email or password." in wrong_password.text
-        assert "Incorrect email or password." in unknown_email.text
+        assert "Incorrect WhatsApp number, email, or password." in wrong_password.text
+        assert "Incorrect WhatsApp number, email, or password." in unknown_email.text
 
     def test_the_session_cookie_cannot_be_read_by_script(
         self, client: TestClient, db: Session
@@ -190,16 +204,24 @@ class TestLoginWall:
         assert response.status_code == 200
         assert "Nairobi Thrift" in response.text
 
-    def test_a_creator_with_no_connected_account_is_told_what_to_do(
+    def test_a_new_seller_is_told_the_three_things_that_unlock_a_sale(
         self, client: TestClient, db: Session
     ) -> None:
-        """The empty state is the first thing nearly every signup ever sees."""
+        """
+        The empty state is the first thing nearly every signup ever sees, and it
+        used to ask for a TikTok connection — which never let anyone sell
+        anything. It now asks for the three things that actually stand between a
+        signup and a first sale, in dependency order.
+        """
         register(db)
         sign_in(client)
 
-        response = client.get("/dashboard")
+        body = client.get("/dashboard").text
 
-        assert "Connect your TikTok" in response.text
+        assert "Add your first product" in body
+        assert "Choose where payments go" in body
+        assert "Open and share your store" in body
+        assert "Connect your TikTok" not in body
 
     def test_signing_out_clears_the_session(self, client: TestClient, db: Session) -> None:
         register(db)

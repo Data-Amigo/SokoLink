@@ -16,7 +16,7 @@
 #}
 {% extends "app_base.html" %}
 
-{% block title %}Sign in · Biashara Mall{% endblock %}
+{% block title %}Sign in · Biasharamall{% endblock %}
 
 {% block chrome %}{% endblock %}
 
@@ -35,8 +35,8 @@
       <h1 class="hero-title">Pick up where<br>you left off.</h1>
 
       <p class="hero-sub">
-        Your numbers have moved since you were last here. See what is working,
-        then turn it into your next post.
+        Your shop has been open while you were away. See what sold, confirm
+        payments, and add what came in.
       </p>
 
       <div class="feature-stack">
@@ -49,11 +49,11 @@
               </svg>
             </span>
             <div>
-              <div class="feature-name">Your latest numbers</div>
-              <div class="feature-kicker">Views, followers, comments</div>
+              <div class="feature-name">What sold</div>
+              <div class="feature-kicker">Orders, M-Pesa payments, totals</div>
             </div>
           </div>
-          <p class="feature-body">Updated every sync, kept over time so you can see the trend.</p>
+          <p class="feature-body">Every order since you were last here, and what is still waiting on you.</p>
         </article>
 
         <article class="feature-card">
@@ -65,14 +65,14 @@
               </svg>
             </span>
             <div>
-              <div class="feature-name">Content waiting</div>
-              <div class="feature-kicker">Drafted from what performed</div>
+              <div class="feature-name">Waiting for you</div>
+              <div class="feature-kicker">Buyers who say they have paid</div>
             </div>
           </div>
           <div class="chip-row">
-            <span class="chip">Hooks</span>
-            <span class="chip">Scripts</span>
-            <span class="chip">Captions</span>
+            <span class="chip">Orders</span>
+            <span class="chip">Payments</span>
+            <span class="chip">Products</span>
           </div>
         </article>
       </div>
@@ -108,14 +108,19 @@
              route — an off-site value never reaches this field. #}
           {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
 
+          {# WHATSAPP NUMBER FIRST, email second. The number is the one a Kenyan
+             seller actually remembers, and the one WhatsApp can verify — email
+             is a formality most of them fill in once and forget. `type=text`
+             rather than `tel` or `email`, because this single field accepts
+             both and either browser keyboard would be wrong half the time. #}
           <div class="field">
-            <label class="label" for="email">Email</label>
-            <input class="input" type="email" id="email" name="email"
-                   value="{{ email or '' }}"
-                   autocomplete="email" inputmode="email"
+            <label class="label" for="identifier">WhatsApp number or email</label>
+            <input class="input" type="text" id="identifier" name="identifier"
+                   value="{{ identifier or email or '' }}"
+                   autocomplete="username"
                    autocapitalize="off" spellcheck="false"
                    required autofocus
-                   placeholder="you@example.com">
+                   placeholder="07XX XXX XXX">
           </div>
 
           <div class="field">

@@ -23,11 +23,14 @@ from app.api import (
     analytics,
     auth,
     catalogue,
+    customers,
     dashboard,
     health,
     orders,
     payments,
+    seller_auth,
     storefront,
+    webhooks,
 )
 from app.api import (
     settings as settings_routes,
@@ -65,12 +68,15 @@ def _login_required(request: Request, exc: Exception) -> RedirectResponse:
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(seller_auth.router)
 app.include_router(dashboard.router)
+app.include_router(customers.router)
 app.include_router(accounts.router)
 app.include_router(catalogue.router)
 app.include_router(analytics.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
+app.include_router(webhooks.router)
 app.include_router(settings_routes.router)
 
 # The design system, and anything else the browser fetches by URL. Version-free

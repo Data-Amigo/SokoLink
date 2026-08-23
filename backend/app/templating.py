@@ -24,6 +24,23 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
+def _initials(value: str | None) -> str:
+    """
+    Two letters standing in for a name, for the avatar in the workspace bar.
+
+    A shop is "Zuma Fashion Store", not a person, so the first and LAST word is
+    what identifies it — "ZS" distinguishes it from "Zuma Kicks" in a way "ZU"
+    does not. Falls back to the first two characters of whatever it was given,
+    because an avatar with nothing in it looks broken rather than empty.
+    """
+    parts = [p for p in (value or "").split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
 def _register_filters() -> None:
     """
     Attach our filters to the environment.
@@ -42,6 +59,10 @@ def _register_filters() -> None:
     # else read by a crawler that has no origin to resolve a relative path
     # against. Getting this wrong costs a link preview with no picture.
     templates.env.filters["media_abs"] = absolute_url
+
+    #: Avatar initials. In the shell, so every page that extends app_base.html
+    #: gets the same two letters rather than computing its own.
+    templates.env.filters["initials"] = _initials
 
 
 _register_filters()

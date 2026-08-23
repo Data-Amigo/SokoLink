@@ -1,0 +1,792 @@
+/*
+ * The seller workspace — loaded after app.css, never instead of it.
+ *
+ * Every class here is `ws-` prefixed and additive. app.css still owns the
+ * shell, the nav and the form controls, so restyling a page cannot reach back
+ * into auth or the storefront.
+ *
+ * MOBILE FIRST. The seller's phone is the likeliest screen — they are standing
+ * in a shop, not sitting at a desk — so every grid starts at one column and
+ * grows. The desktop layout in the design is what happens at 900px, not the
+ * baseline the CSS is written from.
+ */
+
+:root {
+  --ws-ink:       #0d1117;
+  --ws-ink-2:     #161b22;
+  --ws-green:     #0f9d58;
+  --ws-green-d:   #0b7c44;
+  --ws-green-s:   #e8f8ef;
+  --ws-text:      #16181d;
+  --ws-muted:     #5f6672;
+  --ws-faint:     #8b91a0;
+  --ws-line:      #e6e8ec;
+  --ws-surface:   #ffffff;
+  --ws-bg:        #f7f9fa;
+  --ws-warn:      #b45309;
+  --ws-r:         16px;
+}
+
+/* ── Page head ──────────────────────────────────────────────────────────── */
+
+.ws-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.ws-head { margin: 18px 0 26px; }
+
+.ws-head h1 {
+  margin: 0 0 8px;
+  font-size: clamp(27px, 4vw, 34px);
+  letter-spacing: -.025em;
+}
+
+.ws-head p { margin: 0; color: var(--ws-muted); max-width: 62ch; }
+
+.ws-head-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+@media (min-width: 900px) {
+  .ws-head-row { flex-direction: row; align-items: flex-end; justify-content: space-between; }
+}
+
+/* ── The two-column band: checklist beside the store preview ────────────── */
+
+.ws-band { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 20px; }
+
+@media (min-width: 1000px) {
+  /* The checklist is the work; the preview is the reward. Wider left. */
+  .ws-band { grid-template-columns: 1.45fr 1fr; align-items: start; }
+}
+
+.ws-card {
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-r);
+  padding: 22px;
+}
+
+.ws-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.ws-eyebrow {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ws-green);
+}
+
+.ws-card-head h2 { margin: 0; font-size: 20px; letter-spacing: -.015em; }
+
+.ws-count {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-line);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ws-sub { margin: 6px 0 16px; font-size: 13.5px; color: var(--ws-muted); }
+
+/* ── Progress ───────────────────────────────────────────────────────────── */
+
+.ws-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ws-line);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.ws-fill { height: 100%; background: var(--ws-green); border-radius: 999px; }
+
+/* ── Checklist steps ────────────────────────────────────────────────────── */
+
+.ws-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--ws-line);
+  border-radius: 13px;
+}
+.ws-step + .ws-step { margin-top: 10px; }
+
+@media (min-width: 620px) {
+  .ws-step { flex-direction: row; align-items: center; justify-content: space-between; }
+}
+
+/* The step being worked on is the only one tinted, so the eye lands on it
+   without reading. */
+.ws-step-now { background: var(--ws-green-s); border-color: #bfe8d0; }
+
+.ws-step-body { display: flex; align-items: flex-start; gap: 13px; min-width: 0; }
+
+.ws-step-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  border-radius: 999px;
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ws-muted);
+}
+.ws-step-done { background: var(--ws-green); border-color: var(--ws-green); color: #fff; }
+
+.ws-step h3 { margin: 0 0 3px; font-size: 15px; }
+.ws-step p  { margin: 0; font-size: 13px; color: var(--ws-muted); }
+
+/* ── Store preview (the dark card) ──────────────────────────────────────── */
+
+.ws-preview {
+  background: var(--ws-ink);
+  color: #fff;
+  border-radius: var(--ws-r);
+  padding: 22px;
+}
+
+.ws-preview-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.ws-preview-tag {
+  padding: 5px 11px;
+  border-radius: 7px;
+  background: rgb(255 255 255 / .08);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ws-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: #aab2c0;
+}
+.ws-dot::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 999px;
+  background: var(--ws-faint);
+}
+.ws-dot-live::before { background: #4ade80; }
+
+.ws-shop { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.ws-shop img { width: 44px; height: 44px; border-radius: 12px; }
+.ws-shop h3 { margin: 0; font-size: 17px; }
+.ws-shop p  { margin: 2px 0 0; font-size: 12.5px; color: #8f97a5; word-break: break-all; }
+
+.ws-will {
+  padding: 15px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / .05);
+  margin-bottom: 16px;
+}
+.ws-will > p { margin: 0 0 10px; font-size: 12px; color: #aab2c0; }
+.ws-will ul  { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ws-will li  { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+.ws-will svg { color: #4ade80; flex: none; }
+
+.ws-preview-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  text-decoration: none;
+}
+.ws-preview-link:hover { color: #4ade80; }
+
+/* ── Stat tiles ─────────────────────────────────────────────────────────── */
+
+.ws-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 26px; }
+
+@media (min-width: 900px) { .ws-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.ws-stat {
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.ws-stat-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+
+.ws-stat-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ws-muted);
+}
+
+.ws-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+  flex: none;
+}
+
+.ws-stat-value { font-size: 25px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+.ws-stat-note  { margin: 5px 0 0; font-size: 12px; color: var(--ws-faint); }
+.ws-stat-note-warn { color: var(--ws-warn); font-weight: 600; }
+
+/* ── Quick actions ──────────────────────────────────────────────────────── */
+
+.ws-actions { display: grid; grid-template-columns: 1fr; gap: 12px; }
+
+@media (min-width: 760px) { .ws-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.ws-action {
+  display: block;
+  padding: 20px;
+  border: 1px solid var(--ws-line);
+  border-radius: 14px;
+  background: var(--ws-surface);
+  text-decoration: none;
+  color: inherit;
+}
+.ws-action:hover { border-color: #bfe8d0; }
+
+.ws-action-icon {
+  display: grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  border-radius: 11px;
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+  margin-bottom: 14px;
+}
+
+.ws-action h3 { margin: 0 0 5px; font-size: 15.5px; }
+.ws-action p  { margin: 0 0 12px; font-size: 13px; color: var(--ws-muted); }
+.ws-action span { font-size: 13px; font-weight: 600; color: var(--ws-green-d); }
+
+/* ── Buttons used in this layout ────────────────────────────────────────── */
+
+.ws-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 17px;
+  border: 1px solid var(--ws-line);
+  border-radius: 10px;
+  background: var(--ws-surface);
+  color: var(--ws-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ws-btn:hover { border-color: #bfe8d0; }
+
+.ws-btn-primary {
+  background: var(--ws-green);
+  border-color: var(--ws-green);
+  color: #fff;
+}
+.ws-btn-primary:hover { background: var(--ws-green-d); border-color: var(--ws-green-d); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE SHELL AND THE SHARED PARTS
+   ══════════════════════════════════════════════════════════════════════════
+
+   Everything below is used by MORE THAN ONE page. That is the entry rule: a
+   rule earns a place here once a second page needs it, because a stylesheet
+   full of single-use classes is inline styles with extra steps.
+
+   Loaded for every page behind the login wall (see app_base.html), so the bar,
+   the cards and the lists cannot drift apart page to page — which is exactly
+   what happened while each template styled itself.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── The workspace bar ──────────────────────────────────────────────────── */
+
+.ws-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--ws-surface);
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.ws-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 62px;
+}
+
+/* THE NAV SCROLLS SIDEWAYS ON A PHONE rather than collapsing into a hamburger.
+   Six destinations is few enough to swipe, and a menu that must be opened hides
+   the one number the seller came to check. */
+.ws-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.ws-nav::-webkit-scrollbar { display: none; }
+
+.ws-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ws-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ws-nav a:hover { background: #f2f4f6; color: var(--ws-text); }
+
+/* The current page is tinted, not underlined: on a bar that scrolls sideways an
+   underline is easy to miss at the edge of the viewport. */
+.ws-nav a[aria-current="page"] {
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+  font-weight: 600;
+}
+
+.ws-bar-end { display: flex; align-items: center; gap: 9px; margin-left: auto; flex: none; }
+
+@media (max-width: 640px) { .ws-hide-sm { display: none; } }
+
+/* ── Avatar and its menu ────────────────────────────────────────────────── */
+
+.ws-avatar {
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 999px;
+  background: var(--ws-ink);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+.ws-menu { position: relative; }
+.ws-menu > summary { list-style: none; cursor: pointer; }
+.ws-menu > summary::-webkit-details-marker { display: none; }
+
+.ws-menu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 9px);
+  min-width: 216px;
+  padding: 7px;
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: 13px;
+  box-shadow: 0 12px 32px rgb(13 17 23 / .12);
+}
+
+.ws-menu-who { margin: 0; padding: 9px 10px 11px; border-bottom: 1px solid var(--ws-line); }
+.ws-menu-who strong { display: block; font-size: 13.5px; }
+.ws-menu-who span   { font-size: 12px; color: var(--ws-muted); }
+
+.ws-menu-pop a,
+.ws-menu-pop button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin-top: 3px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ws-text);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ws-menu-pop a:hover,
+.ws-menu-pop button:hover { background: #f2f4f6; }
+
+/* ── Page furniture ─────────────────────────────────────────────────────── */
+
+.ws-page { padding: 22px 0 64px; }
+
+.ws-btn-sm { padding: 8px 12px; font-size: 13px; }
+
+.ws-btn-dark {
+  background: var(--ws-ink);
+  border-color: var(--ws-ink);
+  color: #fff;
+}
+.ws-btn-dark:hover { background: var(--ws-ink-2); border-color: var(--ws-ink-2); }
+
+.ws-btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+/* ── The task strip: the one thing on a page that is actually waiting ───── */
+
+/* Tinted and left-barred because it is not information, it is a job. Used on
+   Orders and Money, where an unconfirmed payment means a buyer is sitting there
+   wondering whether their money went nowhere. */
+.ws-task {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  border: 1px solid #bfe8d0;
+  border-left: 4px solid var(--ws-green);
+  border-radius: var(--ws-r);
+  background: var(--ws-green-s);
+}
+.ws-task h2 { margin: 8px 0 4px; font-size: 18px; letter-spacing: -.015em; }
+.ws-task p  { margin: 0; font-size: 13.5px; color: var(--ws-muted); }
+
+@media (min-width: 720px) {
+  .ws-task { flex-direction: row; align-items: center; justify-content: space-between; }
+  .ws-task > div:last-child { flex: none; }
+}
+
+/* A warning, not a task: nothing to do here, something to know. */
+.ws-note {
+  display: flex;
+  gap: 12px;
+  padding: 15px 17px;
+  margin-bottom: 16px;
+  border: 1px solid #fbe2c0;
+  border-radius: 13px;
+  background: #fffaf3;
+}
+.ws-note svg    { flex: none; color: var(--ws-warn); margin-top: 1px; }
+.ws-note strong { display: block; font-size: 14px; margin-bottom: 3px; }
+.ws-note p      { margin: 0; font-size: 13px; color: var(--ws-muted); }
+.ws-note a      { color: var(--ws-green-d); font-weight: 600; }
+
+.ws-flash {
+  padding: 13px 16px;
+  margin-bottom: 18px;
+  border-radius: 11px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.ws-flash-ok  { background: var(--ws-green-s); color: var(--ws-green-d); }
+.ws-flash-bad { background: #fdecec; color: #a32020; }
+
+/* ── Badges ─────────────────────────────────────────────────────────────── */
+
+/* One vocabulary for status across every page. Green = done, amber = needs you,
+   grey = not yet, red = over. A seller learns it once. */
+.ws-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ws-tag-ok      { background: var(--ws-green-s); color: var(--ws-green-d); }
+.ws-tag-warn    { background: #fff2dd; color: var(--ws-warn); }
+.ws-tag-neutral { background: #eef0f3; color: var(--ws-muted); }
+.ws-tag-bad     { background: #fdecec; color: #a32020; }
+
+/* ── The two-column page: content beside a sidebar ──────────────────────── */
+
+.ws-split { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+
+@media (min-width: 1000px) {
+  .ws-split { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); }
+}
+
+.ws-aside { display: grid; gap: 14px; }
+
+/* The dark call-to-action card. One per page at most — it is the loudest thing
+   on screen and a second one cancels the first. */
+.ws-promo {
+  padding: 22px;
+  border-radius: var(--ws-r);
+  background: var(--ws-ink);
+  color: #fff;
+}
+.ws-promo h3 { margin: 0 0 8px; font-size: 19px; letter-spacing: -.015em; }
+.ws-promo p  { margin: 0 0 16px; font-size: 13.5px; color: #aab2c0; }
+
+.ws-promo-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 11px;
+  background: var(--ws-green);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.ws-promo-btn:hover { background: var(--ws-green-d); }
+
+/* ── A keyed list: label on the left, number on the right ───────────────── */
+
+.ws-keys { list-style: none; margin: 0; padding: 0; }
+.ws-keys li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  font-size: 13.5px;
+}
+.ws-keys li + li { border-top: 1px solid var(--ws-line); }
+.ws-keys b { font-weight: 700; }
+
+/* ── Search ─────────────────────────────────────────────────────────────── */
+
+.ws-search { position: relative; margin-bottom: 4px; }
+
+.ws-search svg {
+  position: absolute;
+  left: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ws-faint);
+  pointer-events: none;
+}
+
+.ws-search input {
+  width: 100%;
+  padding: 13px 15px 13px 43px;
+  border: 1px solid var(--ws-line);
+  border-radius: 11px;
+  background: var(--ws-surface);
+  font: inherit;
+  font-size: 14px;
+}
+.ws-search input:focus {
+  outline: none;
+  border-color: var(--ws-green);
+  box-shadow: 0 0 0 3px rgb(15 157 88 / .13);
+}
+
+/* ── Rows: the list that replaces a table on a phone ────────────────────── */
+
+/* WHY ROWS AND NOT A TABLE. A five-column table on a 360px screen either
+   scrolls sideways — hiding the column the seller needs — or squeezes every
+   cell to two words. A row stacks instead: identity first, then the numbers,
+   then the one action. It reads the same on a phone and on a laptop. */
+
+.ws-rows {
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-r);
+  overflow: hidden;
+}
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 15px 17px;
+}
+.ws-row + .ws-row { border-top: 1px solid var(--ws-line); }
+.ws-row:hover { background: #fafbfc; }
+
+.ws-row-main { flex: 1; min-width: 0; }
+
+.ws-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ws-text);
+}
+.ws-row-title a { color: inherit; text-decoration: none; }
+.ws-row-title a:hover { color: var(--ws-green-d); }
+
+.ws-row-meta {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ws-muted);
+  overflow-wrap: anywhere;
+}
+.ws-row-sub  { margin: 3px 0 0; font-size: 12.5px; font-weight: 600; color: var(--ws-text); }
+.ws-row-warn { margin: 3px 0 0; font-size: 12px; font-weight: 600; color: var(--ws-warn); }
+
+/* The action column. Hugs the right and never shrinks, so a button cannot be
+   squeezed onto two lines by a long name beside it. */
+.ws-row-end { flex: none; display: flex; align-items: center; gap: 9px; }
+.ws-row-end form { margin: 0; }
+
+.ws-row-num { flex: none; text-align: right; }
+.ws-row-num b    { display: block; font-size: 14.5px; font-weight: 700; }
+.ws-row-num span { font-size: 12px; color: var(--ws-muted); }
+.ws-row-num .ws-in { color: var(--ws-green-d); }
+
+@media (max-width: 560px) {
+  /* Below this the action cannot sit beside the text without one of them
+     wrapping badly, so it drops onto its own line at full width. */
+  .ws-row { flex-wrap: wrap; }
+  .ws-row-end { width: 100%; }
+  .ws-row-end > * { flex: 1; justify-content: center; }
+}
+
+/* The circular initials beside a name. */
+.ws-face {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px; height: 40px;
+  border-radius: 999px;
+  background: var(--ws-ink);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.ws-thumb {
+  flex: none;
+  width: 46px; height: 46px;
+  border-radius: 11px;
+  object-fit: cover;
+  background: #eef0f3;
+}
+
+/* ── Section headings between blocks ────────────────────────────────────── */
+
+.ws-section {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 26px 0 12px;
+}
+.ws-section h2 { margin: 0; font-size: 17px; letter-spacing: -.015em; }
+.ws-section a  { font-size: 13px; font-weight: 600; color: var(--ws-green-d); text-decoration: none; }
+
+/* ── Empty states ───────────────────────────────────────────────────────── */
+
+/* The empty page is the one every new seller sees first, so it says where the
+   thing comes from and links to the screen that starts it. "No data" is a dead
+   end wearing a polite face. */
+.ws-empty {
+  padding: 52px 26px;
+  text-align: center;
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-r);
+}
+.ws-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px; height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 15px;
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+}
+.ws-empty h3 { margin: 0 0 7px; font-size: 17px; }
+.ws-empty p  { margin: 0 auto 18px; font-size: 13.5px; color: var(--ws-muted); max-width: 46ch; }
+
+/* ── Forms ──────────────────────────────────────────────────────────────── */
+
+.ws-form { display: grid; gap: 18px; }
+
+.ws-field { display: grid; gap: 7px; }
+.ws-field > label { font-size: 13.5px; font-weight: 600; }
+
+.ws-field input,
+.ws-field textarea,
+.ws-field select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--ws-line);
+  border-radius: 11px;
+  background: var(--ws-surface);
+  font: inherit;
+  font-size: 14.5px;
+}
+.ws-field input:focus,
+.ws-field textarea:focus,
+.ws-field select:focus {
+  outline: none;
+  border-color: var(--ws-green);
+  box-shadow: 0 0 0 3px rgb(15 157 88 / .13);
+}
+
+.ws-hint { margin: 0; font-size: 12.5px; color: var(--ws-muted); }
+
+/* Radio cards. The whole label is the target, not a 13px dot — this is used
+   one-handed on a phone, and a bare radio button is below every thumb-size
+   guideline there is. */
+.ws-choices { display: grid; gap: 10px; }
+
+@media (min-width: 620px) { .ws-choices { grid-template-columns: repeat(3, 1fr); } }
+
+.ws-choice {
+  display: block;
+  position: relative;
+  padding: 14px;
+  border: 1px solid var(--ws-line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.ws-choice input  { position: absolute; opacity: 0; pointer-events: none; }
+.ws-choice strong { display: block; font-size: 14px; margin-bottom: 3px; }
+.ws-choice span   { font-size: 12.5px; color: var(--ws-muted); }
+.ws-choice:has(input:checked) { border-color: var(--ws-green); background: var(--ws-green-s); }
+.ws-choice:has(input:focus-visible) { box-shadow: 0 0 0 3px rgb(15 157 88 / .13); }
+
+.ws-fold {
+  border: 1px solid var(--ws-line);
+  border-radius: 13px;
+  padding: 16px;
+}
+.ws-fold > summary { cursor: pointer; font-size: 14px; font-weight: 600; list-style: none; }
+.ws-fold > summary::-webkit-details-marker { display: none; }
+.ws-fold > summary::before { content: "\25B8  "; color: var(--ws-muted); }
+.ws-fold[open] > summary::before { content: "\25BE  "; }
+
+.ws-mono  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.ws-muted { color: var(--ws-muted); }
+.ws-fine  { font-size: 12.5px; color: var(--ws-faint); }

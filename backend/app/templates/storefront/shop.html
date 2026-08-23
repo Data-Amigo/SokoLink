@@ -26,6 +26,20 @@
 {% block body %}
 <div class="shell">
 
+  {% if preview %}
+    {# THE OWNER, LOOKING AT A CLOSED SHOP. Buyers never see this bar — the
+       route only sets `preview` for the account that owns the slug. It says
+       both halves of the truth: nobody else can reach this page, and the one
+       action that changes that. #}
+    <div class="preview-bar" role="status">
+      <div>
+        <strong>Preview — buyers cannot see this yet.</strong>
+        <span>This is exactly what they will get once you open the shop.</span>
+      </div>
+      <a href="/products">Open my shop</a>
+    </div>
+  {% endif %}
+
   <header class="topbar">
     {% if seller.avatar_url %}
       <img class="topbar-logo" src="{{ seller.avatar_url | media }}" alt="">

@@ -170,3 +170,70 @@ def validate_password_strength(password: str) -> None:
     """
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
+
+
+#: How long a proven phone stays proven while the seller finishes signing up.
+#: Short: it is a claim that this browser verified a number, and it should not
+#: outlive the sitting in which it was earned.
+PHONE_PROOF_LIFETIME = timedelta(minutes=20)
+
+#: The cookie carrying it. NOT a URL parameter — WAYS_OF_WORKING §5: a phone
+#: number in a URL leaks through history, referrers and forwarding.
+PHONE_COOKIE = "biashara_phone"
+
+
+def create_phone_token(phone: str, verified: bool) -> str:
+    """
+    Mint a signed token stating which number this browser is working with.
+
+    Two states travel in one token, and the difference is the whole security of
+    the flow:
+
+        verified=False   a code was SENT to this number. Proves nothing.
+        verified=True    a code was ENTERED correctly. The number is proven.
+
+    Signing it is what stops a browser editing the cookie from "I asked for a
+    code" to "I proved the number" — which would be the entire authentication
+    bypass.
+
+    Args:
+        phone: 2547XXXXXXXX.
+        verified: Whether the code has been entered correctly yet.
+
+    Returns:
+        A signed JWT with a short expiry.
+    """
+    now = datetime.now(UTC)
+    payload = {
+        "sub": phone,
+        "vrf": verified,
+        "iat": now,
+        "exp": now + PHONE_PROOF_LIFETIME,
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+
+
+def read_phone_token(token: str) -> tuple[str, bool]:
+    """
+    Read a phone token back.
+
+    Args:
+        token: The cookie value.
+
+    Returns:
+        ``(phone, verified)``.
+
+    Raises:
+        AuthError: If the token is missing, expired, tampered with, or malformed.
+            One error for every cause — the caller sends them back to the start
+            either way, and distinguishing them tells an attacker which of their
+            edits the signature caught.
+    """
+    try:
+        payload: dict[str, Any] = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        phone = str(payload["sub"])
+        verified = bool(payload.get("vrf", False))
+    except (jwt.PyJWTError, KeyError, ValueError) as exc:
+        raise AuthError("Start again.") from exc
+
+    return phone, verified

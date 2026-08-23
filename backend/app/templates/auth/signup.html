@@ -1,23 +1,30 @@
-{# Create an account — step 1 of onboarding.
+{# Create a shop — step 1 of onboarding.
 
-   THE SPLIT SCREEN. Most people land here from an ad, a WhatsApp forward or a
-   TikTok bio, having read no landing page. The left pane is the explanation,
-   placed where the hesitation actually happens. On a phone the form comes
-   first — see the note in app.css.
+   REWRITTEN 2026-08-23. This page used to sell the content engine — Intel,
+   hooks, scripts, captions, Canva, CapCut — from a direction that was parked
+   when the product became store-first. It was the first thing every seller saw
+   and it described a product we are not building.
 
-   THREE FIELDS. Every extra one costs signups, and everything else about a
-   creator — their handle, followers, catalogue — arrives free from the
-   platform once they connect an account.
+   THE PITCH IS NOW THE SHOP: add what you sell, share one link, get paid by
+   M-Pesa. Content help is a later, optional thing and is not mentioned here.
 
-   Unlike login, signup MAY say "that email is already registered": whoever
-   sees it has just claimed the address, and hiding it leaves them stuck with
-   no idea why nothing happened. The asymmetry is documented in
-   services/accounts.py.
+   THE SPLIT SCREEN. Most people land here from a WhatsApp forward having read
+   no landing page. The left pane is the explanation, placed where the
+   hesitation actually happens. On a phone the form comes first — see app.css.
+
+   FOUR FIELDS, and the fourth earns its place. A shop CANNOT OPEN without a
+   WhatsApp number — published_needs_whatsapp refuses a live storefront nobody
+   can contact — and nothing else in the app collects one. Without it here, every
+   seller reached the publish step and was stuck with no way forward. Asking at
+   signup costs a field; not asking cost the whole flow.
+
+   Once the WhatsApp bot exists this page is replaced by a natural conversation
+   with it, and the number comes from the sender instead.
 #}
 {% extends "app_base.html" %}
 
-{% block title %}Create your workspace · Biashara Mall{% endblock %}
-{% block description %}Turn what is working on TikTok into hooks, scripts and captions that sell.{% endblock %}
+{% block title %}Open your shop · Biasharamall{% endblock %}
+{% block description %}Sell on WhatsApp. Add what you sell, share one link, get paid by M-Pesa.{% endblock %}
 
 {# No navigation on an auth page: there is nowhere to go but forward. #}
 {% block chrome %}{% endblock %}
@@ -31,56 +38,50 @@
 
   <div class="auth-split">
 
-    {# ── The case ──────────────────────────────────────────────────────────
-       Second in the DOM, first on a wide screen. Hidden from screen readers
-       below the fold? No — it is real content, and someone using a reader
-       deserves the explanation as much as anyone. Only the decorative
-       pipeline arrows are hidden. #}
+    {# ── The case ────────────────────────────────────────────────────────── #}
     <section class="auth-pitch">
       <span class="pill">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" aria-hidden="true">
-          <rect x="3" y="8" width="18" height="12" rx="2"/>
-          <path d="M12 8v12M3 12h18M7.5 8a2.5 2.5 0 1 1 2-4c1.5 1 2.5 4 2.5 4"/>
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 8h16l-1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/>
         </svg>
         Free to start
       </span>
 
-      <h1 class="hero-title">Create content that<br>gets customers.</h1>
+      <h1 class="hero-title">Your shop,<br>inside WhatsApp.</h1>
 
       <p class="hero-sub">
-        Start with a product or idea. Biashara Intel helps you understand what is
-        working, then the AI Content Brain turns it into hooks, scripts and captions.
+        Add what you sell, share one link, and get paid by M-Pesa. No website to
+        build, and no commission — buyers pay you directly.
       </p>
 
-      {# THE THREE CARDS ARE A PIPELINE, not a feature list:
+      {# THE THREE CARDS ARE THE SELLER'S ACTUAL PATH, in order:
 
-           Biashara Intel ──▶ AI Content Brain ──▼ Creative Engine ──▶ publish
-             understand           draft                design
+           Add products ──▶ Share one link ──▼ Get paid by M-Pesa
 
-         The connectors are what carry that. Without them a reader sees three
-         unrelated boxes and has to work out the relationship themselves. #}
+         The connectors carry that. Without them a reader sees three unrelated
+         boxes and has to work out the relationship themselves. #}
       <div class="feature-stack">
 
         <article class="feature-card">
           <div class="feature-head">
             <span class="feature-icon" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   stroke-width="2" stroke-linecap="round">
-                <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14M5 12h14"/>
               </svg>
             </span>
             <div>
-              <div class="feature-name">Biashara Intel</div>
-              <div class="feature-kicker">TikTok + market signals</div>
+              <div class="feature-name">Add what you sell</div>
+              <div class="feature-kicker">A name and a price is enough</div>
             </div>
           </div>
 
           <p class="feature-note">
-            See useful patterns, customer questions, and content opportunities.
+            Type your stock in, with sizes and photos. Selling bales or packs?
+            Say so, and buyers see “KES 3,000 for 30 pairs”.
           </p>
 
-          {# Intel feeds the Brain. #}
           <span class="flow-mark flow-next" aria-hidden="true">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
@@ -95,46 +96,51 @@
             <span class="feature-icon feature-icon-solid" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3zM9.5 20h5"/>
+                <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/>
+                <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>
               </svg>
             </span>
             <div>
-              <div class="feature-name">AI Content Brain</div>
-              <div class="feature-kicker">Turn insight into content</div>
+              <div class="feature-name">Share one link</div>
+              <div class="feature-kicker">Chats, status, groups</div>
             </div>
           </div>
 
-          {# Stacked chips: these name what the product MAKES, so they get room. #}
+          {# These name where the link actually goes — the whole distribution
+             story in three words. #}
           <div class="chip-row">
             <span class="chip chip-stack">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 3a5.5 5.5 0 0 0-3.2 10V16h6.4v-3A5.5 5.5 0 0 0 12 3zM10 19h4"/>
+                <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4L3 21l1.1-3.3A8.4 8.4 0 1 1 21 11.5z"/>
               </svg>
-              Hooks
+              WhatsApp
             </span>
             <span class="chip chip-stack">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
-                <path d="M14 3v5h5M9 13h6M9 17h4"/>
+                <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
               </svg>
-              Scripts
+              Status
             </span>
             <span class="chip chip-stack">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="3" y="5" width="18" height="14" rx="2"/>
-                <path d="M7 14h4M14 14h3"/>
+                <path d="M16 20v-2a4 4 0 0 0-8 0v2M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                <path d="M21 20v-2a3 3 0 0 0-2-2.8"/>
               </svg>
-              Captions
+              Groups
             </span>
           </div>
+
+          <p class="feature-note">
+            Your shop opens right inside WhatsApp when a buyer taps it. Nothing
+            to download.
+          </p>
         </article>
 
         <article class="feature-card">
-          {# The Brain feeds the Creative Engine — hence a DOWN arrow, entering
-             this card from above rather than leaving the last one. #}
+          {# Sharing leads to payment — hence a DOWN arrow entering this card. #}
           <span class="flow-mark flow-down" aria-hidden="true">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
@@ -142,31 +148,19 @@
             </svg>
           </span>
 
-          <p class="eyebrow" style="margin-bottom: var(--s-2)">Creative engine</p>
+          <p class="eyebrow" style="margin-bottom: var(--s-2)">Getting paid</p>
 
           <div class="feature-head" style="margin-bottom: var(--s-3)">
             <div class="feature-name" style="font-size:1rem; max-width: 13ch">
-              Design, review, then publish
+              Straight to your M-Pesa
             </div>
-            {# Inline chips: these name third-party TOOLS, and the tool is not
-               the point — so they stay small. #}
+            {# The destinations a Kenyan seller already has. Pochi first: it needs
+               no business registration, which is why most sellers use it. #}
             <div class="chip-row" style="margin-left:auto">
-              <span class="chip">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="2" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9"/><path d="M15 9.5a3.6 3.6 0 1 0 0 5" stroke-linecap="round"/>
-                </svg>
-                Canva
-              </span>
-              <span class="chip">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="3" y="6" width="12" height="12" rx="2"/><path d="m15 10 6-3v10l-6-3z"/>
-                </svg>
-                CapCut
-              </span>
+              <span class="chip">Pochi</span>
+              <span class="chip">Till</span>
+              <span class="chip">Paybill</span>
             </div>
-            {# Publish closes the pipeline. #}
             <span class="flow-mark flow-send" aria-hidden="true">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -175,39 +169,30 @@
             </span>
           </div>
 
-          {# The single most important sentence on this pane. Creators are wary
-             of tools that post on their behalf; saying so before the form is
-             reached removes the objection rather than answering it later. #}
+          {# The single most important sentence on this pane. A seller's first
+             question about any tool that touches money is "who holds it?" —
+             answered here, before the form is reached. #}
           <p class="feature-note">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>
             </svg>
-            <span><strong>User approval first.</strong> Publish to TikTok, Instagram or
-            YouTube when ready.</span>
+            <span><strong>Your money is yours.</strong> Buyers pay your number
+            directly. We never hold it and take no cut of a sale.</span>
           </p>
         </article>
 
       </div>
 
-      {# The only mention of selling on this page, and it comes last. The pitch
-         is content first; a creator not ready to open a shop must not read
-         this as a shop-building tool. #}
+      {# Content help is parked, and mentioned only as a later maybe — a seller
+         here is trying to sell something today. #}
       <div style="display:flex; justify-content:center">
         <span class="store-pill">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4 8h16l-1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/>
+            <path d="M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3zM9.5 20h5"/>
           </svg>
-          Audience ready? Open your store
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M5 12h14M13 6l6 6-6 6"/>
-          </svg>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4L3 21l1.1-3.3A8.4 8.4 0 1 1 21 11.5z"/>
-          </svg>
+          Already on TikTok? Connect it later
         </span>
       </div>
     </section>
@@ -219,24 +204,23 @@
         <div class="auth-card-head">
           <div>
             <p class="eyebrow">Step 1 of 3</p>
-            <h1>Create your workspace</h1>
+            <h1>Create your shop</h1>
           </div>
-          {# Time-to-finish, not a progress percentage. "About 1 minute" is what
-             stops a three-field form reading as the start of a long one. #}
           <span class="pill pill-soft">About 1 minute</span>
         </div>
 
         <div class="steps">
-          {# Width comes from the template, not a per-step CSS class, so a
-             fourth step never means a fourth rule. #}
           <div class="steps-track" role="progressbar" aria-valuenow="1" aria-valuemin="1"
                aria-valuemax="3" aria-label="Signup progress: step 1 of 3">
             <div class="steps-fill" style="width: 33.3%"></div>
           </div>
+          {# These are the three things a seller ACTUALLY does next, and all
+             three exist. The previous version promised "Make content" and
+             "Review & publish", neither of which was built. #}
           <div class="steps-labels">
-            <span class="is-current">Create account</span>
-            <span>Make content</span>
-            <span>Review &amp; publish</span>
+            <span class="is-current">Create your shop</span>
+            <span>Add products</span>
+            <span>Share your link</span>
           </div>
         </div>
 
@@ -249,18 +233,31 @@
         <form method="post" action="/signup" novalidate>
 
           <div class="field">
-            <label class="label" for="shop_name">Business or creator name</label>
+            <label class="label" for="shop_name">Your shop name</label>
             <input class="input" type="text" id="shop_name" name="shop_name"
                    value="{{ shop_name or '' }}"
                    autocomplete="organization" required autofocus
                    placeholder="Zuma Mitumba Bales"
                    data-slug-source>
-            {# Shows what the name becomes, live. A creator who sees their own
-               web address forming chooses a better name than one told, after
+            {# Shows the actual link forming, live. A seller who sees the address
+               they are about to share chooses a better name than one told, after
                the fact, what we picked for them. #}
             <p class="field-hint">
-              Your workspace: <span class="mono strong" data-slug-preview>your-name</span>
+              Your link: <span class="mono strong">biasharamall.com/shop/<span data-slug-preview>your-shop</span></span>
             </p>
+          </div>
+
+          <div class="field">
+            <label class="label" for="whatsapp_number">WhatsApp number</label>
+            <input class="input" type="tel" id="whatsapp_number" name="whatsapp_number"
+                   value="{{ whatsapp_number or '' }}"
+                   autocomplete="tel" inputmode="tel" required
+                   placeholder="07XX XXX XXX">
+            {# A fourth field on a signup form is a real cost, and this one earns
+               it: a shop CANNOT OPEN without a number, because a live storefront
+               nobody can contact is a dead end. Asking here beats a seller
+               reaching the publish step and finding no way forward. #}
+            <p class="field-hint">Buyers use this to reach you. It can be your Pochi number.</p>
           </div>
 
           <div class="field">
@@ -288,9 +285,6 @@
                      minlength="{{ min_password_length }}"
                      placeholder="At least {{ min_password_length }} characters"
                      data-password>
-              {# A reveal toggle, because the alternative on a phone keyboard is
-                 a confirm-password field — one more thing to type, and the
-                 commonest place a signup is abandoned. #}
               <button type="button" class="input-action" data-password-toggle
                       aria-label="Show password" aria-pressed="false">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -300,27 +294,24 @@
                 </svg>
               </button>
             </div>
-            {# Length only, no character-class theatre — the rule the server
-               actually enforces, stated before they hit it. #}
             <p class="field-hint">Use {{ min_password_length }} characters or more.</p>
           </div>
 
           <div class="callout" style="margin-top: var(--s-5)">
             <span class="callout-icon" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   stroke-width="2" stroke-linecap="round">
-                <path d="M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3zM9.5 20h5"/>
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 8h16l-1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/>
               </svg>
             </span>
             <span>
-              <strong>Next:</strong> tell us what you sell and get your first
-              hooks, script and caption.
+              <strong>Next:</strong> add your first product and open your shop.
             </span>
           </div>
 
           <button type="submit" class="btn btn-primary btn-block"
                   style="margin-top: var(--s-4); padding-block: 0.95rem; font-size: 1rem">
-            Start creating
+            Create my shop
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                  stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
               <path d="M5 12h14M13 6l6 6-6 6"/>
@@ -329,7 +320,7 @@
         </form>
 
         <p class="auth-alt">
-          Already have an account? <a href="/login">Sign in</a>
+          Already have a shop? <a href="/login">Sign in</a>
         </p>
 
         {% include "partials/trust.html" %}

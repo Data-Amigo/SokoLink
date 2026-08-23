@@ -1,0 +1,59 @@
+{# Step 2 — the six digits.
+
+   ONE WIDE FIELD, not six boxes. Six boxes look better and break paste, break
+   SMS autofill, and fight the on-screen keyboard on every jump. `inputmode`
+   and `autocomplete=one-time-code` let a phone offer the code from the
+   notification, which is the fastest path there is.
+#}
+{% extends "auth/seller_base.html" %}
+
+{% block title %}Enter your code · Biasharamall{% endblock %}
+
+{% block card %}
+  <a class="sa-back" href="/seller/login">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M15 5l-7 7 7 7"/>
+    </svg>
+    Use a different number
+  </a>
+
+  <span class="sa-card-icon" aria-hidden="true">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/>
+    </svg>
+  </span>
+
+  <h1>Enter your code</h1>
+  <p>
+    We sent a six-digit code on WhatsApp to
+    <strong>+{{ phone }}</strong>. It expires in 10 minutes.
+  </p>
+
+  <form method="post" action="/seller/verify">
+    <label class="sa-label sr-only" for="code">Six-digit code</label>
+    <input class="sa-code" type="text" id="code" name="code"
+           inputmode="numeric" autocomplete="one-time-code"
+           pattern="[0-9]*" maxlength="6" required autofocus
+           placeholder="······">
+
+    <button class="sa-btn" type="submit">
+      Verify and continue
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 12h14M13 6l6 6-6 6"/>
+      </svg>
+    </button>
+  </form>
+
+  <form method="post" action="/seller/login">
+    <input type="hidden" name="phone" value="{{ phone }}">
+    <p class="sa-note">
+      Didn't get it?
+      <button type="submit"
+              style="border:0;background:none;padding:0;font:inherit;color:var(--sa-green-dark);
+                     text-decoration:underline;cursor:pointer">Send it again</button>
+    </p>
+  </form>
+{% endblock %}

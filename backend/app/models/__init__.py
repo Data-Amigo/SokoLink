@@ -32,6 +32,7 @@ from app.models.enums import (
     VerificationMethod,
 )
 from app.models.job import Job
+from app.models.login_code import LoginCode
 from app.models.order import Order, OrderItem, Payment
 from app.models.payment_method import PaymentMethod
 from app.models.post import Post
@@ -40,6 +41,7 @@ from app.models.scrape_job import ScrapeJob
 from app.models.seller import Seller
 from app.models.snapshot import AccountMetricSnapshot, PostMetricSnapshot
 from app.models.social_account import SocialAccount
+from app.models.wa_message import WaMessage
 
 __all__ = [
     "Account",
@@ -51,6 +53,7 @@ __all__ = [
     "IngestMethod",
     "Job",
     "JobStatus",
+    "LoginCode",
     "Order",
     "OrderItem",
     "OrderStatus",
@@ -68,4 +71,5 @@ __all__ = [
     "Seller",
     "SocialAccount",
     "VerificationMethod",
+    "WaMessage",
 ]
