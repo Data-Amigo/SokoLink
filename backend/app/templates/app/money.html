@@ -1,0 +1,128 @@
+{# The money tracker — seller-only.
+
+   Replaced the social analytics page, which showed views and followers from the
+   content-first direction that was parked. A seller running a shop opens the app
+   asking one question: did I make any money, and is anyone waiting on me?
+
+   THERE IS NO BALANCE TILE, and that is deliberate. Buyers pay the seller's
+   Pochi or till directly — we are never in the money path and hold nothing, so
+   any balance shown here would be inferred. The first time it disagreed with
+   their own M-Pesa, they would stop trusting every other number on this page.
+   The tile in that position is "waiting on you", which is both honest and the
+   only number that is actually actionable.
+
+   PRIVATE TO THE SELLER. A buyer sees their own order and receipt, never this.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Money · Biasharamall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head">
+    <h1>Money</h1>
+    <p class="muted">Orders, M-Pesa payments, and what still needs you.</p>
+  </div>
+
+  {% if summary.awaiting_kes %}
+    {# Leads the page when it is non-zero: a buyer has said they paid and is
+       waiting to be believed. Every hour it sits there is an hour somebody
+       wonders whether their money went nowhere. #}
+    <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
+      <div class="cluster cluster-between">
+        <div>
+          <span class="badge badge-warn">Needs you</span>
+          <h3 style="margin-top: var(--s-2)">
+            KSh {{ '{:,}'.format(summary.awaiting_kes) }} waiting to be confirmed
+          </h3>
+          <p class="muted small">
+            Check your M-Pesa messages, then confirm so the buyer knows it went through.
+          </p>
+        </div>
+        <a href="/orders" class="btn btn-primary btn-sm">Review orders</a>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="grid grid-2" style="margin-bottom: var(--s-5)">
+    <div class="stat">
+      <div class="stat-label">Sales this month</div>
+      <div class="stat-value">KSh {{ '{:,}'.format(summary.sales_this_month) }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Waiting on you</div>
+      <div class="stat-value">KSh {{ '{:,}'.format(summary.awaiting_kes) }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Paid orders</div>
+      <div class="stat-value">{{ summary.paid_orders }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Average order</div>
+      <div class="stat-value">KSh {{ '{:,}'.format(summary.average_order) }}</div>
+    </div>
+  </div>
+
+  <div class="cluster cluster-between" style="margin-bottom: var(--s-3)">
+    <h2 style="margin:0">Recent transactions</h2>
+    <a href="/orders" class="small">View all</a>
+  </div>
+
+  {% if transactions %}
+    <div class="table-wrap card card-flush">
+      <table class="table">
+        <tbody>
+          {% for order in transactions %}
+            <tr>
+              <td>
+                <a href="/orders/{{ order.reference }}" class="mono strong">{{ order.reference }}</a>
+                <div class="tiny subtle">
+                  {{ order.paid_to_kind|capitalize }} ·
+                  {{ order.created_at.strftime('%d %b, %H:%M') }} ·
+                  {{ order.buyer_name }}
+                </div>
+              </td>
+              <td class="num">
+                {% if order.status == 'paid' %}
+                  <span class="strong" style="color: var(--brand-600, #0b7c44)">
+                    +KSh {{ '{:,}'.format(order.total_kes) }}
+                  </span>
+                  <div class="tiny subtle">Paid</div>
+                {% elif order.status == 'awaiting_confirmation' %}
+                  <span class="strong">KSh {{ '{:,}'.format(order.total_kes) }}</span>
+                  <div class="tiny" style="color: var(--warn, #b45309)">Confirm this</div>
+                {% elif order.status == 'pending' %}
+                  <span class="subtle">KSh {{ '{:,}'.format(order.total_kes) }}</span>
+                  <div class="tiny subtle">Unpaid</div>
+                {% else %}
+                  <span class="subtle">KSh {{ '{:,}'.format(order.total_kes) }}</span>
+                  <div class="tiny subtle">{{ order.status|capitalize }}</div>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card center">
+      <h3>No orders yet</h3>
+      <p class="muted small">
+        When someone buys from
+        {% if seller.is_published %}
+          <a href="/shop/{{ seller.slug }}">your shop</a>, it appears here.
+        {% else %}
+          your shop, it appears here. <a href="/products">Open your shop</a> first.
+        {% endif %}
+      </p>
+    </div>
+  {% endif %}
+
+  <p class="tiny subtle" style="margin-top: var(--s-5)">
+    Buyers pay your M-Pesa number directly, so we cannot see your balance —
+    only the orders placed through your shop. Check M-Pesa for the real thing.
+  </p>
+
+</div>
+{% endblock %}

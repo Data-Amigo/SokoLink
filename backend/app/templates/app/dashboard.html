@@ -1,84 +1,151 @@
 {# The dashboard.
 
-   Two states, and the empty one matters more. Every creator who ever signs up
-   sees it, and it has exactly one job: get them to connect an account. So it
-   holds one sentence, one reason, and one button — nothing to read past and
-   nothing else to click.
+   Two states, and the empty one matters more: every seller who signs up sees
+   it, and it decides whether they do the three things that make a shop work.
+
+   It used to say "Connect your TikTok" — the content-first direction, now
+   parked. Connecting a social account never let anyone sell anything.
+
+   THE CHECKLIST IS IN DEPENDENCY ORDER: a product to sell, a way to be paid,
+   then open the doors. Each row links straight to the screen that completes
+   it, because a checklist that explains rather than acts gets read once and
+   abandoned.
 #}
 {% extends "app_base.html" %}
 
-{% block title %}Dashboard · Biashara Mall{% endblock %}
+{% block title %}Dashboard · Biasharamall{% endblock %}
 
 {% block body %}
 <div class="container page">
 
   <div class="page-head">
-    {# Their own name, not "Dashboard". They know what page they are on. #}
+    {# Their own shop name, not "Dashboard". They know what page they are on. #}
     <h1>{{ seller.display_name if seller else account.email }}</h1>
-    <p class="muted">Here is how your content is doing.</p>
+    {% if setup_complete %}
+      <p class="muted">
+        Your shop is open at
+        <a href="/shop/{{ seller.slug }}">biasharamall.com/shop/{{ seller.slug }}</a>
+        — share that link anywhere.
+      </p>
+    {% else %}
+      <p class="muted">Three things and you can start selling.</p>
+    {% endif %}
   </div>
 
-  {% if not accounts %}
+  {% if not setup_complete %}
 
-    <div class="card card-lg">
-      <div class="empty">
-        <div class="empty-icon" aria-hidden="true">📈</div>
-        <h3>Connect your TikTok to get started</h3>
-        <p>
-          We pull your views, followers and comments so you can see what is
-          actually working — and what is not.
-        </p>
-        <a href="/accounts/connect" class="btn btn-primary">Connect TikTok</a>
-        {# Answers the objection before it is raised. The single most common
-           reason a creator abandons this screen is fear of a password grab. #}
-        <p class="tiny subtle" style="margin-top: var(--s-4)">
-          No password needed — you paste a short code into your bio.
-        </p>
+    <div class="card card-lg" style="margin-bottom: var(--s-5)">
+      <div class="stack">
+
+        {# 1 ── something to sell ─────────────────────────────────────────── #}
+        <div class="cluster cluster-between">
+          <div>
+            {% if steps.has_product %}
+              <span class="badge badge-brand">Done</span>
+            {% else %}
+              <span class="badge badge-neutral">1</span>
+            {% endif %}
+            <h3 style="margin-top: var(--s-2)">Add what you sell</h3>
+            <p class="muted small">
+              A name and a price is enough. Sizes, photos and bulk pricing if you have them.
+            </p>
+          </div>
+          <a href="/products/new"
+             class="btn {{ 'btn-secondary' if steps.has_product else 'btn-primary' }} btn-sm">
+            {{ 'Add another' if steps.has_product else 'Add a product' }}
+          </a>
+        </div>
+
+        {# 2 ── a way to be paid ──────────────────────────────────────────── #}
+        <div class="cluster cluster-between">
+          <div>
+            {% if steps.has_payment %}
+              <span class="badge badge-brand">Done</span>
+            {% else %}
+              <span class="badge badge-neutral">2</span>
+            {% endif %}
+            <h3 style="margin-top: var(--s-2)">Say where the money goes</h3>
+            <p class="muted small">
+              Pochi la Biashara, a Till or a Paybill. Buyers pay you directly —
+              we never hold it.
+            </p>
+          </div>
+          <a href="/settings/payment"
+             class="btn {{ 'btn-secondary' if steps.has_payment else 'btn-primary' }} btn-sm">
+            {{ 'Change' if steps.has_payment else 'Set up payments' }}
+          </a>
+        </div>
+
+        {# 3 ── open the doors ────────────────────────────────────────────── #}
+        <div class="cluster cluster-between">
+          <div>
+            {% if steps.is_open %}
+              <span class="badge badge-brand">Done</span>
+            {% else %}
+              <span class="badge badge-neutral">3</span>
+            {% endif %}
+            <h3 style="margin-top: var(--s-2)">Publish and open your shop</h3>
+            <p class="muted small">
+              {% if catalogue.needs_price %}
+                {{ catalogue.needs_price }}
+                item{{ '' if catalogue.needs_price == 1 else 's' }} still need a price.
+              {% else %}
+                Nothing reaches a buyer until you publish it.
+              {% endif %}
+            </p>
+          </div>
+          <a href="/products"
+             class="btn {{ 'btn-secondary' if steps.is_open else 'btn-primary' }} btn-sm">
+            Go to products
+          </a>
+        </div>
+
       </div>
     </div>
 
   {% else %}
 
-    <div class="grid grid-3">
-      {% for social in accounts %}
-        <article class="card">
-          <div class="cluster cluster-between" style="margin-bottom: var(--s-3)">
-            <span class="badge badge-brand">{{ social.platform|capitalize }}</span>
-            {% if social.last_synced_at %}
-              <span class="tiny subtle">Synced {{ social.last_synced_at.strftime('%d %b') }}</span>
-            {% else %}
-              <span class="badge badge-warn">Never synced</span>
-            {% endif %}
+    {% if money.awaiting_kes %}
+      <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
+        <div class="cluster cluster-between">
+          <div>
+            <span class="badge badge-warn">Needs you</span>
+            <h3 style="margin-top: var(--s-2)">
+              KSh {{ '{:,}'.format(money.awaiting_kes) }} waiting to be confirmed
+            </h3>
+            <p class="muted small">A buyer says they have paid. Check M-Pesa, then confirm.</p>
           </div>
+          <a href="/orders" class="btn btn-primary btn-sm">Review orders</a>
+        </div>
+      </div>
+    {% endif %}
 
-          <h3>@{{ social.handle }}</h3>
-          <p class="muted small">{{ social.display_name or '' }}</p>
+    <div class="grid grid-3" style="margin-bottom: var(--s-5)">
+      <div class="stat">
+        <div class="stat-label">Sales this month</div>
+        <div class="stat-value">KSh {{ '{:,}'.format(money.sales_this_month) }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Paid orders</div>
+        <div class="stat-value">{{ money.paid_orders }}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Live products</div>
+        <div class="stat-value">{{ catalogue.published }}</div>
+      </div>
+    </div>
 
-          <div class="cluster" style="margin-top: var(--s-4)">
-            <div>
-              <div class="tiny subtle">Followers</div>
-              {# Thousands separators, because 22000 and 220000 are the same
-                 shape at a glance and they are wildly different businesses. #}
-              <div class="strong">{{ "{:,}".format(social.follower_count or 0) }}</div>
-            </div>
-            <div>
-              <div class="tiny subtle">Posts</div>
-              <div class="strong">{{ "{:,}".format(social.post_count or 0) }}</div>
-            </div>
-          </div>
-
-          <div class="cluster" style="margin-top: var(--s-5); flex-wrap: nowrap">
-            <a href="/analytics" class="btn btn-secondary btn-sm" style="flex:1">View analytics</a>
-            <form method="post" action="/accounts/{{ social.id }}/sync" style="flex:1">
-              <button type="submit" class="btn btn-primary btn-sm btn-block">Sync now</button>
-            </form>
-          </div>
-        </article>
-      {% endfor %}
-
-      <a href="/accounts/connect" class="card cluster" style="justify-content:center; text-decoration:none; border-style:dashed">
-        <span class="strong muted">+ Connect another account</span>
-      </a>
+    <div class="card">
+      <div class="cluster cluster-between">
+        <div>
+          <h3>Share your shop</h3>
+          <p class="muted small">
+            Paste this in WhatsApp, your TikTok bio, your Instagram bio — anywhere.
+          </p>
+          <p><code class="mono strong code-value">biasharamall.com/shop/{{ seller.slug }}</code></p>
+        </div>
+        <a href="/shop/{{ seller.slug }}" class="btn btn-secondary btn-sm">View shop</a>
+      </div>
     </div>
 
   {% endif %}

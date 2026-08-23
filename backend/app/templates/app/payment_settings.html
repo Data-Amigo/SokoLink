@@ -39,6 +39,34 @@
     </div>
   {% endif %}
 
+  {% if not seller.whatsapp_number %}
+    <div class="callout" style="margin-bottom: var(--s-4)">
+      <div>
+        <strong>Your shop cannot open without a WhatsApp number.</strong>
+        <p class="muted small">
+          It is how buyers reach you, and a live shop nobody can contact is a
+          dead end. Add it below.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+
+  <form method="post" action="/settings/shop/contact" class="card stack"
+        style="margin-bottom: var(--s-5)">
+    <div class="stack-sm">
+      <label class="label" for="whatsapp_number">Your WhatsApp number</label>
+      <input class="input" type="tel" id="whatsapp_number" name="whatsapp_number"
+             value="{{ seller.whatsapp_number or '' }}"
+             inputmode="tel" required placeholder="07XX XXX XXX">
+      <p class="tiny subtle">
+        Buyers use this to message you, and you sign in with it.
+      </p>
+    </div>
+    <div class="cluster">
+      <button class="btn btn-primary" type="submit">Save number</button>
+    </div>
+  </form>
+
   <form method="post" action="/settings/payment" class="card stack">
 
     <div class="stack-sm">

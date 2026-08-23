@@ -57,12 +57,15 @@
 
         {% if account %}
           <nav class="nav" aria-label="Main">
+            {# Ordered by what a seller does, not by what was built first:
+               stock it, watch it sell, see the money, get paid. Accounts is
+               last because connecting TikTok is optional and comes later. #}
             <a href="/dashboard" {% if nav == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
-            <a href="/analytics" {% if nav == 'analytics' %}aria-current="page"{% endif %}>Analytics</a>
-            <a href="/accounts"  {% if nav == 'accounts'  %}aria-current="page"{% endif %}>Accounts</a>
             <a href="/products"  {% if nav == 'products'  %}aria-current="page"{% endif %}>Products</a>
             <a href="/orders"    {% if nav == 'orders'    %}aria-current="page"{% endif %}>Orders</a>
+            <a href="/analytics" {% if nav == 'analytics' %}aria-current="page"{% endif %}>Money</a>
             <a href="/settings/payment" {% if nav == 'settings' %}aria-current="page"{% endif %}>Payments</a>
+            <a href="/accounts"  {% if nav == 'accounts'  %}aria-current="page"{% endif %}>Accounts</a>
             {# Logout is a POST. A GET logout can be triggered by any image tag
                on any site, which is a real (if petty) way to annoy a user. #}
             <form method="post" action="/logout">
