@@ -19,9 +19,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, PostgresDsn, field_validator, model_validator
+from pydantic_core.core_schema import ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The repo root holds the single .env shared by the app, Alembic and the tests.
@@ -155,6 +156,57 @@ class Settings(BaseSettings):
     #: credentials — see app/secrets_vault.py. Refused in prod if left at the
     #: default; see the validator below.
     secret_key: str = Field(default=DEV_SECRET_KEY)
+
+    @field_validator("database_url", "test_database_url", mode="before")
+    @classmethod
+    def _blank_url_is_not_a_url(cls, value: Any, info: ValidationInfo) -> Any:
+        """
+        Turn a blank or whitespace-only database URL into a message that helps.
+
+        THIS EXISTS BECAUSE OF A REAL HOUR LOST. A Railway variable reference
+        that does not resolve — a service renamed, or a typo in
+        ``${{Postgres.DATABASE_URL}}`` — is not an error there. It expands to
+        nothing, and the container receives ``DATABASE_URL=' \\n'``. Pydantic
+        then reported:
+
+            Input should be a valid URL, relative URL without a base
+            [type=url_parsing, input_value=' \\n']
+
+        which is true, and tells you nothing about what to do. A deploy that
+        fails should name the fix, not the symptom.
+
+        Whitespace is also stripped, so a value pasted with a trailing newline
+        works rather than failing for a reason nobody can see in a dashboard.
+
+        Args:
+            value: The raw environment value.
+            info: Carries the field name, for a message that names the variable.
+
+        Returns:
+            The trimmed URL; or None for a blank ``TEST_DATABASE_URL``, which is
+            legitimately unset in production.
+
+        Raises:
+            ValueError: If ``DATABASE_URL`` is present but blank.
+        """
+        if not isinstance(value, str):
+            return value
+
+        trimmed = value.strip()
+        if trimmed:
+            return trimmed
+
+        if info.field_name == "test_database_url":
+            # Unset is the correct state in production, and an empty box in a
+            # dashboard means the same thing as no box at all.
+            return None
+
+        raise ValueError(
+            "DATABASE_URL is set but empty. On Railway this usually means a "
+            "variable reference did not resolve — check the database service is "
+            "named exactly as written in ${{Postgres.DATABASE_URL}} and lives in "
+            "the same project."
+        )
 
     @model_validator(mode="after")
     def _production_must_not_use_development_defaults(self) -> Settings:

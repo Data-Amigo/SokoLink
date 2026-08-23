@@ -195,3 +195,55 @@ class TestMpesaKeysAcceptEitherPrefix:
     def test_it_still_defaults_to_sandbox(self) -> None:
         """A deploy that sets neither cannot move real money."""
         assert build().daraja_environment == "sandbox"
+
+
+class TestABlankDatabaseUrlIsNotAUrl:
+    """
+    A Railway variable reference that does not resolve produces whitespace, not
+    an error — the container receives ``DATABASE_URL=' \n'``.
+
+    Pydantic's own message for that is "Input should be a valid URL, relative
+    URL without a base", which is true and useless: it describes the symptom and
+    names no fix. These tests pin the message that replaces it, because a deploy
+    that fails should say what to do about it.
+    """
+
+    def test_a_whitespace_url_names_the_variable_and_the_likely_cause(self) -> None:
+        """The exact value seen in production when a reference did not resolve."""
+        with pytest.raises(ValidationError, match="DATABASE_URL is set but empty"):
+            build(database_url=" \n")
+
+    def test_an_empty_url_fails_the_same_way(self) -> None:
+        with pytest.raises(ValidationError, match="DATABASE_URL is set but empty"):
+            build(database_url="")
+
+    def test_the_message_points_at_the_service_name(self) -> None:
+        """
+        The fix is nearly always a mismatched service name in the reference, so
+        the error says so rather than leaving it to be guessed.
+        """
+        with pytest.raises(ValidationError, match="same project"):
+            build(database_url="   ")
+
+    def test_surrounding_whitespace_is_stripped_rather_than_fatal(self) -> None:
+        """
+        A value pasted into a dashboard with a trailing newline is still a valid
+        URL, and failing on it would be a defeat nobody can see in a text box.
+        """
+        cfg = build(database_url=f"  {DB_URL}\n")
+        assert str(cfg.database_url).startswith("postgresql://")
+
+    def test_a_blank_test_database_url_means_unset(self) -> None:
+        """
+        Unset is the correct state in production — the suite never runs there —
+        and an empty box in a dashboard means the same thing as no box at all.
+        Erroring on it would block a deploy over a variable nothing reads.
+        """
+        assert build(test_database_url="").test_database_url is None
+
+    def test_a_blank_test_database_url_does_not_stop_the_app(self) -> None:
+        """The regression this guards: an empty TEST_DATABASE_URL row in the
+        Railway dashboard refusing to boot the whole service."""
+        cfg = build(test_database_url="  \n")
+        assert cfg.test_database_url is None
+        assert cfg.test_database_url_str is None
