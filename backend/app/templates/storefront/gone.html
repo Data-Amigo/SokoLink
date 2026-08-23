@@ -1,0 +1,49 @@
+{# A shop or product a buyer cannot reach.
+
+   WHY THIS PAGE EXISTS AT ALL. A shop link is the product's whole distribution:
+   it gets pasted into chats, forwarded, put in a bio, and it outlives the shop
+   it points at. Sellers close shops, unpublish items, and run out of stock — so
+   a buyer meeting this page is normal traffic, not an error condition.
+
+   Before this, they met `{"detail":"Shop not found"}`. In a phone's in-app
+   browser that is a blank screen or a downloaded file, which is why a tapped
+   link appeared to do nothing at all.
+
+   IT NEVER SAYS WHY. A closed shop and a slug that never existed look identical
+   here, deliberately: an unpublished shop is full of half-parsed drafts, and
+   confirming one exists would leak a seller's unfinished work to anybody
+   guessing URLs.
+#}
+{% extends "base.html" %}
+
+{% block title %}Shop unavailable · Biasharamall{% endblock %}
+{% block description %}This shop link is not available.{% endblock %}
+
+{% block meta %}
+  {# Keep dead links out of search results, and out of link-preview caches that
+     would otherwise keep serving this card long after the shop reopens. #}
+  <meta name="robots" content="noindex, nofollow">
+{% endblock %}
+
+{% block body %}
+<div class="shell">
+  <main id="main" class="gone">
+    <div class="gone-icon" aria-hidden="true">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 12h20M4 12V8l2-4h12l2 4v4"/>
+        <path d="M5 12v8h14v-8"/>
+      </svg>
+    </div>
+
+    <h1>This shop isn&rsquo;t open</h1>
+    <p>
+      The link may be old, or the seller may have closed their shop for now.
+      If someone sent you here, ask them for a fresh link &mdash; their shop
+      may be back shortly.
+    </p>
+
+    <p class="gone-brand">Biashara Mall &mdash; shops that live in WhatsApp</p>
+  </main>
+</div>
+{% endblock %}

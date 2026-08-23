@@ -260,3 +260,58 @@ class TestTheLinkPreviewCard:
         head = client.get(f"/shop/{seller.slug}").text.split("</head>")[0]
 
         assert "https://example.test/draft.jpg" not in head
+
+
+class TestADeadLinkIsReadable:
+    """
+    A shop link outlives the shop it points at.
+
+    It gets pasted into chats, forwarded, and put in bios; sellers then close
+    shops and unpublish items. A buyer meeting a 404 is NORMAL TRAFFIC, and
+    until now they met ``{"detail":"Shop not found"}`` — which in a phone's
+    in-app browser is a blank screen or a downloaded file, indistinguishable
+    from a broken app.
+    """
+
+    def test_a_browser_gets_a_page_it_can_render(self, client: TestClient, db: Session) -> None:
+        response = client.get("/shop/no-such-shop", headers={"Accept": "text/html"})
+
+        assert response.status_code == 404
+        assert "text/html" in response.headers["content-type"]
+        assert "isn" in response.text and "open" in response.text
+
+    def test_it_never_says_which_kind_of_missing(self, client: TestClient, db: Session) -> None:
+        """
+        A closed shop and a slug that never existed must look identical. An
+        unpublished shop is full of half-parsed drafts, and confirming one
+        exists leaks a seller's unfinished work to anybody guessing URLs.
+        """
+        account = signed_in(client, db)
+        seller = shop(account)
+        stocked(db, seller)
+        client.post("/logout")
+
+        closed = client.get(f"/shop/{seller.slug}", headers={"Accept": "text/html"})
+        unknown = client.get("/shop/definitely-not-a-shop", headers={"Accept": "text/html"})
+
+        assert closed.status_code == unknown.status_code == 404
+        assert closed.text == unknown.text
+        assert seller.display_name not in closed.text
+
+    def test_a_machine_still_gets_json(self, client: TestClient, db: Session) -> None:
+        """
+        THE PAYMENT CALLBACK MUST NOT BE HANDED AN HTML ERROR PAGE. Daraja and
+        Twilio parse what we return; an HTML body is a worse failure than the
+        one being reported.
+        """
+        response = client.get("/shop/no-such-shop", headers={"Accept": "application/json"})
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Shop not found"}
+
+    def test_other_statuses_stay_machine_readable(self, client: TestClient, db: Session) -> None:
+        """A 403 on the signed webhook must never become a friendly HTML page."""
+        response = client.post("/webhooks/whatsapp", headers={"Accept": "text/html"}, data={})
+
+        assert response.status_code in (403, 503)
+        assert "text/html" not in response.headers["content-type"]

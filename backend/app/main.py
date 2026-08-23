@@ -14,9 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
     accounts,
@@ -38,6 +39,7 @@ from app.api import (
 from app.config import settings
 from app.dependencies import LoginRequired, login_redirect
 from app.services.media import MEDIA_ROOT, MEDIA_URL_PREFIX
+from app.templating import templates
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -64,6 +66,34 @@ def _login_required(request: Request, exc: Exception) -> RedirectResponse:
     """
     next_url = exc.next_url if isinstance(exc, LoginRequired) else None
     return login_redirect(next_url)
+
+
+@app.exception_handler(StarletteHTTPException)
+def _not_found(request: Request, exc: Exception) -> Response:
+    """
+    Render a 404 a person can read, when a person is what asked.
+
+    A SHOP LINK IS THIS PRODUCT'S WHOLE DISTRIBUTION. It gets pasted into chats,
+    forwarded and put in bios, and it outlives the shop it points at — sellers
+    close shops and unpublish items. So a buyer meeting a 404 is normal traffic,
+    and until now they met ``{"detail":"Shop not found"}``, which in a phone's
+    in-app browser is a blank screen or a downloaded file. A tapped link that
+    appears to do nothing is indistinguishable from a broken app.
+
+    ONLY FOR BROWSERS, AND ONLY FOR 404. Anything that did not ask for HTML —
+    Daraja's callback, Twilio, the health check, a fetch — keeps the JSON body
+    it expects, because a payment callback parsing an HTML error page is a worse
+    failure than the one it was reporting. Every other status is left alone too:
+    a 403 on the webhook must stay machine-readable.
+    """
+    status = exc.status_code if isinstance(exc, StarletteHTTPException) else 500
+    detail = exc.detail if isinstance(exc, StarletteHTTPException) else "Error"
+
+    wants_html = "text/html" in request.headers.get("accept", "")
+    if status == 404 and wants_html:
+        return templates.TemplateResponse(request, "storefront/gone.html", {}, status_code=404)
+
+    return JSONResponse({"detail": detail}, status_code=status)
 
 
 app.include_router(health.router)
