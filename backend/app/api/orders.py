@@ -158,6 +158,9 @@ def order_confirm(
     except OrderError as exc:
         return _back_to_orders(reference, str(exc))
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back_to_orders(reference)
 
 
@@ -180,5 +183,8 @@ def order_cancel(
         cancel_order(db, order)
     except OrderError as exc:
         return _back_to_orders(reference, str(exc))
+
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
 
     return _back_to_orders(reference)

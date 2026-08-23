@@ -121,6 +121,9 @@ def payment_settings_save(
     except PaymentSetupError as exc:
         return _back(str(exc))
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back(saved=True)
 
 
@@ -139,4 +142,7 @@ def payment_settings_disable_stk(
     seller = account.seller
     if seller is not None:
         disable_stk(db, seller)
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back(saved=True)

@@ -221,6 +221,9 @@ def cart_add(
     except CartError as exc:
         return _with_cart_cookie(_back_to(slug, f"/{product_id}?error={exc}"), cart)
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _with_cart_cookie(_back_to(slug, "/cart"), cart)
 
 
@@ -243,6 +246,9 @@ def cart_update(
     except CartError as exc:
         return _back_to(slug, f"/cart?error={exc}")
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back_to(slug, "/cart")
 
 
@@ -263,6 +269,9 @@ def cart_remove(
         remove_item(db, cart, item_id)
     except CartError as exc:
         return _back_to(slug, f"/cart?error={exc}")
+
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
 
     return _back_to(slug, "/cart")
 
@@ -332,6 +341,9 @@ def checkout_submit(
     except OrderError as exc:
         return _back_to(slug, f"/checkout?error={exc}")
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back_to(slug, f"/order/{order.reference}")
 
 
@@ -396,6 +408,9 @@ def order_claim(
         claim_payment(db, order, mpesa_code)
     except OrderError as exc:
         return _back_to(slug, f"/order/{reference}?error={exc}")
+
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
 
     return _back_to(slug, f"/order/{reference}")
 

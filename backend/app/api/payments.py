@@ -66,6 +66,9 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)) -> Res
     apply_callback(db, payload)
 
     # Daraja expects this exact shape. It means "received", not "paid".
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return JSONResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 
@@ -108,5 +111,8 @@ def request_stk(
         start_stk_payment(db, order, method, engine, callback_url)
     except PaymentError as exc:
         return RedirectResponse(url=f"/shop/{slug}/order/{reference}?error={exc}", status_code=303)
+
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
 
     return RedirectResponse(url=f"/shop/{slug}/order/{reference}?sent=1", status_code=303)

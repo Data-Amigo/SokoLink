@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies import current_account
 from app.models import Account, ProductStatus
+from app.services.accounts import SignupError, normalise_whatsapp
 from app.services.catalogue import (
     PublishError,
     catalogue_summary,
@@ -180,6 +181,9 @@ def product_new(
     except PublishError as exc:
         return RedirectResponse(url=f"/products/new?error={exc}", status_code=303)
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return RedirectResponse(url=f"/products?added={product.id}", status_code=303)
 
 
@@ -205,6 +209,9 @@ def product_publish(
     except PublishError as exc:
         return _back(str(exc))
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back()
 
 
@@ -223,6 +230,9 @@ def product_unpublish(
         unpublish_product(db, seller, product_id)
     except PublishError as exc:
         return _back(str(exc))
+
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
 
     return _back()
 
@@ -247,6 +257,9 @@ def shop_open(
     except PublishError as exc:
         return _back(str(exc))
 
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back()
 
 
@@ -259,4 +272,40 @@ def shop_close(
     seller = account.seller
     if seller is not None:
         unpublish_shop(db, seller)
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
     return _back()
+
+
+@router.post("/settings/shop/contact")
+def shop_contact(
+    whatsapp_number: str = Form(...),
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+) -> Response:
+    """
+    Set the number buyers reach this seller on.
+
+    EXISTS BECAUSE SELLERS COULD GET STUCK. Signup collects a number now, but
+    accounts created before it did have none — and ``published_needs_whatsapp``
+    refuses to open their shop. Without this form they were blocked with no way
+    forward, which is the worst possible place for a dead end: after the work of
+    adding stock.
+
+    Normalised to 2547XXXXXXXX on the way in, so every ``wa.me`` link built from
+    it resolves.
+    """
+    seller = account.seller
+    if seller is None:
+        return RedirectResponse(url="/settings/payment?error=No shop yet.", status_code=303)
+
+    try:
+        seller.whatsapp_number = normalise_whatsapp(whatsapp_number)
+    except SignupError as exc:
+        return RedirectResponse(url=f"/settings/payment?error={exc}", status_code=303)
+
+    # Routes commit; get_db does not. See app/db.py.
+    db.commit()
+
+    return RedirectResponse(url="/settings/payment?saved=1", status_code=303)
