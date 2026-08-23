@@ -107,8 +107,6 @@ def request_stk(
     try:
         start_stk_payment(db, order, method, engine, callback_url)
     except PaymentError as exc:
-        return RedirectResponse(
-            url=f"/shop/{slug}/order/{reference}?error={exc}", status_code=303
-        )
+        return RedirectResponse(url=f"/shop/{slug}/order/{reference}?error={exc}", status_code=303)
 
     return RedirectResponse(url=f"/shop/{slug}/order/{reference}?sent=1", status_code=303)

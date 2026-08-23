@@ -90,6 +90,7 @@ def make_product(db: Session, seller: Seller, **overrides: Any) -> Product:
     db.flush()
     return product
 
+
 def make_payment_method(db: Session, seller: Seller, **overrides: Any) -> PaymentMethod:
     """
     A seller's payment destination — Pochi unless overridden.
