@@ -125,6 +125,53 @@ class TestTheSignature:
         assert post(client, message()).status_code == 503
 
 
+class TestTheAcknowledgement:
+    """
+    Temporary scaffolding, but tested — it is the only signal a person holding a
+    phone gets that the round trip worked.
+    """
+
+    def test_a_first_message_is_acknowledged(
+        self, client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(get_settings(), "twilio_auth_token", TOKEN)
+
+        body = post(client, message()).text
+
+        assert "<Message>" in body
+        assert "Biashara Mall" in body
+
+    def test_a_redelivery_is_not_acknowledged_twice(
+        self, client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Twilio retries when it did not get our response. If the first one DID
+        land, a second "got it" is worse than none — and once this path creates
+        products, a double reply is the visible half of a double catalogue.
+        """
+        monkeypatch.setattr(get_settings(), "twilio_auth_token", TOKEN)
+
+        first = post(client, message()).text
+        second = post(client, message()).text
+
+        assert "<Message>" in first
+        assert "<Message>" not in second
+
+    def test_the_reply_is_valid_xml(
+        self, client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """TwiML is XML. A malformed document is dropped silently by Twilio,
+        which looks exactly like the webhook never running."""
+        from xml.etree import ElementTree
+
+        monkeypatch.setattr(get_settings(), "twilio_auth_token", TOKEN)
+
+        root = ElementTree.fromstring(post(client, message()).text)
+
+        assert root.tag == "Response"
+        assert root.find("Message") is not None
+
+
 class TestIdempotency:
     def test_a_message_is_recorded(
         self, client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch

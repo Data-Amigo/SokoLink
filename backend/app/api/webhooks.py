@@ -32,6 +32,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import PlainTextResponse
@@ -49,9 +50,44 @@ router = APIRouter(tags=["webhooks"])
 #: silent change would strand every inbound message.
 WHATSAPP_WEBHOOK_PATH = "/webhooks/whatsapp"
 
-#: Twilio's empty TwiML: "received, say nothing back". Replying with content
-#: here would message the seller on every delivery, including retries.
+#: Twilio's empty TwiML: "received, say nothing back".
 _NO_REPLY = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+
+#: TEMPORARY SCAFFOLDING — REMOVE WHEN THE REAL CONVERSATION LANDS IN W3.
+#:
+#: Without it, a working webhook and a broken one look identical from a handset:
+#: you send a message and nothing happens either way. This makes the round trip
+#: — Twilio, signature, database — visible to the person holding the phone.
+#:
+#: It is deliberately not written in the bot's eventual voice. The real thing is
+#: a natural conversation driven by an LLM; this is a receipt, and dressing it up
+#: as a personality we have not built yet would set the wrong expectation with
+#: the first sellers who see it.
+_ACK = (
+    "Got it 👋 This is Biashara Mall. "
+    "Your message reached us. Turning forwarded posts into a shop is coming next."
+)
+
+
+def _reply(text: str) -> str:
+    """
+    Wrap a message in TwiML so Twilio sends it back to whoever wrote in.
+
+    Replying in the webhook RESPONSE rather than through the REST API means no
+    second network call, no API credentials on this path, and no way to send a
+    message to somebody who did not just message us.
+
+    Args:
+        text: Plain text. Escaped, because TwiML is XML and an unescaped ``&``
+            in a caption is a malformed document Twilio silently drops.
+
+    Returns:
+        A TwiML document containing one message.
+    """
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<Response><Message>{escape(text)}</Message></Response>"
+    )
 
 
 def _expected_signature(url: str, params: dict[str, str], auth_token: str) -> str:
@@ -148,4 +184,7 @@ async def whatsapp_inbound(
     # Routes commit; get_db does not. See app/db.py.
     db.commit()
 
-    return PlainTextResponse(_NO_REPLY, media_type="application/xml")
+    # Acknowledged only on FIRST receipt. The redelivery branch above stays
+    # silent: Twilio retries when it did not get our response, but if the first
+    # one did land, a second "got it" is worse than none.
+    return PlainTextResponse(_reply(_ACK), media_type="application/xml")
