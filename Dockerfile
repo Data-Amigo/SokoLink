@@ -35,6 +35,10 @@ WORKDIR /app/backend
 # so it is safe to repeat, and it means a deploy can never serve a schema the
 # code does not expect.
 #
-# Shell form on purpose: $PORT is injected by Railway at runtime, and the exec
-# form would pass it as a literal string.
-CMD alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# WHY `sh -c` AND WHY `exec`. A shell is needed because $PORT is injected at
+# runtime and the plain exec form would pass it as a literal string. But a bare
+# shell-form CMD leaves /bin/sh as PID 1, and it does NOT forward SIGTERM to
+# uvicorn — so Railway's shutdown signal would be swallowed and the container
+# killed after the grace period instead of draining. `exec` replaces the shell
+# with uvicorn, which then receives signals directly and shuts down cleanly.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
