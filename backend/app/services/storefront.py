@@ -22,7 +22,7 @@ from urllib.parse import quote
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Platform, Product, ProductStatus, Seller
+from app.models import Account, Platform, Product, ProductStatus, Seller
 
 #: wa.me needs the number in E.164 with no + and no punctuation.
 _WA_BASE = "https://wa.me/"
@@ -42,6 +42,38 @@ def get_public_shop(db: Session, slug: str) -> Seller | None:
         half-parsed drafts, and showing it would embarrass the seller.
     """
     return db.scalar(select(Seller).where(Seller.slug == slug, Seller.is_published.is_(True)))
+
+
+def get_own_shop(db: Session, slug: str, account: Account | None) -> Seller | None:
+    """
+    A closed shop, but only for the person who owns it.
+
+    Args:
+        db: Session.
+        slug: The URL segment.
+        account: Whoever is signed in, or None.
+
+    Returns:
+        The seller when this account owns that slug; None otherwise — including
+        for a signed-in seller looking at somebody else's closed shop.
+
+    Notes:
+        WHY A SELLER MUST BE ABLE TO SEE THEIR OWN CLOSED SHOP. "View store" is
+        the only way to answer "what will a buyer actually get?", and it is most
+        needed BEFORE opening, which is exactly when the public route 404s. A
+        seller who cannot preview has to publish blind and find out from a
+        customer.
+
+        THIS IS NOT A HOLE IN THE PUBLISH GATE. It widens who may LOOK, never
+        what is shown: the page still lists only published products, because the
+        question being answered is what a buyer sees, not what exists. Ownership
+        is proved by the session, so a stranger with the URL still gets a 404.
+    """
+    if account is None or account.seller is None:
+        return None
+    if account.seller.slug != slug:
+        return None
+    return account.seller
 
 
 #: Sort orders the shop page offers, and the ORDER BY each one means.

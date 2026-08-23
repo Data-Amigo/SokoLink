@@ -47,7 +47,8 @@ from starlette.exceptions import HTTPException
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Cart, Seller
+from app.dependencies import optional_account
+from app.models import Account, Cart, Seller
 from app.services.cart import (
     CART_COOKIE,
     CartError,
@@ -72,6 +73,7 @@ from app.services.storefront import (
     build_whatsapp_url,
     connected_account,
     get_categories,
+    get_own_shop,
     get_public_product,
     get_public_products,
     get_public_shop,
@@ -99,6 +101,40 @@ def _load_shop(db: Session, slug: str) -> Seller:
     if seller is None:
         raise HTTPException(status_code=404, detail="Shop not found")
     return seller
+
+
+def _load_shop_or_preview(db: Session, slug: str, account: Account | None) -> tuple[Seller, bool]:
+    """
+    The shop, plus whether this is the owner previewing a closed one.
+
+    Args:
+        db: Session.
+        slug: The shop.
+        account: Whoever is signed in, or None.
+
+    Returns:
+        ``(seller, is_preview)``. ``is_preview`` is True only when the shop is
+        closed and the viewer owns it.
+
+    Raises:
+        HTTPException: 404 when the shop is closed and the viewer is anyone else
+            — identical to an unknown slug, as before.
+
+    Notes:
+        ONLY THE READ PAGES USE THIS. Cart and checkout still go through
+        :func:`_load_shop`, so a closed shop cannot take an order even from its
+        own owner. Previewing answers "what will a buyer see"; it does not turn
+        the shop on, and the publish gate is unchanged.
+    """
+    seller = get_public_shop(db, slug)
+    if seller is not None:
+        return seller, False
+
+    own = get_own_shop(db, slug, account)
+    if own is not None:
+        return own, True
+
+    raise HTTPException(status_code=404, detail="Shop not found")
 
 
 def _with_cart_cookie(response: Response, cart: Cart) -> Response:
@@ -141,6 +177,7 @@ def shop_page(
     q: str | None = None,
     sort: str | None = None,
     db: Session = Depends(get_db),
+    account: Account | None = Depends(optional_account),
 ) -> Response:
     """
     A seller's public shop, optionally filtered by category, search or sort.
@@ -152,8 +189,15 @@ def shop_page(
         q: Free-text search.
         sort: One of ``SORT_OPTIONS``; anything else falls back to newest.
         db: Session.
+        account: Whoever is signed in — so a seller can preview a closed shop.
+
+    Notes:
+        THE OWNER SEES THIS PAGE EVEN WHEN THE SHOP IS CLOSED, marked as a
+        preview. "View store" is the only honest answer to "what will a buyer
+        get?", and it is most needed before opening — which is exactly when the
+        public route 404s.
     """
-    seller = _load_shop(db, slug)
+    seller, preview = _load_shop_or_preview(db, slug, account)
 
     # An unknown sort is corrected rather than rejected. A buyer who edited the
     # URL, or a stale link, should get a sensible page and not an error.
@@ -174,6 +218,7 @@ def shop_page(
             "tiktok": connected_account(seller),
             "whatsapp_url": build_shop_whatsapp_url(seller),
             "cart": get_cart(db, request.cookies.get(CART_COOKIE), seller),
+            "preview": preview,
         },
     )
     return response
@@ -417,15 +462,20 @@ def order_claim(
 
 @router.get("/{slug}/{product_id}", response_class=HTMLResponse)
 def product_page(
-    slug: str, product_id: int, request: Request, db: Session = Depends(get_db)
+    slug: str,
+    product_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    account: Account | None = Depends(optional_account),
 ) -> Response:
     """
     One product, and the two things a buyer can do with it.
 
     Raises:
-        HTTPException: 404 when the shop or product is not publicly visible.
+        HTTPException: 404 when the shop or product is not publicly visible —
+            unless the viewer owns the shop, who may preview it closed.
     """
-    seller = _load_shop(db, slug)
+    seller, preview = _load_shop_or_preview(db, slug, account)
 
     product = get_public_product(db, seller, product_id)
     if product is None:
@@ -440,5 +490,6 @@ def product_page(
             "whatsapp_url": build_whatsapp_url(seller, product),
             "cart": get_cart(db, request.cookies.get(CART_COOKIE), seller),
             "error": request.query_params.get("error"),
+            "preview": preview,
         },
     )
