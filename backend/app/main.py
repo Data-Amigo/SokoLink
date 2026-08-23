@@ -22,6 +22,7 @@ from app.api import (
     accounts,
     analytics,
     auth,
+    catalogue,
     dashboard,
     health,
     orders,
@@ -66,6 +67,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(accounts.router)
+app.include_router(catalogue.router)
 app.include_router(analytics.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
