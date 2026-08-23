@@ -77,6 +77,7 @@ from app.services.storefront import (
     get_public_product,
     get_public_products,
     get_public_shop,
+    shop_cover,
 )
 from app.templating import templates
 
@@ -219,6 +220,9 @@ def shop_page(
             "whatsapp_url": build_shop_whatsapp_url(seller),
             "cart": get_cart(db, request.cookies.get(CART_COOKIE), seller),
             "preview": preview,
+            # The card a chat app draws around this link. See shop_cover: for a
+            # product distributed by pasted URL, that card IS the shop window.
+            "og_image": shop_cover(db, seller),
         },
     )
     return response

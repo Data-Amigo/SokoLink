@@ -200,3 +200,63 @@ class TestPreviewIsNotAHoleInThePublishGate:
         signed_in(client, db)
 
         assert client.get("/shop/no-such-shop").status_code == 404
+
+
+class TestTheLinkPreviewCard:
+    """
+    The card a chat app draws around a pasted shop link.
+
+    THIS PRODUCT'S WHOLE DISTRIBUTION IS A PASTED URL — a WhatsApp chat, a
+    status, a bio. Far more people see the card than ever tap it, so the card is
+    the shopfront. A grey rectangle with a domain in it reads as a broken link.
+    """
+
+    def test_a_shop_without_an_avatar_advertises_its_newest_stock(
+        self, client: TestClient, db: Session
+    ) -> None:
+        """
+        Almost no seller has an avatar yet, so without this fallback almost
+        every shop link shares as a grey box.
+        """
+        account = signed_in(client, db)
+        seller = shop(account)
+        assert seller.avatar_url is None
+        stocked(db, seller, cover_url="https://example.test/shirt.jpg")
+
+        body = client.get(f"/shop/{seller.slug}").text
+
+        assert 'property="og:image"' in body
+        assert "https://example.test/shirt.jpg" in body
+
+    def test_an_avatar_wins_when_the_seller_has_one(self, client: TestClient, db: Session) -> None:
+        """Their own brand beats a photograph of one item they happen to sell."""
+        account = signed_in(client, db)
+        seller = shop(account)
+        seller.avatar_url = "https://example.test/logo.png"
+        stocked(db, seller, cover_url="https://example.test/shirt.jpg")
+        db.flush()
+
+        body = client.get(f"/shop/{seller.slug}").text
+
+        assert "https://example.test/logo.png" in body
+        assert "https://example.test/shirt.jpg" not in body.split("</head>")[0]
+
+    def test_a_draft_cover_is_never_advertised(self, client: TestClient, db: Session) -> None:
+        """
+        A DRAFT IS NOT FOR SALE. Advertising one in the card promises a buyer
+        something they cannot find when they tap through.
+        """
+        account = signed_in(client, db)
+        seller = shop(account)
+        make_product(
+            db,
+            seller,
+            title="Unfinished Thing",
+            status=ProductStatus.DRAFT.value,
+            cover_url="https://example.test/draft.jpg",
+            platform_post_id="7100000000000000777",
+        )
+
+        head = client.get(f"/shop/{seller.slug}").text.split("</head>")[0]
+
+        assert "https://example.test/draft.jpg" not in head

@@ -19,7 +19,10 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="{{ seller.display_name }}">
   <meta property="og:description" content="{{ seller.bio or 'Shop on Biasharamall' }}">
-  {% if seller.avatar_url %}<meta property="og:image" content="{{ seller.avatar_url | media_abs }}">{% endif %}
+  {# Falls back to the newest thing on sale when the seller has no avatar,
+     which almost none do yet. A card with no image is a grey rectangle with a
+     domain in it, and it reads as a link to something broken. #}
+  {% if og_image %}<meta property="og:image" content="{{ og_image | media_abs }}">{% endif %}
   <meta name="twitter:card" content="summary_large_image">
 {% endblock %}
 

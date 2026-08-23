@@ -44,6 +44,44 @@ def get_public_shop(db: Session, slug: str) -> Seller | None:
     return db.scalar(select(Seller).where(Seller.slug == slug, Seller.is_published.is_(True)))
 
 
+def shop_cover(db: Session, seller: Seller) -> str | None:
+    """
+    The image a chat app should show when this shop's link is pasted.
+
+    Args:
+        db: Session.
+        seller: The shop.
+
+    Returns:
+        A stored path or absolute URL, or None when the shop has nothing to show.
+
+    Notes:
+        THE LINK PREVIEW IS THE SHOPFRONT. This product's entire distribution is
+        a URL pasted into a WhatsApp chat, a status or a bio — so the card Meta
+        draws around it IS the shop window, seen by far more people than ever
+        tap through. A card with no image is a grey rectangle with a domain in
+        it, and it reads as a link to something broken.
+
+        A seller's avatar is better when they have one, because it is their
+        brand. Almost none do yet, so we fall back to the newest thing they are
+        actually selling — which is a photograph of stock, and a far better
+        advert than nothing.
+    """
+    if seller.avatar_url:
+        return seller.avatar_url
+
+    return db.scalar(
+        select(Product.cover_url)
+        .where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.PUBLISHED.value,
+            Product.cover_url.is_not(None),
+        )
+        .order_by(Product.created_at.desc())
+        .limit(1)
+    )
+
+
 def get_own_shop(db: Session, slug: str, account: Account | None) -> Seller | None:
     """
     A closed shop, but only for the person who owns it.
