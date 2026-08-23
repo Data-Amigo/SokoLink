@@ -90,6 +90,7 @@ def signup_submit(
     email: str = Form(...),
     password: str = Form(...),
     shop_name: str = Form(...),
+    whatsapp_number: str = Form(""),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """
@@ -104,7 +105,13 @@ def signup_submit(
         re-rendered at 400 with the error and the typed values.
     """
     try:
-        account = create_account(db, email=email, password=password, shop_name=shop_name)
+        account = create_account(
+            db,
+            email=email,
+            password=password,
+            shop_name=shop_name,
+            whatsapp_number=whatsapp_number,
+        )
     except SignupError as exc:
         # 400, not 200: the request genuinely failed, and saying so keeps the
         # logs and any future API client honest.
@@ -118,6 +125,7 @@ def signup_submit(
                 # in proxy logs and browser caches.
                 "email": email,
                 "shop_name": shop_name,
+                "whatsapp_number": whatsapp_number,
                 "min_password_length": MIN_PASSWORD_LENGTH,
             },
             status_code=400,
@@ -158,8 +166,9 @@ def login_form(
 @router.post("/login", response_class=HTMLResponse)
 def login_submit(
     request: Request,
-    email: str = Form(...),
     password: str = Form(...),
+    identifier: str = Form(""),
+    email: str = Form(""),
     next: str | None = Form(None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
@@ -175,15 +184,21 @@ def login_submit(
         a message of our own keeps it that way: there is exactly one place that
         decides what a failed login says, and it is the service.
     """
+    # The form field was renamed from `email` to `identifier` when a WhatsApp
+    # number became a valid sign-in. Both are accepted so a cached page or an
+    # old bookmark does not 422 on somebody mid-login.
+    typed = (identifier or email).strip()
+
     try:
-        account = authenticate(db, email=email, password=password)
+        account = authenticate(db, identifier=typed, password=password)
     except AuthError as exc:
         return templates.TemplateResponse(
             request,
             "auth/login.html",
             {
                 "error": str(exc),
-                "email": email,
+                "email": typed,
+                "identifier": typed,
                 "next_url": next if _safe_next(next) == next else None,
             },
             status_code=401,

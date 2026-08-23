@@ -207,16 +207,18 @@ class TestSignup:
 class TestAuthentication:
     def test_correct_credentials_return_the_account(self, db: Session) -> None:
         created = signup(db)
-        assert authenticate(db, email="guru@example.com", password=GOOD_PASSWORD).id == created.id
+        assert (
+            authenticate(db, identifier="guru@example.com", password=GOOD_PASSWORD).id == created.id
+        )
 
     def test_the_email_match_is_case_insensitive(self, db: Session) -> None:
         signup(db)
-        assert authenticate(db, email="GURU@Example.com", password=GOOD_PASSWORD) is not None
+        assert authenticate(db, identifier="GURU@Example.com", password=GOOD_PASSWORD) is not None
 
     def test_a_wrong_password_is_rejected(self, db: Session) -> None:
         signup(db)
         with pytest.raises(AuthError):
-            authenticate(db, email="guru@example.com", password="wrong-password")
+            authenticate(db, identifier="guru@example.com", password="wrong-password")
 
     def test_a_deactivated_account_cannot_log_in(self, db: Session) -> None:
         account = signup(db)
@@ -224,11 +226,11 @@ class TestAuthentication:
         db.flush()
 
         with pytest.raises(AuthError):
-            authenticate(db, email="guru@example.com", password=GOOD_PASSWORD)
+            authenticate(db, identifier="guru@example.com", password=GOOD_PASSWORD)
 
     def test_login_records_the_time(self, db: Session) -> None:
         signup(db)
-        account = authenticate(db, email="guru@example.com", password=GOOD_PASSWORD)
+        account = authenticate(db, identifier="guru@example.com", password=GOOD_PASSWORD)
         assert account.last_login_at is not None
 
 
@@ -243,9 +245,9 @@ class TestAntiEnumeration:
         signup(db)
 
         with pytest.raises(AuthError) as unknown:
-            authenticate(db, email="nobody@example.com", password=GOOD_PASSWORD)
+            authenticate(db, identifier="nobody@example.com", password=GOOD_PASSWORD)
         with pytest.raises(AuthError) as wrong:
-            authenticate(db, email="guru@example.com", password="wrong-password")
+            authenticate(db, identifier="guru@example.com", password="wrong-password")
 
         assert str(unknown.value) == str(wrong.value)
 
@@ -256,9 +258,9 @@ class TestAntiEnumeration:
         db.flush()
 
         with pytest.raises(AuthError) as disabled:
-            authenticate(db, email="guru@example.com", password=GOOD_PASSWORD)
+            authenticate(db, identifier="guru@example.com", password=GOOD_PASSWORD)
         with pytest.raises(AuthError) as unknown:
-            authenticate(db, email="nobody@example.com", password=GOOD_PASSWORD)
+            authenticate(db, identifier="nobody@example.com", password=GOOD_PASSWORD)
 
         assert str(disabled.value) == str(unknown.value)
 
@@ -275,12 +277,12 @@ class TestAntiEnumeration:
 
         start = time.perf_counter()
         with pytest.raises(AuthError):
-            authenticate(db, email="nobody@example.com", password=GOOD_PASSWORD)
+            authenticate(db, identifier="nobody@example.com", password=GOOD_PASSWORD)
         unknown_email = time.perf_counter() - start
 
         start = time.perf_counter()
         with pytest.raises(AuthError):
-            authenticate(db, email="guru@example.com", password="wrong-password")
+            authenticate(db, identifier="guru@example.com", password="wrong-password")
         wrong_password = time.perf_counter() - start
 
         # An unknown email must not be an order of magnitude faster.
