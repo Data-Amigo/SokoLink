@@ -1,0 +1,12 @@
+# Root requirements — a POINTER, not a second dependency list.
+#
+# WHY THIS FILE EXISTS AT ALL. The application lives in backend/, but Nixpacks
+# (Railway's builder) decides which language toolchain to install by looking for
+# markers at the REPOSITORY ROOT. With nothing here it built a generic image
+# with no Python, and the build command died on `pip: command not found`.
+#
+# One line pointing at the real list means Nixpacks installs Python and its
+# dependencies, while backend/requirements.txt stays the single place versions
+# are pinned. Editing this file to add a package would be a mistake — add it
+# there.
+-r backend/requirements.txt

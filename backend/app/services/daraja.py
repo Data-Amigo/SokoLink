@@ -233,9 +233,7 @@ class DarajaEngine:
             # paybill. Sending the wrong one is accepted and then fails at the
             # handset, which is the worst place to discover a config error.
             "TransactionType": (
-                "CustomerBuyGoodsOnline"
-                if method.kind == "till"
-                else "CustomerPayBillOnline"
+                "CustomerBuyGoodsOnline" if method.kind == "till" else "CustomerPayBillOnline"
             ),
             "Amount": amount_kes,
             "PartyA": normalise_phone(phone),

@@ -116,7 +116,7 @@ class TestRequestingASync:
         assert db.scalar(select(Job).where(Job.kind == "sync_posts")) is not None
 
     def test_a_recent_sync_is_refused_with_a_number(self, db: Session) -> None:
-        """"Try again later" without a number reads as the product being broken."""
+        """ "Try again later" without a number reads as the product being broken."""
         account = connected(db)
         account.last_synced_at = datetime.now(UTC)
 
