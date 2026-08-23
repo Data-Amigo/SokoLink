@@ -1,0 +1,171 @@
+{# The review queue and the publish gate.
+
+   ORDERED BY THE MODEL'S OWN DOUBT — lowest parse confidence first. A wrong
+   price hides in the drafts the AI was least sure about, and a seller working
+   down a date-ordered list meets those last, after the habit of clicking
+   Publish has already formed.
+
+   The two blockers that stop a shop selling — closed storefront, no payment
+   method — are stated at the top rather than left to be discovered. Publishing
+   ten products into a closed shop is ten pieces of work for nothing.
+#}
+{% extends "app_base.html" %}
+
+{% block title %}Products · Biasharamall{% endblock %}
+
+{% block body %}
+<div class="container page">
+
+  <div class="page-head cluster cluster-between">
+    <div>
+      <h1>Products</h1>
+      <p class="muted">What you sell. Nothing reaches a buyer until you publish it.</p>
+    </div>
+    <a class="btn btn-primary btn-sm" href="/products/new">Add a product</a>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+  {% endif %}
+
+  {# ── Can this shop actually sell? ─────────────────────────────────────── #}
+  {% if not payment_method %}
+    <div class="callout" style="margin-bottom: var(--s-4)">
+      <div>
+        <strong>Your shop cannot take orders yet.</strong>
+        <p class="muted small">
+          Buyers can browse, but checkout is blocked until you say where the money goes.
+          <a href="/settings/payment">Set up payments</a>.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="card" style="margin-bottom: var(--s-5)">
+    <div class="cluster cluster-between">
+      <div>
+        {% if seller.is_published %}
+          <span class="badge badge-brand">Open</span>
+          <h3 style="margin-top: var(--s-2)">Your shop is live</h3>
+          <p class="muted small">
+            <a href="/shop/{{ seller.slug }}">/shop/{{ seller.slug }}</a>
+            — share this link on WhatsApp.
+          </p>
+        {% else %}
+          <span class="badge badge-neutral">Closed</span>
+          <h3 style="margin-top: var(--s-2)">Your shop is not open yet</h3>
+          <p class="muted small">
+            Buyers who follow your link see nothing until you open it.
+          </p>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/settings/shop/{{ 'close' if seller.is_published else 'open' }}">
+        <button class="btn {{ 'btn-secondary' if seller.is_published else 'btn-primary' }} btn-sm"
+                type="submit">
+          {{ 'Close shop' if seller.is_published else 'Open my shop' }}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {# ── Counts a seller can act on ───────────────────────────────────────── #}
+  <div class="grid grid-3" style="margin-bottom: var(--s-5)">
+    <div class="stat">
+      <div class="stat-label">Live</div>
+      <div class="stat-value">{{ summary.published }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Drafts</div>
+      <div class="stat-value">{{ summary.draft }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Need a price</div>
+      <div class="stat-value">{{ summary.needs_price }}</div>
+    </div>
+  </div>
+
+  {% if products %}
+    <div class="table-wrap card card-flush">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th scope="col" class="num">Price</th>
+            <th scope="col" class="num">Stock</th>
+            <th scope="col">Status</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for product in products %}
+            {% set live = product.status == PUBLISHED %}
+            <tr>
+              <td>
+                <span class="strong">{{ product.title }}</span>
+                {% if product.category %}
+                  <div class="tiny subtle">{{ product.category }}</div>
+                {% endif %}
+                {% if product.parse_confidence is not none and product.parse_confidence < 0.6 %}
+                  {# The whole reason this queue is sorted the way it is. #}
+                  <div class="tiny" style="color: var(--warn, #b45309)">
+                    AI was unsure — check the price
+                  </div>
+                {% endif %}
+              </td>
+
+              <td class="num">
+                {% if product.price_display %}
+                  {{ product.price_display }}
+                {% else %}
+                  <span class="subtle">No price</span>
+                {% endif %}
+              </td>
+
+              <td class="num">{{ product.stock }}</td>
+
+              <td>
+                {% if live %}
+                  <span class="badge badge-brand">Live</span>
+                {% elif product.price_kes is none %}
+                  <span class="badge badge-warn">Needs price</span>
+                {% else %}
+                  <span class="badge badge-neutral">Draft</span>
+                {% endif %}
+              </td>
+
+              <td>
+                {% if live %}
+                  <form method="post" action="/products/{{ product.id }}/unpublish">
+                    <button class="btn btn-ghost btn-sm" type="submit">Unpublish</button>
+                  </form>
+                {% elif product.price_kes is none %}
+                  {# Disabled rather than hidden, so the seller can see where the
+                     flow goes — and disabled rather than broken, so nobody taps
+                     into an error they could have been told about. #}
+                  <button class="btn btn-primary btn-sm" type="button" disabled
+                          title="Add a price first">Publish</button>
+                {% else %}
+                  <form method="post" action="/products/{{ product.id }}/publish">
+                    <button class="btn btn-primary btn-sm" type="submit">Publish</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card center">
+      <h3>Nothing here yet</h3>
+      <p class="muted small">
+        Products arrive when you forward a post to the WhatsApp bot, or from a
+        connected account — or you can
+        <a href="/products/new">add one by hand</a>.
+      </p>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}
