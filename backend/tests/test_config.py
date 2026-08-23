@@ -247,3 +247,55 @@ class TestABlankDatabaseUrlIsNotAUrl:
         cfg = build(test_database_url="  \n")
         assert cfg.test_database_url is None
         assert cfg.test_database_url_str is None
+
+
+class TestPastedCredentials:
+    """
+    Whitespace on a secret is invisible in a dashboard and fatal at runtime.
+
+    We already lost a deploy to a ``DATABASE_URL`` of ``' \n'``. The Twilio auth
+    token is worse: it is a shared HMAC secret, so one extra byte makes every
+    genuine inbound message look forged, and the resulting 403 is
+    indistinguishable from having pasted the wrong token entirely.
+    """
+
+    def test_a_token_pasted_with_a_newline_still_works(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "  abc123def456  \n")
+
+        assert build().twilio_auth_token == "abc123def456"
+
+    def test_the_account_sid_and_number_are_trimmed_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123\n")
+        monkeypatch.setenv("TWILIO_WHATSAPP_NUMBER", " +14155238886 ")
+
+        settings = build()
+
+        assert settings.twilio_account_sid == "AC123"
+        assert settings.twilio_whatsapp_number == "+14155238886"
+
+    def test_an_unset_token_stays_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        None must survive the validator.
+
+        The webhook returns 503 when the token is None — refusing beats
+        accepting unverifiable traffic. Coercing it to an empty string would
+        make that check pass and every forged request reach the database.
+        """
+        monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+
+        assert build().twilio_auth_token is None
+
+    def test_a_base_url_with_a_trailing_newline_is_trimmed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Signed webhooks recompute Twilio's signature from ``app_base_url``, so a
+        stray character here rejects every real message with no visible cause.
+        """
+        monkeypatch.setenv("APP_BASE_URL", " https://example.up.railway.app/\n")
+
+        assert build().app_base_url == "https://example.up.railway.app"

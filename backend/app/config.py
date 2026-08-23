@@ -260,8 +260,32 @@ class Settings(BaseSettings):
     @field_validator("app_base_url")
     @classmethod
     def _strip_trailing_slash(cls, v: str) -> str:
-        """A trailing slash produces `//path` when links are built by concatenation."""
-        return v.rstrip("/")
+        """
+        A trailing slash produces `//path` when links are built by concatenation.
+
+        IT ALSO BREAKS EVERY INBOUND WEBHOOK. Twilio signs the exact URL it was
+        given; we recompute that signature from ``app_base_url + path``. One
+        stray slash makes every genuine message look forged, and the only
+        symptom is a silent 403 in somebody else's dashboard.
+        """
+        return v.strip().rstrip("/")
+
+    @field_validator("twilio_account_sid", "twilio_auth_token", "twilio_whatsapp_number")
+    @classmethod
+    def _strip_credential(cls, v: str | None) -> str | None:
+        """
+        Trim whitespace off a pasted credential.
+
+        A TOKEN WITH A TRAILING NEWLINE IS INVISIBLE AND FATAL. It is a shared
+        HMAC secret: one extra byte and every signature we compute differs from
+        every signature Twilio sends, so every real message is rejected as a
+        forgery. Dashboards show the value without revealing the whitespace, and
+        the failure looks identical to having the wrong token entirely.
+
+        We were bitten by exactly this on ``DATABASE_URL``. Same class of bug,
+        same cheap fix.
+        """
+        return v.strip() if isinstance(v, str) else v
 
     @property
     def is_prod(self) -> bool:
