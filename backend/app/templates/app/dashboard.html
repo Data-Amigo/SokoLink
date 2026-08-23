@@ -3,152 +3,314 @@
    Two states, and the empty one matters more: every seller who signs up sees
    it, and it decides whether they do the three things that make a shop work.
 
-   It used to say "Connect your TikTok" — the content-first direction, now
-   parked. Connecting a social account never let anyone sell anything.
+   THE CHECKLIST IS IN DEPENDENCY ORDER — something to sell, a way to be paid,
+   then open the doors — and only the CURRENT step is tinted, so the eye lands
+   on it without reading. Each row links straight to the screen that completes
+   it; a checklist that explains rather than acts gets read once and abandoned.
 
-   THE CHECKLIST IS IN DEPENDENCY ORDER: a product to sell, a way to be paid,
-   then open the doors. Each row links straight to the screen that completes
-   it, because a checklist that explains rather than acts gets read once and
-   abandoned.
+   THE STORE PREVIEW IS THE REWARD next to that work: the seller's own name,
+   their own link, and what a buyer will see. It carries "Draft" or "Live" so
+   the single most misunderstood thing about the product — that a shop is not
+   visible until it is opened — is never in doubt.
 #}
 {% extends "app_base.html" %}
 
 {% block title %}Dashboard · Biasharamall{% endblock %}
 
+{% block head %}
+  <link rel="stylesheet" href="/static/css/workspace.css">
+{% endblock %}
+
 {% block body %}
 <div class="container page">
 
-  <div class="page-head">
-    {# Their own shop name, not "Dashboard". They know what page they are on. #}
-    <h1>{{ seller.display_name if seller else account.email }}</h1>
-    {% if setup_complete %}
-      <p class="muted">
-        Your shop is open at
-        <a href="/shop/{{ seller.slug }}">biasharamall.com/shop/{{ seller.slug }}</a>
-        — share that link anywhere.
-      </p>
-    {% else %}
-      <p class="muted">Three things and you can start selling.</p>
+  <div class="ws-head-row">
+    <div class="ws-head">
+      <span class="ws-pill">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 8h16l-1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/>
+        </svg>
+        Seller workspace
+      </span>
+
+      {# Their own name, in their own language. "Dashboard" tells them nothing
+         they did not already know from clicking Dashboard. #}
+      <h1 style="margin-top: 14px">Karibu, {{ seller.display_name if seller else 'there' }} 👋</h1>
+
+      {% if setup_complete %}
+        <p>Your shop is open. Share your link on WhatsApp, TikTok or Instagram — anywhere.</p>
+      {% else %}
+        <p>
+          Let's get your first product into a store customers can trust and buy from.
+        </p>
+      {% endif %}
+    </div>
+
+    {% if seller %}
+      <a class="ws-btn" href="/shop/{{ seller.slug }}" target="_blank" rel="noopener">
+        Preview mini store
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>
+        </svg>
+      </a>
     {% endif %}
   </div>
 
-  {% if not setup_complete %}
+  {% set done = (steps.has_product|int) + (steps.has_payment|int) + (steps.is_open|int) %}
 
-    <div class="card card-lg" style="margin-bottom: var(--s-5)">
-      <div class="stack">
+  <div class="ws-band">
 
-        {# 1 ── something to sell ─────────────────────────────────────────── #}
-        <div class="cluster cluster-between">
-          <div>
-            {% if steps.has_product %}
-              <span class="badge badge-brand">Done</span>
-            {% else %}
-              <span class="badge badge-neutral">1</span>
-            {% endif %}
-            <h3 style="margin-top: var(--s-2)">Add what you sell</h3>
-            <p class="muted small">
-              A name and a price is enough. Sizes, photos and bulk pricing if you have them.
-            </p>
-          </div>
-          <a href="/products/new"
-             class="btn {{ 'btn-secondary' if steps.has_product else 'btn-primary' }} btn-sm">
-            {{ 'Add another' if steps.has_product else 'Add a product' }}
-          </a>
+    {# ── The work ──────────────────────────────────────────────────────── #}
+    <section class="ws-card">
+      <div class="ws-card-head">
+        <div>
+          <p class="ws-eyebrow">Your launch checklist</p>
+          <h2>Three steps to your first order</h2>
         </div>
+        <span class="ws-count">{{ done }} of 3 complete</span>
+      </div>
 
-        {# 2 ── a way to be paid ──────────────────────────────────────────── #}
-        <div class="cluster cluster-between">
+      <p class="ws-sub">Complete these once. Biasharamall handles the buying journey.</p>
+
+      <div class="ws-track" role="progressbar" aria-valuenow="{{ done }}"
+           aria-valuemin="0" aria-valuemax="3" aria-label="Launch progress">
+        <div class="ws-fill" style="width: {{ (done / 3 * 100) | round }}%"></div>
+      </div>
+
+      <div class="ws-step {% if not steps.has_product %}ws-step-now{% endif %}">
+        <div class="ws-step-body">
+          <span class="ws-step-n {% if steps.has_product %}ws-step-done{% endif %}">
+            {% if steps.has_product %}✓{% else %}1{% endif %}
+          </span>
           <div>
-            {% if steps.has_payment %}
-              <span class="badge badge-brand">Done</span>
-            {% else %}
-              <span class="badge badge-neutral">2</span>
-            {% endif %}
-            <h3 style="margin-top: var(--s-2)">Say where the money goes</h3>
-            <p class="muted small">
-              Pochi la Biashara, a Till or a Paybill. Buyers pay you directly —
-              we never hold it.
-            </p>
+            <h3>Add your first product</h3>
+            <p>A clear name, price and photo are enough to start.</p>
           </div>
-          <a href="/settings/payment"
-             class="btn {{ 'btn-secondary' if steps.has_payment else 'btn-primary' }} btn-sm">
-            {{ 'Change' if steps.has_payment else 'Set up payments' }}
-          </a>
         </div>
+        <a class="ws-btn {% if not steps.has_product %}ws-btn-primary{% endif %}"
+           href="/products/new">
+          {{ 'Add another' if steps.has_product else 'Add a product' }}
+        </a>
+      </div>
 
-        {# 3 ── open the doors ────────────────────────────────────────────── #}
-        <div class="cluster cluster-between">
+      <div class="ws-step {% if steps.has_product and not steps.has_payment %}ws-step-now{% endif %}">
+        <div class="ws-step-body">
+          <span class="ws-step-n {% if steps.has_payment %}ws-step-done{% endif %}">
+            {% if steps.has_payment %}✓{% else %}2{% endif %}
+          </span>
           <div>
-            {% if steps.is_open %}
-              <span class="badge badge-brand">Done</span>
-            {% else %}
-              <span class="badge badge-neutral">3</span>
-            {% endif %}
-            <h3 style="margin-top: var(--s-2)">Publish and open your shop</h3>
-            <p class="muted small">
+            <h3>Choose where payments go</h3>
+            <p>Connect your M-Pesa Pochi, Till or Paybill. Buyers pay you directly.</p>
+          </div>
+        </div>
+        <a class="ws-btn {% if steps.has_product and not steps.has_payment %}ws-btn-primary{% endif %}"
+           href="/settings/payment">
+          {{ 'Change' if steps.has_payment else 'Set up M-Pesa' }}
+        </a>
+      </div>
+
+      <div class="ws-step {% if steps.has_product and steps.has_payment and not steps.is_open %}ws-step-now{% endif %}">
+        <div class="ws-step-body">
+          <span class="ws-step-n {% if steps.is_open %}ws-step-done{% endif %}">
+            {% if steps.is_open %}✓{% else %}3{% endif %}
+          </span>
+          <div>
+            <h3>Open and share your store</h3>
+            <p>
               {% if catalogue.needs_price %}
                 {{ catalogue.needs_price }}
                 item{{ '' if catalogue.needs_price == 1 else 's' }} still need a price.
               {% else %}
-                Nothing reaches a buyer until you publish it.
+                Publish when you are ready, then share the link on WhatsApp and TikTok.
               {% endif %}
             </p>
           </div>
-          <a href="/products"
-             class="btn {{ 'btn-secondary' if steps.is_open else 'btn-primary' }} btn-sm">
-            Go to products
-          </a>
         </div>
-
+        <a class="ws-btn {% if steps.has_product and steps.has_payment and not steps.is_open %}ws-btn-primary{% endif %}"
+           href="/products">Open store</a>
       </div>
-    </div>
+    </section>
 
-  {% else %}
+    {# ── The reward ────────────────────────────────────────────────────── #}
+    <aside class="ws-preview">
+      <div class="ws-preview-top">
+        <span class="ws-preview-tag">Store preview</span>
+        <span class="ws-dot {% if seller and seller.is_published %}ws-dot-live{% endif %}">
+          {{ 'Live' if seller and seller.is_published else 'Draft' }}
+        </span>
+      </div>
 
-    {% if money.awaiting_kes %}
-      <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
-        <div class="cluster cluster-between">
-          <div>
-            <span class="badge badge-warn">Needs you</span>
-            <h3 style="margin-top: var(--s-2)">
-              KSh {{ '{:,}'.format(money.awaiting_kes) }} waiting to be confirmed
-            </h3>
-            <p class="muted small">A buyer says they have paid. Check M-Pesa, then confirm.</p>
-          </div>
-          <a href="/orders" class="btn btn-primary btn-sm">Review orders</a>
-        </div>
-      </div>
-    {% endif %}
-
-    <div class="grid grid-3" style="margin-bottom: var(--s-5)">
-      <div class="stat">
-        <div class="stat-label">Sales this month</div>
-        <div class="stat-value">KSh {{ '{:,}'.format(money.sales_this_month) }}</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Paid orders</div>
-        <div class="stat-value">{{ money.paid_orders }}</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Live products</div>
-        <div class="stat-value">{{ catalogue.published }}</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="cluster cluster-between">
+      <div class="ws-shop">
+        <img src="/static/img/logo.png" alt="">
         <div>
-          <h3>Share your shop</h3>
-          <p class="muted small">
-            Paste this in WhatsApp, your TikTok bio, your Instagram bio — anywhere.
-          </p>
-          <p><code class="mono strong code-value">biasharamall.com/shop/{{ seller.slug }}</code></p>
+          <h3>{{ seller.display_name if seller else 'Your shop' }}</h3>
+          <p>biasharamall.com/shop/{{ seller.slug if seller else 'your-shop' }}</p>
         </div>
-        <a href="/shop/{{ seller.slug }}" class="btn btn-secondary btn-sm">View shop</a>
       </div>
+
+      <div class="ws-will">
+        <p>Your storefront will show</p>
+        <ul>
+          <li>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5"/>
+            </svg>
+            Products and prices
+          </li>
+          <li>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5"/>
+            </svg>
+            WhatsApp ordering
+          </li>
+          <li>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5"/>
+            </svg>
+            M-Pesa checkout and receipts
+          </li>
+        </ul>
+      </div>
+
+      {% if seller %}
+        <a class="ws-preview-link" href="/shop/{{ seller.slug }}" target="_blank" rel="noopener">
+          View customer experience
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14M13 6l6 6-6 6"/>
+          </svg>
+        </a>
+      {% endif %}
+    </aside>
+  </div>
+
+  {# ── The numbers ───────────────────────────────────────────────────────
+     Four tiles, and none of them is a balance. Buyers pay the seller's M-Pesa
+     directly — we hold nothing and cannot see it, so any balance here would be
+     inferred, and the first time it disagreed with their phone they would stop
+     trusting every other number on the page. #}
+  <div class="ws-stats">
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Products</span>
+        <span class="ws-stat-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 8 12 3 3 8l9 5zM3 8v8l9 5 9-5V8"/>
+          </svg>
+        </span>
+      </div>
+      <div class="ws-stat-value">{{ catalogue.published }}</div>
+      <p class="ws-stat-note">
+        {% if catalogue.published %}Live in your store{% else %}Add your first{% endif %}
+      </p>
     </div>
 
-  {% endif %}
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Orders</span>
+        <span class="ws-stat-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/>
+          </svg>
+        </span>
+      </div>
+      <div class="ws-stat-value">{{ money.paid_orders }}</div>
+      <p class="ws-stat-note">
+        {% if money.paid_orders %}Paid this month{% else %}Waiting for launch{% endif %}
+      </p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Sales</span>
+        <span class="ws-stat-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+        </span>
+      </div>
+      <div class="ws-stat-value">KSh {{ '{:,}'.format(money.sales_this_month) }}</div>
+      <p class="ws-stat-note">This month</p>
+    </div>
+
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Store status</span>
+        <span class="ws-stat-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+          </svg>
+        </span>
+      </div>
+      <div class="ws-stat-value">{{ 'Live' if setup_complete else 'Draft' }}</div>
+      <p class="ws-stat-note {% if money.awaiting_kes %}ws-stat-note-warn{% endif %}">
+        {% if money.awaiting_kes %}
+          KSh {{ '{:,}'.format(money.awaiting_kes) }} to confirm
+        {% elif setup_complete %}
+          Open for orders
+        {% else %}
+          {{ 3 - done }} step{{ '' if (3 - done) == 1 else 's' }} remaining
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  {# ── What to do next ──────────────────────────────────────────────────── #}
+  <p class="ws-eyebrow">Quick actions</p>
+  <h2 style="margin: 4px 0 14px; font-size: 20px; letter-spacing: -.015em">Keep moving</h2>
+
+  <div class="ws-actions">
+    <a class="ws-action" href="/products/new">
+      <span class="ws-action-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </span>
+      <h3>Add a product</h3>
+      <p>Create one manually — a name and a price is enough.</p>
+      <span>Add product →</span>
+    </a>
+
+    <a class="ws-action" href="/orders">
+      <span class="ws-action-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/>
+        </svg>
+      </span>
+      <h3>Check your orders</h3>
+      <p>
+        {% if money.awaiting_kes %}
+          A buyer says they have paid. Confirm it.
+        {% else %}
+          Confirm payments and keep buyers moving.
+        {% endif %}
+      </p>
+      <span>View orders →</span>
+    </a>
+
+    <a class="ws-action" href="/settings/payment">
+      <span class="ws-action-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>
+        </svg>
+      </span>
+      <h3>Set up M-Pesa</h3>
+      <p>Choose where customer payments should arrive.</p>
+      <span>Set up payments →</span>
+    </a>
+  </div>
 
 </div>
 {% endblock %}

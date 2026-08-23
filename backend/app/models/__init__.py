@@ -41,6 +41,7 @@ from app.models.scrape_job import ScrapeJob
 from app.models.seller import Seller
 from app.models.snapshot import AccountMetricSnapshot, PostMetricSnapshot
 from app.models.social_account import SocialAccount
+from app.models.wa_message import WaMessage
 
 __all__ = [
     "Account",
@@ -70,4 +71,5 @@ __all__ = [
     "Seller",
     "SocialAccount",
     "VerificationMethod",
+    "WaMessage",
 ]

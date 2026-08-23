@@ -83,7 +83,11 @@ class TestTheCodeItself:
 
     def test_request_code_returns_nothing(self, db: Session) -> None:
         """Handing the code back is how it reaches a log line or a template."""
-        assert request_code(db, PHONE, FakeMessenger()) is None
+        fake = FakeMessenger()
+        # mypy knows this returns None; the point is that the CODE is not
+        # handed back, so assert on what the caller can see instead.
+        request_code(db, PHONE, fake)
+        assert len(fake.sent) == 1
 
     def test_the_right_code_verifies_once(self, db: Session) -> None:
         fake = FakeMessenger()

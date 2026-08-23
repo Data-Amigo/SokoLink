@@ -1,0 +1,322 @@
+/*
+ * The seller workspace — loaded after app.css, never instead of it.
+ *
+ * Every class here is `ws-` prefixed and additive. app.css still owns the
+ * shell, the nav and the form controls, so restyling a page cannot reach back
+ * into auth or the storefront.
+ *
+ * MOBILE FIRST. The seller's phone is the likeliest screen — they are standing
+ * in a shop, not sitting at a desk — so every grid starts at one column and
+ * grows. The desktop layout in the design is what happens at 900px, not the
+ * baseline the CSS is written from.
+ */
+
+:root {
+  --ws-ink:       #0d1117;
+  --ws-ink-2:     #161b22;
+  --ws-green:     #0f9d58;
+  --ws-green-d:   #0b7c44;
+  --ws-green-s:   #e8f8ef;
+  --ws-text:      #16181d;
+  --ws-muted:     #5f6672;
+  --ws-faint:     #8b91a0;
+  --ws-line:      #e6e8ec;
+  --ws-surface:   #ffffff;
+  --ws-bg:        #f7f9fa;
+  --ws-warn:      #b45309;
+  --ws-r:         16px;
+}
+
+/* ── Page head ──────────────────────────────────────────────────────────── */
+
+.ws-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.ws-head { margin: 18px 0 26px; }
+
+.ws-head h1 {
+  margin: 0 0 8px;
+  font-size: clamp(27px, 4vw, 34px);
+  letter-spacing: -.025em;
+}
+
+.ws-head p { margin: 0; color: var(--ws-muted); max-width: 62ch; }
+
+.ws-head-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+@media (min-width: 900px) {
+  .ws-head-row { flex-direction: row; align-items: flex-end; justify-content: space-between; }
+}
+
+/* ── The two-column band: checklist beside the store preview ────────────── */
+
+.ws-band { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 20px; }
+
+@media (min-width: 1000px) {
+  /* The checklist is the work; the preview is the reward. Wider left. */
+  .ws-band { grid-template-columns: 1.45fr 1fr; align-items: start; }
+}
+
+.ws-card {
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-r);
+  padding: 22px;
+}
+
+.ws-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.ws-eyebrow {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ws-green);
+}
+
+.ws-card-head h2 { margin: 0; font-size: 20px; letter-spacing: -.015em; }
+
+.ws-count {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ws-line);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ws-sub { margin: 6px 0 16px; font-size: 13.5px; color: var(--ws-muted); }
+
+/* ── Progress ───────────────────────────────────────────────────────────── */
+
+.ws-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ws-line);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.ws-fill { height: 100%; background: var(--ws-green); border-radius: 999px; }
+
+/* ── Checklist steps ────────────────────────────────────────────────────── */
+
+.ws-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--ws-line);
+  border-radius: 13px;
+}
+.ws-step + .ws-step { margin-top: 10px; }
+
+@media (min-width: 620px) {
+  .ws-step { flex-direction: row; align-items: center; justify-content: space-between; }
+}
+
+/* The step being worked on is the only one tinted, so the eye lands on it
+   without reading. */
+.ws-step-now { background: var(--ws-green-s); border-color: #bfe8d0; }
+
+.ws-step-body { display: flex; align-items: flex-start; gap: 13px; min-width: 0; }
+
+.ws-step-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  border-radius: 999px;
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ws-muted);
+}
+.ws-step-done { background: var(--ws-green); border-color: var(--ws-green); color: #fff; }
+
+.ws-step h3 { margin: 0 0 3px; font-size: 15px; }
+.ws-step p  { margin: 0; font-size: 13px; color: var(--ws-muted); }
+
+/* ── Store preview (the dark card) ──────────────────────────────────────── */
+
+.ws-preview {
+  background: var(--ws-ink);
+  color: #fff;
+  border-radius: var(--ws-r);
+  padding: 22px;
+}
+
+.ws-preview-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.ws-preview-tag {
+  padding: 5px 11px;
+  border-radius: 7px;
+  background: rgb(255 255 255 / .08);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ws-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: #aab2c0;
+}
+.ws-dot::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 999px;
+  background: var(--ws-faint);
+}
+.ws-dot-live::before { background: #4ade80; }
+
+.ws-shop { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.ws-shop img { width: 44px; height: 44px; border-radius: 12px; }
+.ws-shop h3 { margin: 0; font-size: 17px; }
+.ws-shop p  { margin: 2px 0 0; font-size: 12.5px; color: #8f97a5; word-break: break-all; }
+
+.ws-will {
+  padding: 15px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / .05);
+  margin-bottom: 16px;
+}
+.ws-will > p { margin: 0 0 10px; font-size: 12px; color: #aab2c0; }
+.ws-will ul  { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ws-will li  { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+.ws-will svg { color: #4ade80; flex: none; }
+
+.ws-preview-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  text-decoration: none;
+}
+.ws-preview-link:hover { color: #4ade80; }
+
+/* ── Stat tiles ─────────────────────────────────────────────────────────── */
+
+.ws-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 26px; }
+
+@media (min-width: 900px) { .ws-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.ws-stat {
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-line);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.ws-stat-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+
+.ws-stat-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ws-muted);
+}
+
+.ws-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+  flex: none;
+}
+
+.ws-stat-value { font-size: 25px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+.ws-stat-note  { margin: 5px 0 0; font-size: 12px; color: var(--ws-faint); }
+.ws-stat-note-warn { color: var(--ws-warn); font-weight: 600; }
+
+/* ── Quick actions ──────────────────────────────────────────────────────── */
+
+.ws-actions { display: grid; grid-template-columns: 1fr; gap: 12px; }
+
+@media (min-width: 760px) { .ws-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.ws-action {
+  display: block;
+  padding: 20px;
+  border: 1px solid var(--ws-line);
+  border-radius: 14px;
+  background: var(--ws-surface);
+  text-decoration: none;
+  color: inherit;
+}
+.ws-action:hover { border-color: #bfe8d0; }
+
+.ws-action-icon {
+  display: grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  border-radius: 11px;
+  background: var(--ws-green-s);
+  color: var(--ws-green-d);
+  margin-bottom: 14px;
+}
+
+.ws-action h3 { margin: 0 0 5px; font-size: 15.5px; }
+.ws-action p  { margin: 0 0 12px; font-size: 13px; color: var(--ws-muted); }
+.ws-action span { font-size: 13px; font-weight: 600; color: var(--ws-green-d); }
+
+/* ── Buttons used in this layout ────────────────────────────────────────── */
+
+.ws-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 17px;
+  border: 1px solid var(--ws-line);
+  border-radius: 10px;
+  background: var(--ws-surface);
+  color: var(--ws-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ws-btn:hover { border-color: #bfe8d0; }
+
+.ws-btn-primary {
+  background: var(--ws-green);
+  border-color: var(--ws-green);
+  color: #fff;
+}
+.ws-btn-primary:hover { background: var(--ws-green-d); border-color: var(--ws-green-d); }

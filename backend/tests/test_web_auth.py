@@ -218,9 +218,9 @@ class TestLoginWall:
 
         body = client.get("/dashboard").text
 
-        assert "Add what you sell" in body
-        assert "Say where the money goes" in body
-        assert "Publish and open your shop" in body
+        assert "Add your first product" in body
+        assert "Choose where payments go" in body
+        assert "Open and share your store" in body
         assert "Connect your TikTok" not in body
 
     def test_signing_out_clears_the_session(self, client: TestClient, db: Session) -> None:
