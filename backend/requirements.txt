@@ -12,7 +12,12 @@ fastapi==0.128.0
 uvicorn[standard]==0.38.0        # the ASGI server that runs the app
 
 # ── Config & validation ──────────────────────────────────────────────────────
-pydantic==2.12.3
+# 2.13.4, not 2.12.3. google-genai 2.17.0 requires pydantic>=2.12.5, so the old
+# pin could not resolve at all — pip refused the whole file with
+# ResolutionImpossible. It went unnoticed because the local .venv had already
+# been upgraded to 2.13.4 in place, so every test ran against a version this
+# file did not name. The first honest install was the Docker build.
+pydantic==2.13.4
 pydantic-settings==2.7.1         # typed .env loading — see app/config.py
 
 # ── Database ─────────────────────────────────────────────────────────────────
