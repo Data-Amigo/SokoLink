@@ -1241,3 +1241,98 @@ Scheduled for W4, and W1 is built assuming it will exist.
 - `PRODUCTION_PLAN.md` — rewritten around the W-phases
 - `CLAUDE.md` — direction, journeys, rules, branch naming
 - `BUILD_ORDER.md` — superseded; it argued for a content agent first
+
+---
+
+## 2026-08-23 · One workspace, not six pages that share a login
+
+The dashboard was restyled first and in isolation, and that turned out to be the
+wrong unit of work. Against the new dashboard, the other five pages did not read
+as "not yet restyled" — they read as a different product. Same login, different
+buttons, different badges, three different icons for the same idea.
+
+So the restyle moved down a layer.
+
+### What actually changed
+
+**One icon set** — `templates/partials/icons.html`, a macro per icon, imported
+once in the shell. Before this, icons were hand-written into whichever template
+needed one, so "orders" was a clipboard on the nav and a cart on the page. The
+family is fixed: 24×24, stroke-only, `stroke-width: 2`, `currentColor`. Mixing a
+filled icon into a line set is the most visible way a UI looks assembled rather
+than designed.
+
+**One stylesheet, loaded by the shell.** `workspace.css` used to be opted into
+by the dashboard through a `{% block head %}`. It is now in `app_base.html`, so
+every page behind the login wall gets the same bar, cards, rows, badges and
+form controls whether or not its template remembered to ask.
+
+**Rows instead of tables.** Products, orders, transactions and customers were
+all `<table>`. A five-column table on a 360px screen either scrolls sideways —
+hiding the column the seller needs — or crushes every cell to two words. The
+seller is standing in a shop holding a phone, so the row stacks instead:
+identity, then the number, then the one action.
+
+**One status vocabulary.** Green = done, amber = needs you, grey = not yet,
+red = over. `.ws-tag` and four modifiers, used identically on every page. A
+seller learns it once, and there is now a test asserting a claimed payment
+reads the same on Orders, on Money and on the order itself.
+
+### Customers
+
+A new page, and the first one where the design and the data disagreed.
+
+The design showed 24 sample customers, an "Add customer" button, and a
+"WhatsApp reachable" tile. Three decisions came out of that:
+
+- **There is no customer table.** A buyer never signs up — that is the friction
+  this whole product removes — so there is no moment at which a customer record
+  could be created and nothing on one a seller could edit. Customers are derived
+  from orders. Deriving also means it cannot drift: a separate table needs
+  writing on every order, and the first missed write is a buyer who bought
+  something and does not appear.
+- **The phone is the identity, not the name.** The same person is "Akinyi",
+  "akinyi o" and "Akinyi Otieno" across three orders. Grouping by name shows a
+  seller three customers where they have one. There is a test.
+- **No sample data, and no "Add customer" button.** A seller with no orders gets
+  an empty state that says where customers come from. Inventing buyers on
+  someone's own dashboard, or shipping a button that cannot work, is the fastest
+  way to lose their trust in every other number on the page.
+
+The segment counts were decoration in the design; they are links now.
+"7 repeat buyers" is only worth showing next to the seven names and the seven
+message buttons, which is what clicking it produces.
+
+**Spend counts confirmed money only.** An order somebody claimed and never paid
+is not spend, and counting it would overstate a seller's best customers to their
+face.
+
+### The gap this exposed
+
+**Jinja has no compile step.** A renamed context key, an unregistered filter, a
+macro imported in the shell but not the child — none of it is caught by ruff, by
+mypy, or by any service test. It surfaces as a 500 on a page a seller opened,
+which is exactly how it surfaced during this restyle.
+
+`tests/test_web_workspace.py` now renders every workspace page in **both** of its
+states. The empty state matters more: it is a completely separate branch of every
+template and it is the one every new seller sees first, so a suite that only
+tests populated pages tests the half of the UI fewer people ever look at.
+
+### Removed
+
+- **`templates/app/analytics.html`** — orphaned. `/analytics` has rendered
+  `money.html` since the money tracker replaced it; the old template still sat
+  there showing views and followers from the parked content-first direction.
+- **Accounts is off the main nav.** The routes still work. Connecting TikTok no
+  longer builds the catalogue, so it does not get a slot in a six-item bar for
+  something that cannot produce a sale.
+
+### Still open
+
+- The order-reference link is unguessable but permanent and unsigned, and the
+  page behind it shows a buyer's phone and address. `WAYS_OF_WORKING` §5 asks
+  for signed, scoped and short-lived.
+- The TikTok connect and claim screens keep the auth styling. They are a
+  centred two-step flow, not a workspace list, and they read correctly beside
+  the login pages they resemble.

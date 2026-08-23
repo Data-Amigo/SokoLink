@@ -5,64 +5,62 @@
    down a date-ordered list meets those last, after the habit of clicking
    Publish has already formed.
 
-   The two blockers that stop a shop selling — closed storefront, no payment
-   method — are stated at the top rather than left to be discovered. Publishing
-   ten products into a closed shop is ten pieces of work for nothing.
+   THE TWO BLOCKERS LEAD THE PAGE — closed storefront, no payment method —
+   rather than waiting to be discovered. Publishing ten products into a closed
+   shop is ten pieces of work for nothing.
 #}
 {% extends "app_base.html" %}
 
 {% block title %}Products · Biasharamall{% endblock %}
 
 {% block body %}
-<div class="container page">
+<div class="container ws-page">
 
-  <div class="page-head cluster cluster-between">
-    <div>
+  <div class="ws-head-row">
+    <div class="ws-head">
+      <p class="ws-eyebrow">Your catalogue</p>
       <h1>Products</h1>
-      <p class="muted">What you sell. Nothing reaches a buyer until you publish it.</p>
+      <p>What you sell. Nothing reaches a buyer until you publish it.</p>
     </div>
-    <a class="btn btn-primary btn-sm" href="/products/new">Add a product</a>
+    <a class="ws-btn ws-btn-primary" href="/products/new">{{ icon.plus(15) }} Add a product</a>
   </div>
 
   {% if error %}
-    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+    <div class="ws-flash ws-flash-bad">{{ error }}</div>
   {% endif %}
 
-  {# ── Can this shop actually sell? ─────────────────────────────────────── #}
   {% if not payment_method %}
-    <div class="callout" style="margin-bottom: var(--s-4)">
+    <div class="ws-note">
+      {{ icon.alert(17) }}
       <div>
         <strong>Your shop cannot take orders yet.</strong>
-        <p class="muted small">
-          Buyers can browse, but checkout is blocked until you say where the money goes.
-          <a href="/settings/payment">Set up payments</a>.
+        <p>
+          Buyers can browse, but checkout is blocked until you say where the
+          money goes. <a href="/settings/payment">Set up payments</a>.
         </p>
       </div>
     </div>
   {% endif %}
 
-  <div class="card" style="margin-bottom: var(--s-5)">
-    <div class="cluster cluster-between">
-      <div>
-        {% if seller.is_published %}
-          <span class="badge badge-brand">Open</span>
-          <h3 style="margin-top: var(--s-2)">Your shop is live</h3>
-          <p class="muted small">
-            <a href="/shop/{{ seller.slug }}">/shop/{{ seller.slug }}</a>
-            — share this link on WhatsApp.
-          </p>
-        {% else %}
-          <span class="badge badge-neutral">Closed</span>
-          <h3 style="margin-top: var(--s-2)">Your shop is not open yet</h3>
-          <p class="muted small">
-            Buyers who follow your link see nothing until you open it.
-          </p>
-        {% endif %}
-      </div>
-
+  {# ── Open or closed: the single most misunderstood thing about the product #}
+  <div class="ws-task" style="{% if not seller.is_published %}background:#fff;border-color:var(--ws-line);border-left-color:var(--ws-faint){% endif %}">
+    <div>
+      {% if seller.is_published %}
+        <span class="ws-tag ws-tag-ok">{{ icon.check(13) }} Open</span>
+        <h2>Your shop is live</h2>
+        <p>
+          <a class="ws-mono" href="/shop/{{ seller.slug }}">/shop/{{ seller.slug }}</a>
+          — share this link anywhere.
+        </p>
+      {% else %}
+        <span class="ws-tag ws-tag-neutral">Closed</span>
+        <h2>Your shop is not open yet</h2>
+        <p>Buyers who follow your link see nothing until you open it.</p>
+      {% endif %}
+    </div>
+    <div>
       <form method="post" action="/settings/shop/{{ 'close' if seller.is_published else 'open' }}">
-        <button class="btn {{ 'btn-secondary' if seller.is_published else 'btn-primary' }} btn-sm"
-                type="submit">
+        <button class="ws-btn {{ '' if seller.is_published else 'ws-btn-primary' }}" type="submit">
           {{ 'Close shop' if seller.is_published else 'Open my shop' }}
         </button>
       </form>
@@ -70,100 +68,100 @@
   </div>
 
   {# ── Counts a seller can act on ───────────────────────────────────────── #}
-  <div class="grid grid-3" style="margin-bottom: var(--s-5)">
-    <div class="stat">
-      <div class="stat-label">Live</div>
-      <div class="stat-value">{{ summary.published }}</div>
+  <div class="ws-stats">
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Live</span>
+        <span class="ws-stat-icon">{{ icon.eye(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.published }}</div>
+      <p class="ws-stat-note">Buyers can see these</p>
     </div>
-    <div class="stat">
-      <div class="stat-label">Drafts</div>
-      <div class="stat-value">{{ summary.draft }}</div>
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Drafts</span>
+        <span class="ws-stat-icon">{{ icon.products(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.draft }}</div>
+      <p class="ws-stat-note">Waiting for you</p>
     </div>
-    <div class="stat">
-      <div class="stat-label">Need a price</div>
-      <div class="stat-value">{{ summary.needs_price }}</div>
+    <div class="ws-stat">
+      <div class="ws-stat-top">
+        <span class="ws-stat-label">Need a price</span>
+        <span class="ws-stat-icon">{{ icon.tag(15) }}</span>
+      </div>
+      <div class="ws-stat-value">{{ summary.needs_price }}</div>
+      <p class="ws-stat-note {% if summary.needs_price %}ws-stat-note-warn{% endif %}">
+        {{ 'Cannot be published' if summary.needs_price else 'All priced' }}
+      </p>
     </div>
   </div>
 
   {% if products %}
-    <div class="table-wrap card card-flush">
-      <table class="table">
-        <thead>
-          <tr>
-            <th scope="col">Item</th>
-            <th scope="col" class="num">Price</th>
-            <th scope="col" class="num">Stock</th>
-            <th scope="col">Status</th>
-            <th scope="col"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for product in products %}
-            {% set live = product.status == PUBLISHED %}
-            <tr>
-              <td>
-                <span class="strong">{{ product.title }}</span>
-                {% if product.category %}
-                  <div class="tiny subtle">{{ product.category }}</div>
-                {% endif %}
-                {% if product.parse_confidence is not none and product.parse_confidence < 0.6 %}
-                  {# The whole reason this queue is sorted the way it is. #}
-                  <div class="tiny" style="color: var(--warn, #b45309)">
-                    AI was unsure — check the price
-                  </div>
-                {% endif %}
-              </td>
+    <div class="ws-rows">
+      {% for product in products %}
+        {% set live = product.status == PUBLISHED %}
+        <div class="ws-row">
+          <div class="ws-row-main">
+            <div class="ws-row-title">
+              {{ product.title }}
+              {% if live %}
+                <span class="ws-tag ws-tag-ok">Live</span>
+              {% elif product.price_kes is none %}
+                <span class="ws-tag ws-tag-warn">Needs price</span>
+              {% else %}
+                <span class="ws-tag ws-tag-neutral">Draft</span>
+              {% endif %}
+            </div>
 
-              <td class="num">
-                {% if product.price_display %}
-                  {{ product.price_display }}
-                {% else %}
-                  <span class="subtle">No price</span>
-                {% endif %}
-              </td>
+            <p class="ws-row-meta">
+              {%- if product.category %}{{ product.category }} · {% endif -%}
+              {{ product.stock }} in stock
+            </p>
 
-              <td class="num">{{ product.stock }}</td>
+            {% if product.parse_confidence is not none and product.parse_confidence < 0.6 %}
+              {# The whole reason this queue is sorted the way it is. #}
+              <p class="ws-row-warn">AI was unsure — check the price</p>
+            {% endif %}
+          </div>
 
-              <td>
-                {% if live %}
-                  <span class="badge badge-brand">Live</span>
-                {% elif product.price_kes is none %}
-                  <span class="badge badge-warn">Needs price</span>
-                {% else %}
-                  <span class="badge badge-neutral">Draft</span>
-                {% endif %}
-              </td>
+          <div class="ws-row-num">
+            {% if product.price_display %}
+              <b>{{ product.price_display }}</b>
+            {% else %}
+              <b class="ws-muted">No price</b>
+            {% endif %}
+          </div>
 
-              <td>
-                {% if live %}
-                  <form method="post" action="/products/{{ product.id }}/unpublish">
-                    <button class="btn btn-ghost btn-sm" type="submit">Unpublish</button>
-                  </form>
-                {% elif product.price_kes is none %}
-                  {# Disabled rather than hidden, so the seller can see where the
-                     flow goes — and disabled rather than broken, so nobody taps
-                     into an error they could have been told about. #}
-                  <button class="btn btn-primary btn-sm" type="button" disabled
-                          title="Add a price first">Publish</button>
-                {% else %}
-                  <form method="post" action="/products/{{ product.id }}/publish">
-                    <button class="btn btn-primary btn-sm" type="submit">Publish</button>
-                  </form>
-                {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          <div class="ws-row-end">
+            {% if live %}
+              <form method="post" action="/products/{{ product.id }}/unpublish">
+                <button class="ws-btn ws-btn-sm" type="submit">Unpublish</button>
+              </form>
+            {% elif product.price_kes is none %}
+              {# Disabled rather than hidden, so the seller can see where the
+                 flow goes — and disabled rather than broken, so nobody taps
+                 into an error they could have been warned about. #}
+              <button class="ws-btn ws-btn-sm ws-btn-primary" type="button" disabled
+                      title="Add a price first">Publish</button>
+            {% else %}
+              <form method="post" action="/products/{{ product.id }}/publish">
+                <button class="ws-btn ws-btn-sm ws-btn-primary" type="submit">Publish</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
     </div>
   {% else %}
-    <div class="card center">
+    <div class="ws-empty">
+      <div class="ws-empty-icon">{{ icon.products(22) }}</div>
       <h3>Nothing here yet</h3>
-      <p class="muted small">
-        Products arrive when you forward a post to the WhatsApp bot, or from a
-        connected account — or you can
-        <a href="/products/new">add one by hand</a>.
+      <p>
+        Products arrive when you forward a post to the WhatsApp bot — or you can
+        add one by hand right now.
       </p>
+      <a class="ws-btn ws-btn-primary" href="/products/new">{{ icon.plus(15) }} Add a product</a>
     </div>
   {% endif %}
 

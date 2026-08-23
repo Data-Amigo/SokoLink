@@ -4,6 +4,11 @@
    matters: the seller is being asked to check it against their own M-Pesa
    messages, not to rubber-stamp something the system already believes. On the
    manual path this human check is the only verification that exists.
+
+   THE ACTION LEADS, THE RECORD FOLLOWS. Whatever the order needs — confirm it,
+   chase it, or nothing at all — is the first block on the page. Items and buyer
+   details are underneath, because they are what the seller checks *while*
+   deciding, not what they came for.
 #}
 {% extends "app_base.html" %}
 
@@ -12,152 +17,200 @@
 {% block title %}{{ order.reference }} · Biasharamall{% endblock %}
 
 {% block body %}
-<div class="container page">
+<div class="container ws-page">
 
-  <div class="page-head">
-    <p class="tiny subtle"><a href="/orders">← All orders</a></p>
-    <h1 class="mono">{{ order.reference }}</h1>
-    <p class="muted">{{ order.created_at.strftime('%d %B %Y, %H:%M') }}</p>
+  <div class="ws-head">
+    <p class="ws-eyebrow"><a href="/orders" style="color: inherit">← All orders</a></p>
+    <h1 class="ws-mono">{{ order.reference }}</h1>
+    <p>{{ order.created_at.strftime('%d %B %Y, %H:%M') }}</p>
   </div>
 
   {% if error %}
-    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+    <div class="ws-flash ws-flash-bad">{{ error }}</div>
   {% endif %}
 
-  {% if order.status == 'awaiting_confirmation' %}
-    <div class="card" style="margin-bottom: var(--s-5); border-color: var(--brand-200)">
-      <span class="badge badge-warn">Waiting for you</span>
-      <h3 style="margin-top: var(--s-2)">The buyer says they have paid</h3>
+  <div class="ws-split">
+    <div style="display: grid; gap: 16px">
 
-      {% if claim and claim.claimed_code %}
-        <p class="muted small">They entered this code:</p>
-        <p><code class="mono strong code-value">{{ claim.claimed_code }}</code></p>
-      {% endif %}
+      {# ── What this order needs ──────────────────────────────────────────── #}
+      {% if order.status == 'awaiting_confirmation' %}
+        <div class="ws-task" style="display: block; margin: 0">
+          <span class="ws-tag ws-tag-warn">{{ icon.clock(13) }} Waiting for you</span>
+          <h2>The buyer says they have paid</h2>
 
-      <p class="muted small">
-        Check it against your own M-Pesa messages for
-        <strong>KES {{ '{:,}'.format(order.total_kes) }}</strong>
-        to <strong>{{ order.paid_to_number }}</strong>.
-        Only confirm once you have seen the money.
-      </p>
-
-      <form method="post" action="/orders/{{ order.reference }}/confirm"
-            class="stack-sm" style="margin-top: var(--s-4)">
-        <label class="label" for="receipt">
-          M-Pesa code <span class="subtle">(leave blank to accept the code above)</span>
-        </label>
-        <div class="input-group">
-          <input class="input" id="receipt" name="receipt"
-                 placeholder="{{ claim.claimed_code if claim and claim.claimed_code else 'e.g. SLK7XA2B9C' }}">
-          <button class="btn btn-primary" type="submit">Confirm payment</button>
-        </div>
-      </form>
-    </div>
-
-  {% elif order.status == 'pending' %}
-    <div class="card" style="margin-bottom: var(--s-5)">
-      <span class="badge badge-neutral">Unpaid</span>
-      <h3 style="margin-top: var(--s-2)">The buyer has not paid yet</h3>
-      <p class="muted small">
-        They were told to send KES {{ '{:,}'.format(order.total_kes) }}
-        to {{ order.paid_to_number }}. If the money has arrived anyway, confirm it here.
-      </p>
-
-      <form method="post" action="/orders/{{ order.reference }}/confirm"
-            class="stack-sm" style="margin-top: var(--s-4)">
-        <label class="label" for="receipt">M-Pesa code</label>
-        <div class="input-group">
-          <input class="input" id="receipt" name="receipt" placeholder="e.g. SLK7XA2B9C" required>
-          <button class="btn btn-primary" type="submit">Confirm payment</button>
-        </div>
-      </form>
-    </div>
-
-  {% elif order.status == 'paid' %}
-    <div class="card" style="margin-bottom: var(--s-5)">
-      <span class="badge badge-brand">Paid</span>
-      <h3 style="margin-top: var(--s-2)">KES {{ '{:,}'.format(order.total_kes) }} confirmed</h3>
-      <p class="muted small">
-        {{ order.paid_at.strftime('%d %B %Y, %H:%M') }}
-        {% if claim and claim.mpesa_receipt %}
-          · <code class="mono">{{ claim.mpesa_receipt }}</code>
-        {% endif %}
-      </p>
-    </div>
-
-  {% else %}
-    <div class="card" style="margin-bottom: var(--s-5)">
-      <span class="badge badge-danger">{{ order.status|capitalize }}</span>
-      <h3 style="margin-top: var(--s-2)">This order is closed</h3>
-    </div>
-  {% endif %}
-
-  <div class="card" style="margin-bottom: var(--s-5)">
-    <div class="card-header"><h3>Items</h3></div>
-    <div class="table-wrap">
-      <table class="table">
-        <tbody>
-          {% for item in order.items %}
-            <tr>
-              <td>
-                {{ item.title }}
-                {% if item.selected_variant %}
-                  <div class="tiny subtle">{{ item.selected_variant }}</div>
-                {% endif %}
-                <div class="tiny subtle">{{ item.price_display }}</div>
-              </td>
-              <td class="num">×{{ item.quantity }}</td>
-              <td class="num strong">KES {{ '{:,}'.format(item.line_total_kes) }}</td>
-            </tr>
-          {% endfor %}
-          {% if order.delivery_fee_kes %}
-            <tr>
-              <td>Delivery</td><td></td>
-              <td class="num">KES {{ '{:,}'.format(order.delivery_fee_kes) }}</td>
-            </tr>
+          {% if claim and claim.claimed_code %}
+            <p style="margin-top: 12px">They entered this code:</p>
+            <p class="ws-mono"
+               style="margin: 6px 0 0; font-size: 20px; font-weight: 700; letter-spacing: .04em">
+              {{ claim.claimed_code }}
+            </p>
           {% endif %}
-          <tr>
-            <td class="strong">Total</td><td></td>
-            <td class="num strong">KES {{ '{:,}'.format(order.total_kes) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
 
-  <div class="card" style="margin-bottom: var(--s-5)">
-    <div class="card-header"><h3>Buyer</h3></div>
-    <p class="strong">{{ order.buyer_name }}</p>
-    <p class="muted small">{{ order.buyer_phone }}</p>
-    {% if order.delivery_address %}
-      <p class="muted small">{{ order.delivery_address }}</p>
-    {% endif %}
-    {% if order.delivery_note %}
-      <p class="muted small">“{{ order.delivery_note }}”</p>
-    {% endif %}
-    <p class="tiny subtle" style="margin-top: var(--s-3)">
-      {% if order.whatsapp_opt_in %}
-        Agreed to a WhatsApp receipt on this number.
+          <p style="margin-top: 12px">
+            Check it against your own M-Pesa messages for
+            <strong>KSh {{ '{:,}'.format(order.total_kes) }}</strong>
+            to <strong>{{ order.paid_to_number }}</strong>.
+            Only confirm once you have seen the money.
+          </p>
+
+          <form method="post" action="/orders/{{ order.reference }}/confirm"
+                class="ws-form" style="margin-top: 18px">
+            <div class="ws-field">
+              <label for="receipt">
+                M-Pesa code <span class="ws-muted">(leave blank to accept the code above)</span>
+              </label>
+              <input id="receipt" name="receipt"
+                     placeholder="{{ claim.claimed_code if claim and claim.claimed_code else 'e.g. SLK7XA2B9C' }}">
+            </div>
+            <div>
+              <button class="ws-btn ws-btn-primary" type="submit">
+                {{ icon.check(15) }} Confirm payment
+              </button>
+            </div>
+          </form>
+        </div>
+
+      {% elif order.status == 'pending' %}
+        <div class="ws-card">
+          <span class="ws-tag ws-tag-neutral">Unpaid</span>
+          <h2 style="margin: 10px 0 4px; font-size: 18px">The buyer has not paid yet</h2>
+          <p class="ws-hint">
+            They were told to send KSh {{ '{:,}'.format(order.total_kes) }}
+            to {{ order.paid_to_number }}. If the money has arrived anyway,
+            confirm it here.
+          </p>
+
+          <form method="post" action="/orders/{{ order.reference }}/confirm"
+                class="ws-form" style="margin-top: 16px">
+            <div class="ws-field">
+              <label for="receipt">M-Pesa code</label>
+              <input id="receipt" name="receipt" placeholder="e.g. SLK7XA2B9C" required>
+            </div>
+            <div>
+              <button class="ws-btn ws-btn-primary" type="submit">Confirm payment</button>
+            </div>
+          </form>
+        </div>
+
+      {% elif order.status == 'paid' %}
+        <div class="ws-card" style="border-color: #bfe8d0; background: var(--ws-green-s)">
+          <span class="ws-tag ws-tag-ok">{{ icon.check(13) }} Paid</span>
+          <h2 style="margin: 10px 0 4px; font-size: 18px">
+            KSh {{ '{:,}'.format(order.total_kes) }} confirmed
+          </h2>
+          <p class="ws-hint">
+            {{ order.paid_at.strftime('%d %B %Y, %H:%M') }}
+            {% if claim and claim.mpesa_receipt %}
+              · <span class="ws-mono">{{ claim.mpesa_receipt }}</span>
+            {% endif %}
+          </p>
+        </div>
+
       {% else %}
-        Did not opt in to a WhatsApp receipt.
+        <div class="ws-card">
+          <span class="ws-tag ws-tag-bad">{{ order.status|capitalize }}</span>
+          <h2 style="margin: 10px 0 0; font-size: 18px">This order is closed</h2>
+        </div>
       {% endif %}
-    </p>
 
-    {% if order.buyer_phone %}
-      <a class="btn btn-secondary btn-sm" style="margin-top: var(--s-3)"
-         href="https://wa.me/{{ order.buyer_phone | replace('+','') | replace(' ','') }}?text={{ ('Hi ' ~ order.buyer_name ~ '! About your order ' ~ order.reference ~ '.') | urlencode }}">
-        Message the buyer
-      </a>
-    {% endif %}
+      {# ── Items ──────────────────────────────────────────────────────────── #}
+      <div class="ws-card" style="padding: 0">
+        <div style="padding: 18px 20px 0">
+          <p class="ws-eyebrow">What they bought</p>
+        </div>
+
+        {% for item in order.items %}
+          <div class="ws-row">
+            <div class="ws-row-main">
+              <div class="ws-row-title">{{ item.title }}</div>
+              <p class="ws-row-meta">
+                {%- if item.selected_variant %}{{ item.selected_variant }} · {% endif -%}
+                {{ item.price_display }} × {{ item.quantity }}
+              </p>
+            </div>
+            <div class="ws-row-num">
+              <b>KSh {{ '{:,}'.format(item.line_total_kes) }}</b>
+            </div>
+          </div>
+        {% endfor %}
+
+        {% if order.delivery_fee_kes %}
+          <div class="ws-row">
+            <div class="ws-row-main"><div class="ws-row-title">Delivery</div></div>
+            <div class="ws-row-num"><b>KSh {{ '{:,}'.format(order.delivery_fee_kes) }}</b></div>
+          </div>
+        {% endif %}
+
+        <div class="ws-row" style="background: #fafbfc">
+          <div class="ws-row-main"><div class="ws-row-title">Total</div></div>
+          <div class="ws-row-num">
+            <b style="font-size: 17px">KSh {{ '{:,}'.format(order.total_kes) }}</b>
+          </div>
+        </div>
+      </div>
+
+      {% if order.status in ('pending', 'awaiting_confirmation') %}
+        <form method="post" action="/orders/{{ order.reference }}/cancel">
+          <button class="ws-btn ws-btn-sm" type="submit">
+            Cancel this order and return the stock
+          </button>
+        </form>
+      {% endif %}
+    </div>
+
+    {# ── Buyer ────────────────────────────────────────────────────────────── #}
+    <aside class="ws-aside">
+      <div class="ws-card">
+        <p class="ws-eyebrow">Buyer</p>
+
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 14px">
+          <span class="ws-face">{{ order.buyer_name | initials }}</span>
+          <div style="min-width: 0">
+            <div class="ws-row-title">{{ order.buyer_name }}</div>
+            <p class="ws-row-meta">{{ order.buyer_phone }}</p>
+          </div>
+        </div>
+
+        {% if order.delivery_address %}
+          <p class="ws-row-meta" style="display: flex; gap: 8px; align-items: flex-start">
+            {{ icon.location(14) }} {{ order.delivery_address }}
+          </p>
+        {% endif %}
+        {% if order.delivery_note %}
+          <p class="ws-row-meta">“{{ order.delivery_note }}”</p>
+        {% endif %}
+
+        {% if order.buyer_phone %}
+          {# The one action a seller reaches for from this page after confirming:
+             tell the buyer their thing is coming. #}
+          <a class="ws-btn ws-btn-sm" style="margin-top: 14px; width: 100%; justify-content: center"
+             target="_blank" rel="noopener"
+             href="https://wa.me/{{ order.buyer_phone | replace('+','') | replace(' ','') }}?text={{ ('Hi ' ~ order.buyer_name ~ '! About your order ' ~ order.reference ~ '.') | urlencode }}">
+            {{ icon.message(14) }} Message the buyer
+          </a>
+        {% endif %}
+
+        <p class="ws-fine" style="margin-top: 14px">
+          {% if order.whatsapp_opt_in %}
+            Agreed to a WhatsApp receipt on this number.
+          {% else %}
+            Did not opt in to a WhatsApp receipt.
+          {% endif %}
+        </p>
+      </div>
+
+      <div class="ws-card">
+        <p class="ws-eyebrow">Paid to</p>
+        <div class="ws-row-title">{{ order.paid_to_kind|capitalize }}</div>
+        <p class="ws-mono ws-muted" style="margin: 4px 0 0; font-size: 13.5px">
+          {{ order.paid_to_number }}
+        </p>
+        {% if order.paid_to_name %}
+          <p class="ws-fine" style="margin: 4px 0 0">{{ order.paid_to_name }}</p>
+        {% endif %}
+      </div>
+    </aside>
   </div>
-
-  {% if order.status in ('pending', 'awaiting_confirmation') %}
-    <form method="post" action="/orders/{{ order.reference }}/cancel">
-      <button class="btn btn-ghost btn-sm" type="submit">
-        Cancel this order and return the stock
-      </button>
-    </form>
-  {% endif %}
 
 </div>
 {% endblock %}

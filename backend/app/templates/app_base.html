@@ -17,6 +17,7 @@
    NO CLIENT FRAMEWORK. HTMX for the few places that need partial updates, and
    nothing else. Every page here renders complete from the server.
 #}
+{% import "partials/icons.html" as icon %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -42,6 +43,9 @@
         href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap">
 
   <link rel="stylesheet" href="/static/css/app.css">
+  {# The workspace skin. Loaded for every page behind the login wall so the
+     nav, cards and tables cannot drift page to page. #}
+  <link rel="stylesheet" href="/static/css/workspace.css">
   <link rel="icon" href="/static/img/logo.png" type="image/png">
 
   {% block head %}{% endblock %}
@@ -51,27 +55,67 @@
   <a href="#main" class="sr-only">Skip to content</a>
 
   {% block chrome %}
-    <header class="topbar">
-      <div class="container topbar-inner">
+    {# THE WORKSPACE BAR. Ordered by what a seller actually does in a day:
+       stock it, watch it sell, see the money, get paid, then who bought.
+
+       ICONS COME FROM ONE MACRO FILE so the nav and the pages below it never
+       disagree about what an order looks like. Each icon sits beside its word
+       and never replaces it — an icon-only bar is a guessing game on the small
+       screen this is mostly used on.
+
+       IT SCROLLS SIDEWAYS ON A PHONE rather than collapsing into a hamburger.
+       Six destinations is few enough to swipe, and a menu that must be opened
+       hides the one number a seller came to check. #}
+    <header class="ws-bar">
+      <div class="container ws-bar-inner">
         {% with logo_href = "/dashboard" %}{% include "partials/logo.html" %}{% endwith %}
 
         {% if account %}
-          <nav class="nav" aria-label="Main">
-            {# Ordered by what a seller does, not by what was built first:
-               stock it, watch it sell, see the money, get paid. Accounts is
-               last because connecting TikTok is optional and comes later. #}
-            <a href="/dashboard" {% if nav == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
-            <a href="/products"  {% if nav == 'products'  %}aria-current="page"{% endif %}>Products</a>
-            <a href="/orders"    {% if nav == 'orders'    %}aria-current="page"{% endif %}>Orders</a>
-            <a href="/analytics" {% if nav == 'analytics' %}aria-current="page"{% endif %}>Money</a>
-            <a href="/settings/payment" {% if nav == 'settings' %}aria-current="page"{% endif %}>Payments</a>
-            <a href="/accounts"  {% if nav == 'accounts'  %}aria-current="page"{% endif %}>Accounts</a>
-            {# Logout is a POST. A GET logout can be triggered by any image tag
-               on any site, which is a real (if petty) way to annoy a user. #}
-            <form method="post" action="/logout">
-              <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
-            </form>
+          <nav class="ws-nav" aria-label="Main">
+            <a href="/dashboard" {% if nav == 'dashboard' %}aria-current="page"{% endif %}>
+              {{ icon.dashboard() }}<span>Dashboard</span></a>
+            <a href="/products" {% if nav == 'products' %}aria-current="page"{% endif %}>
+              {{ icon.products() }}<span>Products</span></a>
+            <a href="/orders" {% if nav == 'orders' %}aria-current="page"{% endif %}>
+              {{ icon.orders() }}<span>Orders</span></a>
+            <a href="/analytics" {% if nav == 'analytics' %}aria-current="page"{% endif %}>
+              {{ icon.money() }}<span>Money</span></a>
+            <a href="/settings/payment" {% if nav == 'settings' %}aria-current="page"{% endif %}>
+              {{ icon.payments() }}<span>Payments</span></a>
+            <a href="/customers" {% if nav == 'customers' %}aria-current="page"{% endif %}>
+              {{ icon.customers() }}<span>Customers</span></a>
           </nav>
+
+          <div class="ws-bar-end">
+            {% if seller %}
+              {# Opens in a new tab: a seller checking their shop should come
+                 back to the workspace, not have to navigate back to it. #}
+              <a class="ws-btn ws-btn-sm" href="/shop/{{ seller.slug }}"
+                 target="_blank" rel="noopener">
+                {{ icon.eye(14) }}<span class="ws-hide-sm">View store</span>
+              </a>
+            {% endif %}
+
+            {# The avatar IS the sign-out control. A separate "Sign out" link
+               costs a nav slot to do something a seller does once a month. #}
+            <details class="ws-menu">
+              <summary aria-label="Account menu">
+                <span class="ws-avatar">{{ (seller.display_name if seller else account.email or 'Seller') | initials }}</span>
+              </summary>
+              <div class="ws-menu-pop">
+                <p class="ws-menu-who">
+                  <strong>{{ seller.display_name if seller else 'Your shop' }}</strong>
+                  {% if account.phone %}<span>{{ account.phone }}</span>{% endif %}
+                </p>
+                <a href="/settings/payment">{{ icon.payments(14) }} Payment details</a>
+                {# Logout is a POST. A GET logout can be triggered by any image
+                   tag on any site, which is a real (if petty) annoyance. #}
+                <form method="post" action="/logout">
+                  <button type="submit">{{ icon.lock(14) }} Sign out</button>
+                </form>
+              </div>
+            </details>
+          </div>
         {% endif %}
       </div>
     </header>

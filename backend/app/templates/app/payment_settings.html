@@ -13,24 +13,26 @@
 {% block title %}Payments · Biasharamall{% endblock %}
 
 {% block body %}
-<div class="container page">
+<div class="container ws-page">
 
-  <div class="page-head">
-    <h1>Getting paid</h1>
-    <p class="muted">Where buyers send money when they order from your shop.</p>
+  <div class="ws-head">
+    <p class="ws-eyebrow">Getting paid</p>
+    <h1>Payments</h1>
+    <p>Where buyers send money when they order from your shop.</p>
   </div>
 
   {% if error %}
-    <div class="alert alert-error" style="margin-bottom: var(--s-5)">{{ error }}</div>
+    <div class="ws-flash ws-flash-bad">{{ error }}</div>
   {% elif saved %}
-    <div class="alert alert-success" style="margin-bottom: var(--s-5)">Saved.</div>
+    <div class="ws-flash ws-flash-ok">{{ icon.check(14) }} Saved.</div>
   {% endif %}
 
   {% if not method %}
-    <div class="callout" style="margin-bottom: var(--s-5)">
+    <div class="ws-note">
+      {{ icon.alert(17) }}
       <div>
         <strong>Your shop cannot take orders yet.</strong>
-        <p class="muted small">
+        <p>
           Buyers can browse, but checkout is blocked until you say where the
           money goes. Most sellers use Pochi la Biashara — just your Safaricom
           number, nothing to apply for.
@@ -40,133 +42,190 @@
   {% endif %}
 
   {% if not seller.whatsapp_number %}
-    <div class="callout" style="margin-bottom: var(--s-4)">
+    <div class="ws-note">
+      {{ icon.alert(17) }}
       <div>
         <strong>Your shop cannot open without a WhatsApp number.</strong>
-        <p class="muted small">
+        <p>
           It is how buyers reach you, and a live shop nobody can contact is a
-          dead end. Add it below.
+          dead end.
         </p>
       </div>
     </div>
   {% endif %}
 
-  <form method="post" action="/settings/shop/contact" class="card stack"
-        style="margin-bottom: var(--s-5)">
-    <div class="stack-sm">
-      <label class="label" for="whatsapp_number">Your WhatsApp number</label>
-      <input class="input" type="tel" id="whatsapp_number" name="whatsapp_number"
-             value="{{ seller.whatsapp_number or '' }}"
-             inputmode="tel" required placeholder="07XX XXX XXX">
-      <p class="tiny subtle">
-        Buyers use this to message you, and you sign in with it.
-      </p>
-    </div>
-    <div class="cluster">
-      <button class="btn btn-primary" type="submit">Save number</button>
-    </div>
-  </form>
+  <div class="ws-split">
+    <div style="display: grid; gap: 16px">
 
-  <form method="post" action="/settings/payment" class="card stack">
+      {# ── Contact ────────────────────────────────────────────────────────── #}
+      <form method="post" action="/settings/shop/contact" class="ws-card ws-form">
+        <div>
+          <p class="ws-eyebrow">Step 1</p>
+          <h2 style="margin: 0; font-size: 19px">Your WhatsApp number</h2>
+        </div>
 
-    <div class="stack-sm">
-      <span class="label" id="kind-label">How do you want to be paid?</span>
-      <div class="chip-row" role="radiogroup" aria-labelledby="kind-label">
-        {% for kind in kinds %}
-          <label class="chip">
-            <input type="radio" name="kind" value="{{ kind.value }}"
-                   {% if (method and method.kind == kind.value) or (not method and kind.value == 'pochi') %}checked{% endif %}>
-            <span>
-              {% if kind.value == 'pochi' %}Pochi la Biashara
-              {% elif kind.value == 'till' %}Buy Goods (Till)
-              {% else %}Paybill{% endif %}
-            </span>
-          </label>
-        {% endfor %}
-      </div>
-      <p class="tiny subtle">
-        Pochi works with just your Safaricom number. Till and Paybill can also
-        confirm payments automatically, if you add API details below.
-      </p>
-    </div>
+        <div class="ws-field">
+          <label for="whatsapp_number">Number buyers will message</label>
+          <input type="tel" id="whatsapp_number" name="whatsapp_number"
+                 value="{{ seller.whatsapp_number or '' }}"
+                 inputmode="tel" required placeholder="07XX XXX XXX">
+          <p class="ws-hint">This is also how you sign in.</p>
+        </div>
 
-    <div class="stack-sm">
-      <label class="label" for="number">Your number</label>
-      <input class="input" id="number" name="number" required
-             value="{{ method.number if method else '' }}"
-             placeholder="07XX XXX XXX, or a till / paybill number">
-    </div>
+        <div>
+          <button class="ws-btn ws-btn-primary" type="submit">Save number</button>
+        </div>
+      </form>
 
-    <div class="stack-sm">
-      <label class="label" for="account_name">Name shown to the buyer</label>
-      <input class="input" id="account_name" name="account_name"
-             value="{{ method.account_name or '' if method else '' }}"
-             placeholder="e.g. Nairobi Thrift">
-      <p class="tiny subtle">
-        We show this at checkout so buyers can check it matches the name on
-        their M-Pesa prompt before sending money.
-      </p>
-    </div>
+      {# ── Method ─────────────────────────────────────────────────────────── #}
+      <form method="post" action="/settings/payment" class="ws-card ws-form">
+        <div>
+          <p class="ws-eyebrow">Step 2</p>
+          <h2 style="margin: 0; font-size: 19px">How you want to be paid</h2>
+        </div>
 
-    <div class="stack-sm">
-      <label class="label" for="account_reference">Paybill account number <span class="subtle">(if yours needs one)</span></label>
-      <input class="input" id="account_reference" name="account_reference"
-             value="{{ method.account_reference or '' if method else '' }}">
-    </div>
-
-    <details {% if method and method.can_stk %}open{% endif %}>
-      <summary class="label" style="cursor:pointer">
-        Automatic confirmation <span class="subtle">— optional</span>
-      </summary>
-
-      <div class="stack-sm" style="margin-top: var(--s-3)">
-        <p class="muted small">
-          With Daraja API details, buyers get an M-Pesa prompt on their phone and
-          payment is confirmed automatically. Without them, you confirm each
-          order yourself from the Orders page — which is what most sellers do.
-        </p>
-        <p class="tiny subtle">
-          Not available for Pochi la Biashara: Safaricom's API cannot send
-          prompts to it.
-        </p>
-
-        {% if method and method.can_stk %}
-          <div class="alert alert-info">
-            API details are saved. Leave the boxes blank to keep them.
+        <div class="ws-field">
+          <span id="kind-label" style="font-size: 13.5px; font-weight: 600">Choose one</span>
+          <div class="ws-choices" role="radiogroup" aria-labelledby="kind-label">
+            {% for kind in kinds %}
+              <label class="ws-choice">
+                <input type="radio" name="kind" value="{{ kind.value }}"
+                       {% if (method and method.kind == kind.value) or (not method and kind.value == 'pochi') %}checked{% endif %}>
+                {% if kind.value == 'pochi' %}
+                  <strong>Pochi la Biashara</strong>
+                  <span>Just your Safaricom number</span>
+                {% elif kind.value == 'till' %}
+                  <strong>Buy Goods (Till)</strong>
+                  <span>Can confirm automatically</span>
+                {% else %}
+                  <strong>Paybill</strong>
+                  <span>Can confirm automatically</span>
+                {% endif %}
+              </label>
+            {% endfor %}
           </div>
-        {% endif %}
+        </div>
 
-        <label class="label" for="stk_shortcode">Shortcode</label>
-        <input class="input" id="stk_shortcode" name="stk_shortcode"
-               value="{{ method.stk_shortcode or '' if method else '' }}">
+        <div class="ws-field">
+          <label for="number">Your number</label>
+          <input id="number" name="number" required
+                 value="{{ method.number if method else '' }}"
+                 placeholder="07XX XXX XXX, or a till / paybill number">
+        </div>
 
-        <label class="label" for="consumer_key">Consumer key</label>
-        <input class="input" id="consumer_key" name="consumer_key" autocomplete="off"
-               placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+        <div class="ws-field">
+          <label for="account_name">Name shown to the buyer</label>
+          <input id="account_name" name="account_name"
+                 value="{{ method.account_name or '' if method else '' }}"
+                 placeholder="e.g. Nairobi Thrift">
+          <p class="ws-hint">
+            Shown at checkout so buyers can check it matches the name on their
+            M-Pesa prompt before sending money.
+          </p>
+        </div>
 
-        <label class="label" for="consumer_secret">Consumer secret</label>
-        <input class="input" id="consumer_secret" name="consumer_secret" type="password"
-               autocomplete="off"
-               placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+        <div class="ws-field">
+          <label for="account_reference">
+            Paybill account number <span class="ws-muted">(if yours needs one)</span>
+          </label>
+          <input id="account_reference" name="account_reference"
+                 value="{{ method.account_reference or '' if method else '' }}">
+        </div>
 
-        <label class="label" for="passkey">Passkey</label>
-        <input class="input" id="passkey" name="passkey" type="password" autocomplete="off"
-               placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
-      </div>
-    </details>
+        <details class="ws-fold" {% if method and method.can_stk %}open{% endif %}>
+          <summary>Automatic confirmation <span class="ws-muted">— optional</span></summary>
 
-    <div class="cluster">
-      <button class="btn btn-primary" type="submit">Save</button>
+          <div class="ws-form" style="margin-top: 16px">
+            <p class="ws-hint">
+              With Daraja API details, buyers get an M-Pesa prompt on their phone
+              and payment is confirmed automatically. Without them you confirm
+              each order yourself from the Orders page — which is what most
+              sellers do.
+            </p>
+            <p class="ws-hint">
+              <strong>Not available for Pochi la Biashara</strong> — Safaricom's
+              API cannot send prompts to it.
+            </p>
+
+            {% if method and method.can_stk %}
+              <div class="ws-flash ws-flash-ok" style="margin: 0">
+                {{ icon.lock(14) }} API details are saved. Leave the boxes blank to keep them.
+              </div>
+            {% endif %}
+
+            <div class="ws-field">
+              <label for="stk_shortcode">Shortcode</label>
+              <input id="stk_shortcode" name="stk_shortcode"
+                     value="{{ method.stk_shortcode or '' if method else '' }}">
+            </div>
+
+            <div class="ws-field">
+              <label for="consumer_key">Consumer key</label>
+              <input id="consumer_key" name="consumer_key" autocomplete="off"
+                     placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+            </div>
+
+            <div class="ws-field">
+              <label for="consumer_secret">Consumer secret</label>
+              <input id="consumer_secret" name="consumer_secret" type="password"
+                     autocomplete="off"
+                     placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+            </div>
+
+            <div class="ws-field">
+              <label for="passkey">Passkey</label>
+              <input id="passkey" name="passkey" type="password" autocomplete="off"
+                     placeholder="{{ '••••••••  (saved)' if method and method.can_stk else '' }}">
+            </div>
+          </div>
+        </details>
+
+        <div>
+          <button class="ws-btn ws-btn-primary" type="submit">Save</button>
+        </div>
+      </form>
+
+      {% if method and method.can_stk %}
+        <form method="post" action="/settings/payment/disable-stk">
+          <button class="ws-btn ws-btn-sm" type="submit">
+            Remove my API details and confirm payments myself
+          </button>
+        </form>
+      {% endif %}
     </div>
-  </form>
 
-  {% if method and method.can_stk %}
-    <form method="post" action="/settings/payment/disable-stk" style="margin-top: var(--s-4)">
-      <button class="btn btn-ghost btn-sm" type="submit">
-        Remove my API details and confirm payments myself
-      </button>
-    </form>
-  {% endif %}
+    {# ── Sidebar: the thing sellers most often get wrong ─────────────────── #}
+    <aside class="ws-aside">
+      <div class="ws-card">
+        <p class="ws-eyebrow">How the money moves</p>
+        <h3 style="margin: 0 0 10px; font-size: 17px">Straight to you</h3>
+        <p style="margin: 0 0 14px; font-size: 13.5px; color: var(--ws-muted)">
+          Buyers pay your M-Pesa directly. We never hold, split or forward your
+          money — we only record that the order happened.
+        </p>
+        <ul class="ws-keys">
+          <li><span>Pochi</span><b>Manual confirm</b></li>
+          <li><span>Till / Paybill</span><b>Manual confirm</b></li>
+          <li><span>+ Daraja details</span><b>Automatic</b></li>
+        </ul>
+      </div>
+
+      {% if method %}
+        <div class="ws-card">
+          <p class="ws-eyebrow">Current setting</p>
+          <div class="ws-row-title" style="margin-bottom: 8px">
+            {{ method.kind|capitalize }}
+            {% if method.can_stk %}
+              <span class="ws-tag ws-tag-ok">Automatic</span>
+            {% else %}
+              <span class="ws-tag ws-tag-neutral">You confirm</span>
+            {% endif %}
+          </div>
+          <p class="ws-mono ws-muted" style="margin: 0; font-size: 13.5px">{{ method.number }}</p>
+        </div>
+      {% endif %}
+    </aside>
+  </div>
 
 </div>
 {% endblock %}
