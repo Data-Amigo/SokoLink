@@ -183,7 +183,16 @@ async def whatsapp_inbound(
     # THE BOT RUNS ONLY ON FIRST RECEIPT. The redelivery branch above returns
     # early, so a Twilio retry can never add the same item to a basket twice or
     # place a second order from one message.
-    outcome = handle(db, phone, params.get("Body") or "")
+    # Twilio numbers attachments: MediaUrl0, MediaContentType0, and so on.
+    # A forwarded catalogue post is often several photos in one message, which
+    # is why this is a list and not a single optional field.
+    media = [
+        (f"{message_sid}:{index}", params[f"MediaUrl{index}"])
+        for index in range(int(params.get("NumMedia") or 0))
+        if params.get(f"MediaUrl{index}")
+    ]
+
+    outcome = handle(db, phone, params.get("Body") or "", media=media)
 
     # One commit for the message record AND everything the bot did. A reply
     # promising "added to your basket" must not survive a failed basket write.

@@ -43,6 +43,7 @@ from app.models import (
     WaConversation,
 )
 from app.services.cart import CartError, add_item, clear, get_or_create_cart
+from app.services.intake import IntakeError, ingest_forwarded_post
 from app.services.media import absolute_url
 from app.services.orders import claim_payment, get_payment_method, place_order
 from app.services.storefront import get_categories, get_public_products
@@ -353,7 +354,84 @@ def _claim(db: Session, convo: WaConversation, text: str) -> list[Reply]:
     ]
 
 
-def handle(db: Session, phone: str, text: str) -> Outcome:
+# ══════════════════════════════════════════════════════════════════════════
+# THE SELLER SIDE
+# ══════════════════════════════════════════════════════════════════════════
+#
+# A message from a number that owns a shop is a SELLER, not a buyer. This is the
+# product's central promise: they forward a catalogue post from the WhatsApp
+# group they already sell in, and it becomes a product.
+#
+# Sellers are recognised by their own WhatsApp number, which is the identity
+# they sign in with. Nobody types a command to "switch mode" — a seller
+# forwarding a photo means one thing, and asking them to announce it first would
+# be friction we invented for our own convenience.
+
+
+def find_seller_by_phone(db: Session, phone: str) -> Seller | None:
+    """
+    The shop this number owns, if any.
+
+    Args:
+        db: Session.
+        phone: Bare digits with country code.
+
+    Returns:
+        The seller, or None for an ordinary buyer.
+
+    Notes:
+        Matched on the number as stored AND without a country code, because a
+        seller may have typed theirs either way in the workspace and neither is
+        wrong to them.
+    """
+    local = "0" + phone[3:] if phone.startswith("254") and len(phone) == 12 else phone
+    return db.scalar(select(Seller).where(Seller.whatsapp_number.in_({phone, local, f"+{phone}"})))
+
+
+def _handle_forward(
+    db: Session, seller: Seller, media_id: str, media_url: str, caption: str
+) -> list[Reply]:
+    """
+    Turn one forwarded catalogue post into a draft product, and say what happened.
+
+    THE REPLY NAMES THE ITEM AND ASKS FOR WHAT IS MISSING. "Product created" is
+    useless: a seller forwarding twenty posts needs to know which one this was
+    and whether it still needs them. Prices are usually absent — verified
+    against 24 real captions, zero mention KSh — so "needs a price" is the
+    common case, not an error.
+    """
+    try:
+        result = ingest_forwarded_post(
+            db, seller, media_id=media_id, media_url=media_url, caption=caption
+        )
+    except IntakeError as exc:
+        # The message is written to be shown to a seller verbatim.
+        return [Reply(str(exc))]
+
+    product = result.product
+    if result.needs_price:
+        return [
+            Reply(
+                f"Added *{product.title}* to your drafts. ✅\n\n"
+                f"I couldn't see a price on it. Reply with the price in shillings "
+                f"— just the number — and I'll set it."
+            )
+        ]
+
+    return [
+        Reply(
+            f"Added *{product.title}* — {product.price_display}. ✅\n\n"
+            f"It's a draft until you publish it. Check it in your shop dashboard."
+        )
+    ]
+
+
+def handle(
+    db: Session,
+    phone: str,
+    text: str,
+    media: list[tuple[str, str]] | None = None,
+) -> Outcome:
     """
     Advance one buyer's conversation by one message.
 
@@ -361,7 +439,8 @@ def handle(db: Session, phone: str, text: str) -> Outcome:
         db: Session. The caller commits — this function never does, so a failed
             reply cannot leave a half-applied order behind.
         phone: Bare digits with country code.
-        text: What they sent.
+        text: What they sent, which is the caption when media is attached.
+        media: ``(media_id, url)`` for each attachment, in order.
 
     Returns:
         An :class:`Outcome` carrying the replies to send back, in order.
@@ -374,6 +453,17 @@ def handle(db: Session, phone: str, text: str) -> Outcome:
     convo = get_conversation(db, phone)
     said = text.strip()
     lowered = said.lower()
+
+    # ── A seller forwarding their catalogue ─────────────────────────────────
+    # Checked before anything else: this is the one interaction the whole
+    # product exists for, and a photo from a seller can mean nothing else.
+    if media:
+        owner = find_seller_by_phone(db, phone)
+        if owner is not None:
+            replies: list[Reply] = []
+            for media_id, url in media:
+                replies.extend(_handle_forward(db, owner, media_id, url, said))
+            return Outcome(replies)
 
     # ── Routing: which shop is this? ────────────────────────────────────────
     # The shareable link is wa.me/<bot>?text=shop%20<slug>, so the buyer's very

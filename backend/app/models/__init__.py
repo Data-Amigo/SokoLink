@@ -34,6 +34,7 @@ from app.models.enums import (
 from app.models.job import Job
 from app.models.login_code import LoginCode
 from app.models.order import Order, OrderItem, Payment
+from app.models.parsed_media import ParsedMedia
 from app.models.payment_method import PaymentMethod
 from app.models.post import Post
 from app.models.product import Product
@@ -73,6 +74,7 @@ __all__ = [
     "SocialAccount",
     "VerificationMethod",
     "ConversationState",
+    "ParsedMedia",
     "WaConversation",
     "WaMessage",
 ]
