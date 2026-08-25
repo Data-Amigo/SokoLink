@@ -1,28 +1,35 @@
 """
-Send a native WhatsApp CTA URL button, to find out where it actually opens.
+Send a plain link AND a native CTA button, to find out which opens where.
 
     python scripts/send_cta_probe.py 2547XXXXXXXX [slug]
 
-    Content template (twilio/call-to-action) ──▶ Messages.json ──▶ a real handset
+    plain body link  ──▶ ─┐
+                          ├──▶ same handset, two taps, one answer
+    CTA URL button   ──▶ ─┘
 
-THE QUESTION THIS ANSWERS. A plain URL in a message body is text that WhatsApp
-linkifies, and tapping it hands an intent to the operating system — which on
-some Android skins (MIUI especially) is intercepted and routed to the default
-browser. A CTA URL button is a native interactive component instead, and the
-claim is that WhatsApp opens it in its own WebView rather than delegating.
+THE QUESTION. A plain URL in a message body is text WhatsApp linkifies; tapping
+it hands an intent to the operating system, which some Android skins (MIUI in
+particular) intercept and route to the default browser. A CTA URL button is a
+native interactive component instead, so there may be no intent to intercept.
 
-THAT CLAIM IS UNVERIFIED AND THIS SCRIPT EXISTS TO TEST IT, not to assume it.
-Twilio's docs describe the component; they do not promise which browser a given
-Android OEM ends up using. The only evidence that settles it is a thumb on the
-phone that is currently failing.
+That is a hypothesis, not a documented guarantee — neither Twilio nor Meta
+promises which browser a given OEM lands on. So this sends BOTH, seconds apart,
+to the same phone. Two taps and the question is answered by evidence rather
+than by anyone's confident paragraph, mine included.
 
-It prints every Twilio error in full. The interesting failures here are
-specific and fixable — an unjoined sandbox recipient, a content type the
-account cannot send, a session window that has closed — and each needs a
-different response, so "it failed" is not a useful thing to report.
+IT NEVER READS APP_BASE_URL. The first version of this script did, and locally
+that is http://localhost:8000 — so it would have sent a button pointing at a
+server on the developer's laptop, which no phone can reach. The production host
+is a constant here precisely because the whole point is what a real handset on
+a mobile network does.
 
-WHAT IT DOES NOT DO. It does not add CTA buttons to the product. This is a
-probe: one message, one question, thrown away once answered.
+THE BUTTON URL IS A STATIC BASE PLUS A VARIABLE TAIL. WhatsApp rejects a URL
+button whose address is entirely a placeholder; the domain must be fixed at
+template-approval time, with only a suffix varying per message. So the template
+carries `.../shop/{{1}}` and the slug is the variable.
+
+WHAT THIS DOES NOT DO. It does not add buttons to the product. It is a probe,
+deleted once it has answered.
 """
 
 from __future__ import annotations
@@ -40,67 +47,75 @@ from app.config import settings  # noqa: E402
 CONTENT_API = "https://content.twilio.com/v1/Content"
 MESSAGES_API = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
 
-#: Reused across runs so repeated probes do not litter the account with
-#: near-identical templates.
-FRIENDLY_NAME = "biashara_shop_cta_probe"
+#: The deployed host, NOT settings.app_base_url — see the module docstring.
+#: A phone cannot reach a laptop's localhost, and that is exactly the mistake
+#: this constant exists to make impossible.
+PROD_BASE = "https://sokolink-production.up.railway.app"
+
+#: Bumped when the template's shape changes, so a run never silently reuses a
+#: template built to the older, rejected shape.
+FRIENDLY_NAME = "biashara_shop_cta_v2"
 
 
-def find_or_create_template(auth: tuple[str, str], shop_url: str) -> str:
+def find_or_create_template(client: httpx.Client) -> str:
     """
-    Get the content SID for our CTA template, creating it the first time.
+    The content SID for our CTA template, created on first use.
 
     Args:
-        auth: Twilio account SID and auth token.
-        shop_url: The absolute URL the button should open.
+        client: An authenticated Twilio client.
 
     Returns:
         The content SID to send with.
 
     Raises:
-        SystemExit: With Twilio's own message, which names the actual problem.
+        SystemExit: Carrying Twilio's own message, which names the real problem.
     """
-    with httpx.Client(auth=auth, timeout=30) as client:
-        existing = client.get(CONTENT_API, params={"PageSize": 100})
-        if existing.status_code == 200:
-            for item in existing.json().get("contents", []):
-                if item.get("friendly_name") == FRIENDLY_NAME:
-                    print(f"  reusing template {item['sid']}")
-                    return str(item["sid"])
+    listed = client.get(CONTENT_API, params={"PageSize": 100})
+    if listed.status_code == 200:
+        for item in listed.json().get("contents", []):
+            if item.get("friendly_name") == FRIENDLY_NAME:
+                print(f"  reusing template {item['sid']}")
+                return str(item["sid"])
 
-        payload = {
-            "friendly_name": FRIENDLY_NAME,
-            "language": "en",
-            "variables": {"1": shop_url},
-            "types": {
-                "twilio/call-to-action": {
-                    "body": ("Your shop is ready. Tap below to see what buyers see."),
-                    "actions": [
-                        {"type": "URL", "title": "Open my shop", "url": "{{1}}"},
-                    ],
-                }
-            },
-        }
-        created = client.post(
-            CONTENT_API,
-            headers={"Content-Type": "application/json"},
-            content=json.dumps(payload),
+    payload = {
+        "friendly_name": FRIENDLY_NAME,
+        "language": "en",
+        "variables": {"1": "vitabu-bora"},
+        "types": {
+            "twilio/call-to-action": {
+                "body": "Your shop is live. Tap the button to see what a buyer sees.",
+                "actions": [
+                    {
+                        "type": "URL",
+                        "title": "Open shop",
+                        # Static domain, variable tail — WhatsApp requires it.
+                        "url": f"{PROD_BASE}/shop/{{{{1}}}}",
+                    }
+                ],
+            }
+        },
+    }
+    created = client.post(
+        CONTENT_API,
+        headers={"Content-Type": "application/json"},
+        content=json.dumps(payload),
+    )
+    if created.status_code not in (200, 201):
+        raise SystemExit(
+            f"Could not create the content template ({created.status_code}):\n{created.text}"
         )
-        if created.status_code not in (200, 201):
-            raise SystemExit(
-                f"Could not create the content template ({created.status_code}):\n{created.text}"
-            )
-        sid = str(created.json()["sid"])
-        print(f"  created template {sid}")
-        return sid
+    sid = str(created.json()["sid"])
+    print(f"  created template {sid}")
+    return sid
 
 
 def main(to: str, slug: str) -> int:
     """
-    Send one CTA button message.
+    Send the plain link, then the CTA button, to one number.
 
     Args:
-        to: Destination number, digits only, with country code.
-        slug: Which shop the button should open.
+        to: Destination, digits with country code.
+        slug: Which shop to open.
 
     Returns:
         A process exit code.
@@ -111,31 +126,54 @@ def main(to: str, slug: str) -> int:
         print("TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_NUMBER must be set.")
         return 1
 
-    shop_url = f"{settings.app_base_url}/shop/{slug}"
-    print(f"Shop URL : {shop_url}")
-    print(f"To       : whatsapp:+{to}\n")
+    url = f"{PROD_BASE}/shop/{slug}"
+    dest = f"whatsapp:+{to.lstrip('+')}"
+    src = f"whatsapp:+{sender.lstrip('+')}"
+    auth = (sid, token)
 
-    content_sid = find_or_create_template((sid, token), shop_url)
+    print(f"Shop URL : {url}")
+    print(f"To       : {dest}\n")
 
-    data = {
-        "To": f"whatsapp:+{to.lstrip('+')}",
-        "From": f"whatsapp:+{sender.lstrip('+')}",
-        "ContentSid": content_sid,
-        "ContentVariables": json.dumps({"1": shop_url}),
-    }
-    sent = httpx.post(MESSAGES_API.format(sid=sid), data=data, auth=(sid, token), timeout=30)
-    if sent.status_code not in (200, 201):
-        # The sandbox refusing an unjoined number, and an account that cannot
-        # send interactive content, are different problems with different fixes.
-        print(f"\nSEND FAILED ({sent.status_code}):\n{sent.text}")
-        return 1
+    ok = True
+    with httpx.Client(auth=auth, timeout=30) as client:
+        # 1 — the plain link, identical to pasting it by hand. The control.
+        plain = client.post(
+            MESSAGES_API.format(sid=sid),
+            data={"To": dest, "From": src, "Body": f"TEST 1 of 2 — plain link:\n{url}"},
+        )
+        if plain.status_code in (200, 201):
+            print(f"  1. plain link  sent  ({plain.json().get('status')})")
+        else:
+            ok = False
+            print(f"  1. plain link  FAILED ({plain.status_code}):\n{plain.text}\n")
 
-    body = sent.json()
-    print(f"\nSent. sid={body.get('sid')} status={body.get('status')}")
-    print("\nNow tap the BUTTON on the handset that was opening Chrome, and check:")
-    print("  - does back land you straight in the chat?  -> WhatsApp's own WebView")
-    print("  - does Chrome appear as a separate app?     -> it left WhatsApp")
-    return 0
+        # 2 — the same URL as a native button. The variable.
+        content_sid = find_or_create_template(client)
+        button = client.post(
+            MESSAGES_API.format(sid=sid),
+            data={
+                "To": dest,
+                "From": src,
+                "ContentSid": content_sid,
+                "ContentVariables": json.dumps({"1": slug}),
+            },
+        )
+        if button.status_code in (200, 201):
+            print(f"  2. CTA button  sent  ({button.json().get('status')})")
+        else:
+            ok = False
+            # An account that cannot send interactive content and a sandbox
+            # refusing an unjoined number are different problems entirely.
+            print(f"  2. CTA button  FAILED ({button.status_code}):\n{button.text}")
+
+    if ok:
+        print("\nOn the phone that was opening Chrome, tap message 1, then message 2.")
+        print("For each, check:")
+        print("  back lands straight in the chat   -> WhatsApp's own WebView")
+        print("  Chrome is a separate app in recents -> it left WhatsApp")
+        print("\nIf 1 leaves and 2 does not, the button is the fix.")
+        print("If both leave, the handset is overriding and we need Flows.")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
