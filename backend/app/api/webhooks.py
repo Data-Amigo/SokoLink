@@ -32,6 +32,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from collections.abc import Sequence
 from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -43,6 +44,7 @@ from starlette.exceptions import HTTPException
 from app.config import get_settings
 from app.db import get_db
 from app.models import WaMessage
+from app.services.bot import Reply, handle
 
 router = APIRouter(tags=["webhooks"])
 
@@ -53,41 +55,36 @@ WHATSAPP_WEBHOOK_PATH = "/webhooks/whatsapp"
 #: Twilio's empty TwiML: "received, say nothing back".
 _NO_REPLY = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
 
-#: TEMPORARY SCAFFOLDING — REMOVE WHEN THE REAL CONVERSATION LANDS IN W3.
-#:
-#: Without it, a working webhook and a broken one look identical from a handset:
-#: you send a message and nothing happens either way. This makes the round trip
-#: — Twilio, signature, database — visible to the person holding the phone.
-#:
-#: It is deliberately not written in the bot's eventual voice. The real thing is
-#: a natural conversation driven by an LLM; this is a receipt, and dressing it up
-#: as a personality we have not built yet would set the wrong expectation with
-#: the first sellers who see it.
-_ACK = (
-    "Got it 👋 This is Biashara Mall. "
-    "Your message reached us. Turning forwarded posts into a shop is coming next."
-)
 
-
-def _reply(text: str) -> str:
+def _twiml(replies: Sequence[Reply]) -> str:
     """
-    Wrap a message in TwiML so Twilio sends it back to whoever wrote in.
+    Wrap the bot's replies in TwiML so Twilio sends them back.
 
     Replying in the webhook RESPONSE rather than through the REST API means no
-    second network call, no API credentials on this path, and no way to send a
-    message to somebody who did not just message us.
+    second network call, no API credentials on this path, and no way to message
+    somebody who did not just message us. It also needs no content template and
+    no Meta approval, which is what lets the whole shop run on the sandbox.
 
     Args:
-        text: Plain text. Escaped, because TwiML is XML and an unescaped ``&``
-            in a caption is a malformed document Twilio silently drops.
+        replies: In order. Twilio sends them as separate messages.
 
     Returns:
-        A TwiML document containing one message.
+        A TwiML document.
+
+    Notes:
+        EVERYTHING IS XML-ESCAPED. A product called "Tom & Jerry" would
+        otherwise produce a malformed document that Twilio drops silently —
+        which looks exactly like the webhook never running.
     """
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f"<Response><Message>{escape(text)}</Message></Response>"
-    )
+    parts = ['<?xml version="1.0" encoding="UTF-8"?><Response>']
+    for reply in replies:
+        parts.append("<Message>")
+        parts.append(f"<Body>{escape(reply.body)}</Body>")
+        if reply.media_url:
+            parts.append(f"<Media>{escape(reply.media_url)}</Media>")
+        parts.append("</Message>")
+    parts.append("</Response>")
+    return "".join(parts)
 
 
 def _expected_signature(url: str, params: dict[str, str], auth_token: str) -> str:
@@ -169,22 +166,27 @@ async def whatsapp_inbound(
         # recording the SID is that the second arrival changes nothing.
         return PlainTextResponse(_NO_REPLY, media_type="application/xml")
 
+    phone = params.get("From", "").replace("whatsapp:", "").lstrip("+")
+
     db.add(
         WaMessage(
             provider_message_id=message_sid,
             # Twilio prefixes numbers with the channel: whatsapp:+254712345678.
             # Stored bare so it matches Account.phone and Seller.whatsapp_number.
-            from_number=params.get("From", "").replace("whatsapp:", "").lstrip("+"),
+            from_number=phone,
             body=params.get("Body") or None,
             media_count=int(params.get("NumMedia") or 0),
             raw=params,
         )
     )
 
-    # Routes commit; get_db does not. See app/db.py.
+    # THE BOT RUNS ONLY ON FIRST RECEIPT. The redelivery branch above returns
+    # early, so a Twilio retry can never add the same item to a basket twice or
+    # place a second order from one message.
+    outcome = handle(db, phone, params.get("Body") or "")
+
+    # One commit for the message record AND everything the bot did. A reply
+    # promising "added to your basket" must not survive a failed basket write.
     db.commit()
 
-    # Acknowledged only on FIRST receipt. The redelivery branch above stays
-    # silent: Twilio retries when it did not get our response, but if the first
-    # one did land, a second "got it" is worse than none.
-    return PlainTextResponse(_reply(_ACK), media_type="application/xml")
+    return PlainTextResponse(_twiml(outcome.replies), media_type="application/xml")
