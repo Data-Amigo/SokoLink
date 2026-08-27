@@ -6,27 +6,39 @@
 > `BUILD_LOG.md` says *what happened and why*, chronologically.
 > This says *what exists now and how it works*.
 >
-> Current as of 2026-08-16 · **199 tests passing** · P0 complete · P1 complete · the buyer storefront is live.
+> Current as of 2026-08-25 · **605 tests** · 28 test files · 17 migrations
+>
+> **This document was rewritten after the 2026-08-22 pivot and again after the
+> 2026-08-25 buyer-surface change.** If something here contradicts an older PDF
+> in `docs/`, this is right and the PDF is a snapshot of a direction we left.
 
 ---
 
 ## 1. The thirty-second version
 
-A seller proves they own a TikTok account. We scrape their videos, an AI reads
-the product and price off each one, and the seller confirms. Buyers browse the
-result and message the seller on WhatsApp with the item and price already
-written for them.
+A Kenyan seller already runs a catalogue inside WhatsApp groups. They forward a
+post to our bot; an AI reads the photo and drafts a product; the seller confirms
+a price and opens their shop. Buyers reach that shop **inside WhatsApp** and pay
+the seller directly on M-Pesa.
 
-**The hard part is the price.** Kenyan sellers don't put it in the caption —
-measured, 0 of 10 — so we read it from the cover image, and failing that, we
-*listen* to the video. That cascade is the heart of the system.
+**Two hard problems shape everything else.**
+
+*The price is not in the caption.* Measured against 24 real captions: zero
+mention KSh, three contain any price-like number. Sellers withhold it
+deliberately — that withholding is the buyer bottleneck this product removes. So
+the price is read from the image, and when it is not there, the seller supplies
+one number by hand.
+
+*We cannot control which browser a link opens.* Tested on a real handset: a
+plain URL and a native CTA button **both** left WhatsApp for Chrome. So the
+buyer surface is not a page we link to — it is the conversation itself.
 
 ```
-3,121 lines   application code   (29 Python files)
-  257 lines   templates          (3 Jinja2 files)
-1,988 lines   tests              (199 tests)
-  599 lines   spikes             (throwaway probes against real APIs)
-  372 lines   migrations         (6, each reviewed before applying)
+ 13,594 lines   application code   (70 Python files)
+  3,695 lines   templates          (28 Jinja2 files)
+  8,806 lines   tests              (605 tests, 28 files)
+     17         migrations         (each reviewed line by line before applying)
+     52         HTTP routes
 ```
 
 ---
@@ -38,42 +50,45 @@ cd backend
 .venv\Scripts\activate                # Windows
 
 uvicorn app.main:app --reload         # http://localhost:8000
-pytest                                # 199 tests
+pytest                                # 605 tests
 ruff check . && mypy app tests        # the quality gate
 alembic upgrade head                  # apply migrations
 
-python scripts/seed_demo_shop.py      # a real, browsable demo shop
+python scripts/seed_test_shop.py      # stock to look at, no Apify needed
 ```
 
-Two databases are required, and they must differ — see §8.
+Two databases are required and they must differ — see §8.
+
+> **A warning worth its own line.** `--reload` was observed *silently not
+> reloading* on this machine, and a killed uvicorn parent can leave a live
+> worker holding the port. A server that lies about which code it runs costs
+> hours. If behaviour disagrees with the source, kill every `uvicorn` process —
+> **children first** — confirm the port is free, and start one fresh.
 
 ---
 
 ## 3. The layering rule
 
 ```
-HTTP request
+HTTP request  /  inbound WhatsApp message
      │
      ▼
   api/          parse, validate, delegate, render.  NO business logic.
      │
      ▼
-  services/     the rules and the transactions.     NO HTTP objects.
-     │
-     ├──────────▶ agent/     the only place a model provider SDK is imported
+  services/     the rules. Providers hidden behind our own adapters.
      │
      ▼
-  models/       persistence + the database rails
-     │
-     ▼
-  PostgreSQL
+  models/       persistence, and the constraints that make bad states impossible.
 ```
 
-`schemas/` sits sideways: Pydantic types used at both the HTTP boundary *and*
-as the contract handed to the LLM. `templates/` is rendered by `api/` only.
+`agent/` sits beside `services/` and is the **only** place a model provider SDK
+is imported. A route containing business logic is in the wrong layer; so is a
+service that knows it is talking to Gemini.
 
-**A route containing business logic is in the wrong layer. A service building an
-HTTP response is in the wrong layer.** That is the whole convention.
+**Routes commit; `get_db` does not.** This bit us once, badly — sixteen mutating
+routes had no `db.commit()` and nothing persisted, while the whole test suite
+stayed green because fixtures roll back inside a transaction. See §7.
 
 ---
 
@@ -81,398 +96,264 @@ HTTP response is in the wrong layer.** That is the whole convention.
 
 ### The spine
 
-| File | Lines | What it does |
-|---|---:|---|
-| `app/main.py` | 73 | Builds the app, registers routers, mounts static + media. **Owns nothing else.** |
-| `app/config.py` | 142 | Typed settings. **The only file that reads the environment.** |
-| `app/db.py` | 53 | Engine, session factory, `Base`. **Never build an engine elsewhere.** |
-| `app/security.py` | 129 | Argon2id hashing and JWT sessions. **Nothing else touches a password.** |
-| `app/dependencies.py` | 180 | The session layer — cookies, `current_account`, the login wall. |
-| `app/templating.py` | 42 | One Jinja environment and its filters, shared by every router. |
+| File | What it owns |
+|---|---|
+| `main.py` | Wires routers. Owns nothing else. Registers the `LoginRequired` redirect and the HTML-404 handler. |
+| `config.py` | Typed settings. **Nothing else reads `os.environ`.** Trims whitespace off pasted secrets — see §7. |
+| `db.py` | Engine and session. Import `get_db`; never build an engine. `autoflush=False`, which matters more than it sounds — see §7. |
+| `dependencies.py` | `current_account`, `current_seller`, `optional_account`. |
+| `security.py` | Argon2 hashing, session tokens, phone-proof tokens. |
+| `secrets_vault.py` | Fernet encryption for sellers' Daraja credentials. Deliberately *not* in `security.py`: hashing is one-way, this is the opposite. |
+| `templating.py` | The one Jinja environment, and its filters (`media`, `media_abs`, `initials`). |
 
-Five details that are easy to undo by accident:
+### The AI
 
-- **`config.py` normalises the database driver.** Providers hand out bare
-  `postgresql://` URLs; SQLAlchemy reads that as *psycopg2*, which we don't
-  install. `_with_psycopg_driver()` rewrites it so `.env` holds the provider's
-  URL verbatim on every environment.
-- **`config.py` is lazy** (`@lru_cache`). An eager `settings = Settings()` would
-  throw the moment anything imported the module, breaking tests and tooling.
-- **`db.py` sets `pool_pre_ping=True`.** Cloud Postgres silently drops idle
-  connections; without it the app hands a request a dead one and the user sees a
-  500 that vanishes on retry.
-- **The storefront router is registered LAST in `main.py`, and must stay last.**
-  It owns `/{slug}`, which would otherwise swallow `/health`, `/docs` and every
-  future route. FastAPI matches in registration order, so anything added below
-  that line is unreachable. The other half of that guard is `RESERVED_SLUGS` in
-  `services/accounts.py` — **a new top-level route needs a new entry there**, or
-  a seller can claim the name and end up with an unreachable shop.
-- **`dependencies.py` sets the session cookie's `Secure` flag from the
-  environment**, not hardcoded. A `Secure` cookie is silently dropped over plain
-  http, so hardcoding it on makes localhost log you in and immediately forget.
+| File | What it owns |
+|---|---|
+| `agent/draft.py` | The vision agent. `draft_from_forwarded(caption, image)` is the live path; `draft_from_cover` / `draft_from_video` belong to the parked scraper. **The only file that knows which vision provider we use.** |
+| `schemas/draft.py` | `ProductDraft` — the Pydantic guardrail on model output. |
+| `services/intake.py` | Forwarded post → download → parse-once → DRAFT product. |
+| `services/drafting.py` | The cost-ordered cascade. Parked with the scraper. |
+| `models/parsed_media.py` | One row per image we have paid to read. The cache that makes "once ever" a database fact. |
 
-### Models — where the rails live
+### WhatsApp
 
-| File | Lines | What it holds |
-|---|---:|---|
-| `models/enums.py` | 113 | `Platform`, `IngestMethod`, `VerificationMethod`, `ProductStatus`, `ScrapeStatus`, `PriceSource` |
-| `models/account.py` | 63 | A login. Email + Argon2id hash. |
-| `models/seller.py` | 115 | A shop and its permanent public slug. |
-| `models/social_account.py` | 126 | A connected platform account. **Verified by construction.** |
-| `models/account_claim.py` | 92 | An *unproven* claim. Grants nothing. |
-| `models/product.py` | 279 | A catalogue item. **The largest and most constrained file.** |
-| `models/scrape_job.py` | 97 | One ingestion run, and the cache that keeps Apify affordable. |
+| File | What it owns |
+|---|---|
+| `api/webhooks.py` | `POST /webhooks/whatsapp`. Verifies Twilio's signature, dedupes by `MessageSid`, replies in TwiML. |
+| `services/bot.py` | The conversation. Buyer browsing and checkout; seller forwarding. |
+| `services/messaging.py` | Outbound sending, behind a `Messenger` Protocol. Plain httpx, no SDK. |
+| `models/wa_message.py` | Every inbound message, raw. Unique on `provider_message_id`. |
+| `models/wa_conversation.py` | Where a buyer has got to, and which basket is theirs. |
 
-> **Why enums are strings + CHECK constraints, not native PG enums:** adding a
-> value to a native enum needs a migration and an exclusive lock. Adding one
-> here is a code change. Platforms will grow.
+### Commerce
 
-### Ingestion and AI
+| File | What it owns |
+|---|---|
+| `services/catalogue.py` | The publish gate. Refuses without a price, and names the item when it does. |
+| `services/cart.py` | Server-side baskets, scoped to exactly one seller. |
+| `services/orders.py` | `place_order`, `claim_payment`, `confirm_payment`, `cancel_order`. |
+| `services/payments.py` | Idempotent Daraja callback handling. |
+| `services/daraja.py` | STK push, behind an `StkEngine` adapter. |
+| `services/storefront.py` | The public catalogue, preview rules, link-preview cover. |
+| `services/customers.py` | Buyers derived from orders. **There is no customer table** — see §5. |
 
-| File | Lines | What it does |
-|---|---:|---|
-| `schemas/tiktok.py` | 121 | **The validation border.** Apify JSON → validated objects. |
-| `services/scraper.py` | 208 | Apify behind *our* interface. `ScraperEngine` is a Protocol. |
-| `schemas/draft.py` | 113 | The contract the vision model must satisfy. |
-| `agent/draft.py` | 171 | **The provider seam.** The only file that knows we use Gemini. |
-| `services/drafting.py` | 142 | The cascade. **Where the economics live.** |
-| `services/ingestion.py` | 269 | Scrape → cascade → `Product` rows. **Where the money guards live.** |
-| `services/media.py` | 94 | Our own copies of covers, because theirs expire. |
+### The workspace
 
-### Accounts and the storefront
+Server-rendered Jinja behind a login wall. `app_base.html` is the shell;
+`partials/icons.html` is the **one** icon set; `static/css/workspace.css` holds
+everything used by more than one page. A rule earns its place there once a
+second page needs it.
 
-| File | Lines | What it does |
-|---|---:|---|
-| `services/accounts.py` | 190 | Signup, login, slug reservation. **Anti-enumeration is the point.** |
-| `services/verification.py` | 319 | Proving a seller owns the account they claim. |
-| `services/storefront.py` | 126 | What a buyer may see, and the WhatsApp handoff. |
-| `api/storefront.py` | 87 | The two public routes. Thin: parse, delegate, render. |
-| `api/health.py` | 54 | Liveness and readiness, deliberately separate. |
-
-### The web layer — the creator's workspace
-
-| File | Lines | What it does |
-|---|---:|---|
-| `api/auth.py` | 214 | signup / login / logout. **Renders the service's error, never its own.** |
-| `api/dashboard.py` | 72 | The shell, and the empty state that asks for a first account. |
-| `static/css/app.css` | 540 | The design system. **One `:root` block owns every colour.** |
-| `templates/app_base.html` | 74 | Workspace shell — topbar, nav, skip link. |
-| `templates/auth/` | 187 | `login.html`, `signup.html` |
-| `templates/app/` | 85 | `dashboard.html` |
-| `templates/base.html` + `storefront/` | 297 | The buyer's storefront, on its own stylesheet |
-
-> **Two base templates, on purpose.** `base.html` serves a stranger who arrives
-> once from a WhatsApp chat on the cheapest data bundle available;
-> `app_base.html` serves someone who signed up and comes back weekly. Keeping
-> them apart means a change to the dashboard cannot slow down the storefront.
->
-> **No Tailwind in the workspace.** Its build step is one more thing to break in
-> the deploy, and its CDN ships ~3MB of JS to generate CSS in the browser.
-> `app.css` is 20.7KB uncompressed. Reversible: the components map onto utility
-> classes, so adopting Tailwind later is a rewrite of one file.
+Pages: dashboard, products, product_new, orders, order_detail, money,
+payment_settings, customers. Plus `accounts` / `connect` / `claim`, which belong
+to the parked TikTok flow and are off the main nav.
 
 ---
 
 ## 5. The data model
 
-```
-Account ──1:1──▶ Seller ──┬──▶ SocialAccount ──▶ Product
- (login)          (shop)   │      (VERIFIED only)     ▲
-                           ├──▶ AccountClaim          │
-                           │      (unproven)          │
-                           ├──▶ Product ──────────────┘
-                           └──▶ ScrapeJob
-```
+### The two identities
 
-### Provenance is two dimensions, not one
+An **Account** signs in. A **Seller** is the shop. `Account.email` is nullable —
+phone-and-OTP is the real login, because the WhatsApp number is the identity a
+Kenyan micro-seller actually has. A CHECK constraint requires one or the other.
 
-| Column | Answers | Values |
-|---|---|---|
-| `platform` | **Where** it came from | tiktok · instagram · facebook · jumia · manual |
-| `ingest_method` | **How** it got here | profile_sync · single_link · upload |
+### Provenance is two dimensions
 
-Separate because **only the second decides re-sync ownership.** A feed sync owns
-what it created and may update it. It must never touch a product the seller
-uploaded by hand — a seller who adds stock, syncs, and watches it vanish does
-not come back.
+`platform` (where it came from) and `ingest_method` (how it arrived) are
+separate columns with a constraint requiring them to agree. A forwarded post is
+`manual` + `upload` and carries no `platform_post_id`, so a future feed sync can
+never overwrite something a seller sent by hand.
 
-### Verification: claims versus accounts
+### Customers are derived, not stored
 
-The two-table split is the whole design:
-
-| | `AccountClaim` | `SocialAccount` |
-|---|---|---|
-| Means | "I say this is mine" | "This is proven mine" |
-| Grants | nothing | everything |
-| Lifetime | expires in 24h | permanent until disconnected |
-| `verified_at` | — | **NOT NULL** |
-
-**A row in `social_accounts` IS a verified account. There is no other kind.**
-Nothing downstream filters for verified, because there is nothing to filter out.
-`_connect()` in `verification.py` is the only function that creates one, giving
-the invariant exactly one place to be got right.
-
-The attack this defeats: a stranger types someone else's handle, we scrape her
-videos and photos, and they publish a storefront pointing at *their* WhatsApp
-number. Sales diversion, invisible to the buyer.
+A buyer never signs up — that friction is what the product removes — so there is
+no moment at which a customer row could be created and nothing on one to edit.
+`services/customers.py` groups orders **by phone**, because the same person is
+"Akinyi", "akinyi o" and "Akinyi Otieno" across three orders and grouping by
+name would show a seller three customers where they have one.
 
 ### The rails — constraints in Postgres, not in service code
 
-A model, a future agent, a migration script and a hand-written query all have to
-obey the database. Only application code has to *remember* to call a validator.
+These are the ones that have actually caught bugs:
 
-| Constraint | Prevents |
+| Constraint | What it prevents |
 |---|---|
-| `published_requires_price` | the AI pushing an unpriced item live |
-| `stock_non_negative` | overselling, at the storage layer |
-| `price_positive` | KSh 0 — always a parse failure, never a giveaway |
-| `price_plausible` (≤ 10m) | a phone number misread as a price reaching a storefront |
-| `uq_products_platform_post` | a re-scrape duplicating instead of updating |
-| `upload_has_no_post_id` | an uploaded product looking re-syncable |
-| `manual_iff_upload` | an incoherent "tiktok upload" |
-| `unit_quantity_and_label_together` | *"KES 3,000 for 30"* — of what? |
-| `verified_at` NOT NULL | an unproven connection existing at all |
-| `published_needs_whatsapp` | a live shop nobody can contact |
-| `slug_format` | a URL a buyer cannot type |
-| `failed_needs_error` | a scrape failure nobody can debug |
-
-**Most model tests assert Postgres *refuses* something.** A constraint nobody
-has watched fail is only a claim.
+| `ck_sellers_published_needs_whatsapp` | A live shop nobody can contact. Caught a test that tried to publish without a number. |
+| `ck_payment_methods_pochi_has_no_stk` | Pretending Pochi can take an STK push. It cannot — Daraja does Paybill and Buy Goods only. |
+| `ck_orders_subtotal_positive` | An order with zero totals. Caught 20 tests when totals were computed after the row was created. |
+| `ck_orders_paid_has_timestamp` | A paid order nobody can audit. |
+| `ck_wa_conversations_paying_needs_order` | An M-Pesa code arriving with nowhere to land. |
+| `ck_parsed_media_draft_xor_error` | A cache row recording nothing, re-parsed forever. |
+| unique `provider_message_id` | One forwarded post becoming two products when Meta redelivers. |
+| unique `provider_media_id` | Paying twice to read the same image. |
 
 ### Money
 
-`price_kes` is an **integer**, and it is the price of **one unit as sold** —
-which is not always one item.
+Integer KES throughout. **Order lines copy the price**; they never join to a
+live product, so a seller editing a price cannot rewrite what a buyer already
+paid. Carts do the opposite — they read through to the live product, because a
+rename mid-basket should be visible.
 
-```python
-price_kes      = 3000
-unit_quantity  = 30
-unit_label     = "pairs"
-price_display  → "KES 3,000 for 30 pairs"
-```
-
-Found by spiking a real seller: @zumamitumbabales sells mitumba **bales**. Use
-`price_display`, never `price_kes` directly, in anything a buyer sees — including
-the WhatsApp message, or the seller and buyer start the conversation disagreeing
-about what was offered.
+`pending → awaiting_confirmation → paid`. Only the seller makes the last move on
+the manual path. **A buyer-entered M-Pesa code is a claim, not a payment** —
+`claimed_code` and `mpesa_receipt` are deliberately separate columns.
 
 ---
 
 ## 6. Three flows, traced
 
-### A. A seller proves they own an account
+### A. A seller forwards a catalogue post
 
 ```
-1.  start_claim(seller, tiktok, "@zumamitumbabales")
-        AccountClaim + code "soko-K7M2QP".  Connects NOTHING.
+photo + caption ──▶ POST /webhooks/whatsapp
+                          │  signature verified against APP_BASE_URL
+                          │  MessageSid deduped
+                          ▼
+                    services/bot.handle(media=[...])
+                          │  find_seller_by_phone → this is a SELLER
+                          ▼
+                    services/intake.ingest_forwarded_post
+                          │  download (authenticated)
+                          │  parse_once  ── cached by media id ──▶ ParsedMedia
+                          │  agent.draft_from_forwarded
+                          ▼
+                    DRAFT product, never published
+                          │
+                          ▼
+        "Added *Ankara Shirt* to your drafts. I couldn't see a price…"
+```
 
-2.  Seller pastes the code into their TikTok bio.
+The agent proposes a name, description and — only if it can literally see one —
+a price. There is no estimate and no fallback: a wrong price reaches a buyer, a
+missing one costs the seller five seconds.
 
-3.  check_claim(claim, scraper)
-        expiry checked   ─┐  both BEFORE the paid scrape
-        attempts checked ─┘  (capped at 10)
+### B. A buyer shops, inside WhatsApp
+
+```
+wa.me/<bot>?text=shop <slug>     ← a DEEP LINK, not a URL. Opens WhatsApp itself.
         │
-        re-read bio → code present?
-              │
-             yes ──▶ _connect() → SocialAccount created, claim deleted
-              no ──▶ returns None. Still just a claim.
+        ▼
+  categories ▸ products ▸ product+photo ▸ add ▸ cart ▸ checkout
+        │
+        ▼
+  place_order  ── same service the web checkout calls ──▶ Order
+        │
+        ▼
+  "Send KSh 950 to 07XX. Reply with the M-Pesa code."
+        │
+        ▼
+  claim_payment  → awaiting_confirmation → the seller confirms in the workspace
 ```
 
-OAuth replaces steps 1–3 with one tap once TikTok and Meta approve our app.
-`complete_via_oauth()` is written and tested; the handle comes from the
-*provider*, never from anything the seller typed.
+State lives in `WaConversation`, because a bare "2" means nothing without what
+we last asked. The basket token lives there too — see §7.
 
-### B. A verified account becomes draft products
+### C. A seller opens their shop
 
-```
-1.  sync_account(account, scraper, drafter)
-        require_syncable()          disconnected? refuse
-        cooldown check              synced < 24h ago? refuse (unless force)
-        ScrapeJob created           RUNNING
+`/products` shows the review queue, **lowest parse confidence first**: a wrong
+price hides in the drafts the model was least sure about, and a seller working
+a date-ordered list meets those last, after the habit of clicking Publish has
+formed.
 
-2.  scraper.fetch_profile()          capped at 30 recent posts
-        failure → job marked FAILED with the reason, THEN raise
-        (a failure the seller cannot see looks like "you have no videos")
-
-3.  For each post:
-        already have it? ──▶ refresh METRICS ONLY, never the seller's edits
-        new?             ──▶ cascade → store cover → Product (DRAFT)
-        not a product?   ──▶ skipped, counted
-
-4.  account.last_synced_at set · job SUCCEEDED
-```
-
-**Three money guards, each of which has cost someone a real bill:**
-
-1. **Once per day per account** — Apify bills per post.
-2. **Skip posts already drafted** — that AI work is done and paid for.
-3. **The video tier is opt-in** (`allow_video_tier=False` by default) — a bulk
-   import that watched every clip would be ruinous.
-
-**One post failing never aborts the sync.** The other twenty are still worth
-having; the failure lands in `warnings`.
-
-### C. A buyer reaches WhatsApp
-
-```
-GET /{slug}
-     get_public_shop()      unknown OR unpublished → 404, identically
-     get_public_products()  published only; in-stock first, then newest
-                            sold-out items INCLUDED with a badge
-
-GET /{slug}/{id}
-     get_public_product()   scoped to this shop — a guessed id must not show
-                            another seller's product under this header
-     build_whatsapp_url()   wa.me link, message pre-written:
-
-     "Hi ZUMA MITUMBA BALES! I saw Mixed Ladies Sandals
-      (KES 3,000 for 30 pairs) on your Biashara Mall shop. Is it available?"
-```
-
-**This handoff is the product.** Everything upstream exists so this message can
-be written *for* the buyer instead of *by* them.
-
-Sold-out items are shown on purpose: a buyer who saw the item on TikTok and
-finds nothing assumes the shop is dead. A "Sold out" badge says it is real and
-worth asking about — and gives Soko Intel a restock signal later.
+`publish_product` refuses without a price. Opening the shop is a separate,
+deliberate act — and until it happens, `/shop/<slug>` 404s for everyone except
+the owner, who sees a preview bar over the real page.
 
 ---
 
-## 7. Two lessons the code carries
+## 7. Five lessons the code carries
 
-**Cover URLs expire.** TikTok signs them with an `x-expires` timestamp. Spike 02
-flagged it; the first demo shop then *proved* it by rendering ten broken images
-a week after the scrape. `services/media.py` stores our own copy, and `Product`
-holds a **relative** path — so moving to object storage later changes one
-constant and nothing else.
+**1. Nothing persisted, and 465 tests said it was fine.** Sixteen mutating
+routes never called `db.commit()`. Test fixtures run inside a transaction that
+is rolled back, so they *structurally cannot* catch it. A test that commits and
+re-reads from a separate session is the only kind that would.
 
-**`scripts/seed_demo_shop.py` scrapes live rather than replaying saved data**,
-for the same reason. Its first version replayed spike 01's payload and produced
-exactly that wall of broken images.
+**2. A field nothing writes.** `whatsapp_number` was read everywhere and written
+nowhere, so no seller could ever open a shop. The test factory set it, which hid
+the hole completely.
+
+**3. `get_or_create_cart` mints a new token.** The web flow relies on that and
+writes it back to a cookie. A chat has no cookie, so the first bot version
+passed a made-up token that was never found — every message got a fresh empty
+basket. It said "Added ✅" and then "your basket is empty".
+
+**4. `autoflush=False`.** The parse cache added its row but never flushed it, so
+the lookup at the top of the same function never saw it and every redelivery
+paid Gemini again. Exactly the bug the cache exists to prevent, shipped inside
+the cache.
+
+**5. Whitespace on a pasted secret is invisible and fatal.** A `DATABASE_URL` of
+`' \n'` cost a deploy. The Twilio auth token is worse — it is a shared HMAC
+secret, so one stray byte makes every genuine message look forged. `config.py`
+now trims all of them.
+
+The through-line: **four of these five were invisible to a green test suite.**
+Walk the real path against a real database before believing it works.
 
 ---
 
 ## 8. Tests
 
-| File | Tests | Protects |
-|---|---:|---|
-| `test_auth.py` | 43 | Hashing, sessions, slugs, **anti-enumeration** |
-| `test_models.py` | 42 | The database rails. Mostly asserts Postgres **refuses**. |
-| `test_verification.py` | 35 | That an unverified account is **unrepresentable** |
-| `test_scraper.py` | 26 | The validation border, against the **real captured payload** |
-| `test_ingestion.py` | 19 | The money guards and the re-sync rail |
-| `test_drafting.py` | 16 | The cascade — **which tiers ran**, i.e. cost |
-| `test_config.py` | 14 | Settings, hermetic (`_env_file=None`) |
-| `test_health.py` | 4 | Liveness vs readiness |
+605 tests, 28 files, mirroring `app/`. Transactional fixtures against real
+Postgres — no SQLite, because the rails in §5 are Postgres CHECK constraints and
+a database that ignores them tests nothing.
 
-Conventions worth knowing:
+**External services are always mocked.** Gemini, Twilio, Daraja and Apify never
+receive a call from the suite. That is not tidiness: a suite that costs money or
+needs quota is a suite nobody runs.
 
-- **Externals are always mocked.** No test calls Apify, Gemini, Meta or Daraja.
-- **Scraper fixtures come from the real payload** captured by spike 01. A test
-  passing against a payload we imagined proves nothing.
-- **Cascade and ingestion tests assert cost**, not only output — which tiers ran,
-  whether a scrape happened at all. A regression that quietly escalated every
-  item would pass a naive correctness test and arrive as a bill.
-- **`tests/factories.py` cannot build an unverified account.** The thing does
-  not exist. That is the guarantee proving itself.
+Two files earn a mention:
+
+- `test_web_workspace.py` renders **every** workspace page in **both** states.
+  Jinja has no compile step, so a renamed context key is a 500 on a page a
+  seller opened — caught by nothing else.
+- `test_bot.py::TestTheBasketSurvives` exists because lesson 3 above shipped.
 
 ### Two databases, on purpose
 
-`TEST_DATABASE_URL` must be set and must **differ** from `DATABASE_URL`.
-
-- Unset → database-backed tests **skip** (a visible gap).
-- Identical → the suite **refuses to run**.
-
-The `_schema` fixture **drops and recreates**, because `create_all` only adds
-missing tables and never alters existing ones — that drift once produced 25
-failures reading *"column unit_quantity does not exist"*.
+`TEST_DATABASE_URL` must never equal `DATABASE_URL`; the suite refuses to run if
+it does. The guard is not paranoia — the suite calls `drop_all`, and it has
+already prevented one production wipe.
 
 ---
 
-## 9. Spikes
+## 9. What exists, and what doesn't
 
-`spikes/` holds throwaway probes against real APIs. Nothing in `app/` imports
-them; they are kept because their **findings** justify the design.
+**Works today**
 
-| Spike | Cost | Found |
-|---|---|---|
-| 01 · Apify profile | paid | Payload shape. 0/10 captions have prices. Bio carries phone numbers. |
-| 02 · Offline analysis | **free** | No transcriptions. Cover URLs expire. Clips are 9–24s. |
-| 03 · Gemini cover | paid | 0/4 — and the model correctly refused to invent a price. |
-| 04 · Gemini video | paid | **3/3.** And `price_evidence` revealed bulk pricing. |
+- Seller auth by phone + OTP; the whole workspace; the publish gate
+- The storefront, cart and checkout on the web, with owner preview
+- Orders, manual M-Pesa confirmation, idempotent Daraja callback
+- Inbound WhatsApp: signature verification, dedupe, conversation
+- Buyer shopping in chat; seller forwarding a post into a draft product
 
-Spike 01 writes its raw response to `spikes/out/`, so every later question is
-answered offline for free. **Spend once, analyse many times.**
+**Exists but parked**
+
+- TikTok scraping (Apify), account verification by bio code, the video tier of
+  the cascade. The adapter seams remain, so it can return without a rewrite.
+
+**Does not exist yet**
+
+- **The reply loop.** The bot asks for a price; nothing handles the answer.
+- **Anthropic.** There is no `anthropic_api_key` setting. The
+  Claude-reasons / Gemini-localises split is a plan, not code.
+- **Natural onboarding.** A new seller still gets "open a shop's link".
+- **A production WhatsApp sender.** Everything runs on the Twilio sandbox, which
+  requires every recipient to send `join <code>` first. **No real buyer will
+  ever do that** — Meta Business verification is the gate on launching at all.
+- **WhatsApp Flows.** The preferred buyer surface, blocked on verification. The
+  chat flow is what exists in the meantime; the storefront is the seller's
+  preview and the desktop fallback.
 
 ---
 
 ## 10. Where to start reading
 
-In this order — each builds on the last:
-
-1. **`app/models/product.py`** — the domain, and every rail. Start here.
-2. **`app/schemas/draft.py`** — what we demand of the AI, and what we
-   deliberately *don't* let it decide.
-3. **`app/services/drafting.py`** — the cascade. The clearest expression of how
-   cost shapes this system.
-4. **`app/services/ingestion.py`** — where the cascade meets the database, and
-   where the money guards live.
-5. **`app/services/verification.py`** — read the module docstring; the
-   claim/account split is the least obvious decision in the codebase.
-6. **`app/services/accounts.py`** — read `authenticate()` closely; the
-   anti-enumeration reasoning is non-obvious.
-7. **`tests/test_models.py`** — the rails, proven. Reads as a specification.
-
-Every file opens with a header docstring saying what it does, the pipeline it
-sits in, and **why it is shaped that way**. If something looks strange, that
-docstring almost certainly explains it — and if it doesn't, that is a
-documentation bug worth fixing.
-
----
-
-## 11. What exists, and what doesn't
-
-| | Status |
-|---|---|
-| Foundation, config, DB, health, CI | ✅ |
-| Models + the database rails | ✅ |
-| Scraper adapter + validation border | ✅ |
-| Draft agent + the price cascade | ✅ |
-| Ownership verification (bio-code) | ✅ |
-| Ingestion — sync, guards, re-sync rail | ✅ |
-| Media storage | ✅ |
-| **Buyer storefront** — shop + product + WhatsApp handoff | ✅ |
-| Design system | ✅ |
-| Session layer — cookies, login wall, safe redirects | ✅ |
-| Signup / login / logout **pages** | ✅ |
-| Dashboard shell + empty state | ✅ |
-| **Connect-an-account screens** — claim, show the code, check it | ❌ next |
-| `Post` model + metric snapshots (the time series) | ❌ |
-| Analytics sync + analytics page | ❌ |
-| Review queue + publish UI | ❌ |
-| Manual upload path | ❌ |
-| Single-link ingestion path | ❌ scraper supports it; nothing calls it |
-| Deploy to Railway | ❌ no start command committed yet |
-| WhatsApp channel | ⏳ gated on Meta verification |
-| Orders + M-Pesa | ❌ P4 |
-| Soko AI, Soko Intel | ❌ P5–P8 |
-
-**The gap that matters:** a creator can now sign up, sign in and reach a
-dashboard in a browser — but the dashboard's one button goes nowhere.
-Connecting an account still requires Python, so nothing real appears on that
-page yet. The storefront works and is browsable; getting products *into* it
-currently requires `scripts/seed_demo_shop.py`.
-
-**Two things are being thrown away right now, and only one is recoverable.**
-
-`services/ingestion.py` discards every post the model judges not a product —
-correct for a catalogue, wrong for analytics, where a talking-head video still
-has views a creator is paying to understand. And `Product.views` is *overwritten*
-on each sync, so nothing can answer "am I growing?".
-
-The first is a filter to relax. The second is history that cannot be
-backfilled — every day without `PostMetricSnapshot` is a day of data gone
-permanently. That is why Step 5 of [`PHASE_0.md`](PHASE_0.md) is a migration
-with no UI attached.
-
-Connect-an-account is the next thing built.
+1. `CLAUDE.md` — the direction and the rules that must not be silently changed
+2. `services/intake.py` — the product's central promise, in one file
+3. `services/bot.py` — the buyer and seller conversations
+4. `models/order.py` — the money rails, and the comments explaining each
+5. `services/catalogue.py` — the publish gate
+6. `docs/BUILD_LOG.md` — why any of the above is shaped the way it is
