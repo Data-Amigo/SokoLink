@@ -21,7 +21,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, PostgresDsn, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    PostgresDsn,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core.core_schema import ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -330,6 +337,34 @@ class Settings(BaseSettings):
         return str(value)
 
 
+#: What to print when the environment is empty. Named variables, in the order
+#: they must be set, because a list of pydantic field errors does not tell
+#: somebody staring at a dashboard which box to fill in.
+_MISSING_ENV_HELP = """
+DATABASE_URL is not set, so the application cannot start.
+
+This is a DEPLOYMENT CONFIGURATION problem, not a code problem. The container
+received no environment at all.
+
+On Railway, check the SERVICE and the ENVIRONMENT selected at the top of the
+page — variables belong to one service in one environment, and a second service
+(or a second environment) starts with none. The "Suggested Variables" panel is
+NOT your configuration: it is Railway reading .env.example and offering to
+create those variables, and it reappears on every deploy while that file exists.
+
+The variables this service needs:
+
+    DATABASE_URL          the Postgres connection string
+    SECRET_KEY            signs sessions; must not be the .env.example default
+    APP_BASE_URL          https://<your-domain>   (no trailing slash)
+    APP_ENV               production
+    TWILIO_ACCOUNT_SID    }
+    TWILIO_AUTH_TOKEN     }  needed to receive WhatsApp messages
+    TWILIO_WHATSAPP_NUMBER}
+    GEMINI_API_KEY        needed to read forwarded catalogue posts
+"""
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """
@@ -338,8 +373,35 @@ def get_settings() -> Settings:
     Cached rather than evaluated at import so that merely importing this module
     never reads the environment — which keeps tests and tooling able to import
     the app without a real .env present.
+
+    Raises:
+        RuntimeError: When required variables are missing, carrying a message
+            that names the fix.
+
+    Notes:
+        WHY THIS CATCHES AND RE-RAISES. A MISSING variable never reaches the
+        validators below — pydantic rejects the model first, and the container
+        log reads:
+
+            ValidationError: 1 validation error for Settings
+            database_url
+              Field required [type=missing, input_value={}, input_type=dict]
+
+        That is accurate and nearly useless: it does not say which variable in
+        which dashboard, and ``input_value={}`` — the fact that the WHOLE
+        environment was empty — is the single most diagnostic thing in it and
+        the easiest to miss. This has now cost two separate debugging sessions.
+
+        The blank-string case is handled by a validator instead, because a value
+        that is present but empty means something different: usually an
+        unresolved ``${{Service.VAR}}`` reference rather than a missing box.
     """
-    return Settings()  # type: ignore[call-arg]  # values come from env/.env
+    try:
+        return Settings()  # type: ignore[call-arg]  # values come from env/.env
+    except ValidationError as exc:
+        if any(error["type"] == "missing" for error in exc.errors()):
+            raise RuntimeError(_MISSING_ENV_HELP) from exc
+        raise
 
 
 settings = get_settings()

@@ -16,7 +16,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings, settings
+from app import config
+from app.config import _MISSING_ENV_HELP, Settings, get_settings, settings
 
 DB_URL = "postgresql://user:pass@localhost:5432/biashara"
 
@@ -299,3 +300,103 @@ class TestPastedCredentials:
         monkeypatch.setenv("APP_BASE_URL", " https://example.up.railway.app/\n")
 
         assert build().app_base_url == "https://example.up.railway.app"
+
+
+class TestAnEmptyEnvironmentSaysWhatToDo:
+    """
+    The failure that has now cost two debugging sessions.
+
+    A MISSING variable never reaches the validators above — pydantic rejects the
+    model first, and the container log reads:
+
+        ValidationError: 1 validation error for Settings
+        database_url
+          Field required [type=missing, input_value={}, input_type=dict]
+
+    Accurate, and nearly useless. It does not say which variable in which
+    dashboard, and ``input_value={}`` — the fact that the WHOLE environment was
+    empty, which is the single most diagnostic thing in it — is the easiest part
+    to miss.
+    """
+
+    def test_a_missing_variable_becomes_a_message_that_names_the_fix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Settings is stubbed rather than the environment emptied: ``env_file`` is
+        an ABSOLUTE path to the repo's .env, so a developer machine always has a
+        DATABASE_URL and clearing os.environ would not reproduce the container.
+        """
+
+        def raises_missing(**_: object) -> Settings:
+            raise ValidationError.from_exception_data(
+                "Settings",
+                [{"type": "missing", "loc": ("database_url",), "input": {}}],
+            )
+
+        monkeypatch.setattr(config, "Settings", raises_missing)
+        get_settings.cache_clear()
+
+        with pytest.raises(RuntimeError) as caught:
+            get_settings()
+
+        message = str(caught.value)
+        assert "DATABASE_URL is not set" in message
+        assert "DEPLOYMENT CONFIGURATION problem" in message
+        get_settings.cache_clear()
+
+    def test_a_validation_error_that_is_not_missing_is_left_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        A malformed URL is a different problem with a different fix. Replacing
+        pydantic's message with ours would hide which field was actually wrong.
+        """
+
+        def raises_bad_url(**_: object) -> Settings:
+            raise ValidationError.from_exception_data(
+                "Settings",
+                [
+                    {
+                        "type": "url_parsing",
+                        "loc": ("database_url",),
+                        "input": "nope",
+                        "ctx": {"error": "relative URL without a base"},
+                    }
+                ],
+            )
+
+        monkeypatch.setattr(config, "Settings", raises_bad_url)
+        get_settings.cache_clear()
+
+        with pytest.raises(ValidationError):
+            get_settings()
+        get_settings.cache_clear()
+
+    def test_it_explains_the_suggested_variables_panel(self) -> None:
+        """
+        Railway shows a "Suggested Variables" panel built from .env.example and
+        redisplays it on every deploy. It looks exactly like configuration that
+        keeps resetting itself, and it is not — but nobody should have to work
+        that out from a stack trace.
+        """
+        assert "Suggested Variables" in _MISSING_ENV_HELP
+        assert "NOT your configuration" in _MISSING_ENV_HELP
+
+    def test_it_points_at_the_service_and_the_environment(self) -> None:
+        """The commonest real cause: variables set on a different service, or in
+        a different environment, from the one being deployed."""
+        assert "SERVICE" in _MISSING_ENV_HELP
+        assert "ENVIRONMENT" in _MISSING_ENV_HELP
+
+    def test_it_lists_every_variable_the_service_needs(self) -> None:
+        """Naming one missing variable invites fixing them one failed deploy at
+        a time."""
+        for name in (
+            "DATABASE_URL",
+            "SECRET_KEY",
+            "APP_BASE_URL",
+            "TWILIO_AUTH_TOKEN",
+            "GEMINI_API_KEY",
+        ):
+            assert name in _MISSING_ENV_HELP
