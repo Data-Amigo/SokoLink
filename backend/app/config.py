@@ -17,6 +17,7 @@ needs its own key asserts it via ``require()``.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -357,12 +358,71 @@ The variables this service needs:
     DATABASE_URL          the Postgres connection string
     SECRET_KEY            signs sessions; must not be the .env.example default
     APP_BASE_URL          https://<your-domain>   (no trailing slash)
-    APP_ENV               production
+    APP_ENV               prod          (NOT "production" — see app_env)
     TWILIO_ACCOUNT_SID    }
     TWILIO_AUTH_TOKEN     }  needed to receive WhatsApp messages
     TWILIO_WHATSAPP_NUMBER}
     GEMINI_API_KEY        needed to read forwarded catalogue posts
 """
+
+
+#: The variables a deployed service is expected to carry. Names only — this
+#: list is printed on a failed boot, and a secret in a log is a secret leaked.
+EXPECTED_ENV = (
+    "DATABASE_URL",
+    "SECRET_KEY",
+    "APP_ENV",
+    "APP_BASE_URL",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_AUTH_TOKEN",
+    "TWILIO_WHATSAPP_NUMBER",
+    "GEMINI_API_KEY",
+)
+
+
+def _env_inventory() -> str:
+    """
+    Which expected variables the container actually received, by name.
+
+    Returns:
+        A block to append to the startup failure message.
+
+    Notes:
+        THIS IS THE LINE THAT ANSWERS "WHY DOES THIS KEEP HAPPENING". There is a
+        large difference between one missing variable and an environment that is
+        entirely empty, and the two have completely different causes:
+
+            some present, one missing   somebody deleted or renamed a box
+            NONE present                the deploy is running against a
+                                        different SERVICE or ENVIRONMENT from
+                                        the one the variables were set on
+
+        Pydantic's ``input_value={}`` does say the second thing, but only to
+        somebody who already knows to read it that way. This says it outright.
+
+        NAMES ONLY, NEVER VALUES. This text goes into a deployment log that gets
+        pasted into chats and screenshots.
+    """
+    present = [name for name in EXPECTED_ENV if os.environ.get(name, "").strip()]
+    missing = [name for name in EXPECTED_ENV if name not in present]
+
+    lines = ["", "What this container actually received:", ""]
+    for name in EXPECTED_ENV:
+        lines.append(f"    {'set    ' if name in present else 'MISSING'}  {name}")
+
+    lines.append("")
+    if not present:
+        lines.append(
+            "NONE of them are set. An empty environment almost always means the\n"
+            "deploy is running against a different SERVICE or ENVIRONMENT from the\n"
+            "one the variables were saved on — not that the values were lost."
+        )
+    elif missing:
+        lines.append(
+            f"{len(present)} of {len(EXPECTED_ENV)} are set, so the service does have an\n"
+            "environment — the ones marked MISSING were never added, or were renamed."
+        )
+    return "\n".join(lines) + "\n"
 
 
 @lru_cache(maxsize=1)
@@ -400,7 +460,7 @@ def get_settings() -> Settings:
         return Settings()  # type: ignore[call-arg]  # values come from env/.env
     except ValidationError as exc:
         if any(error["type"] == "missing" for error in exc.errors()):
-            raise RuntimeError(_MISSING_ENV_HELP) from exc
+            raise RuntimeError(_MISSING_ENV_HELP + _env_inventory()) from exc
         raise
 
 

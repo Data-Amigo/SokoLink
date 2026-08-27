@@ -400,3 +400,84 @@ class TestAnEmptyEnvironmentSaysWhatToDo:
             "GEMINI_API_KEY",
         ):
             assert name in _MISSING_ENV_HELP
+
+
+class TestTheEnvInventory:
+    """
+    The line that answers "why does this keep happening on every deploy".
+
+    There is a large difference between one missing variable and an environment
+    that is entirely empty, and they have completely different causes. Pydantic's
+    ``input_value={}`` does say the second thing, but only to somebody who
+    already knows to read it that way.
+    """
+
+    def test_an_empty_environment_blames_the_service_not_the_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in config.EXPECTED_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+        report = config._env_inventory()
+
+        assert "NONE of them are set" in report
+        assert "different SERVICE or ENVIRONMENT" in report
+        assert "not that the values were lost" in report
+
+    def test_a_partly_set_environment_says_the_opposite(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Some present means the service DOES have an environment, so the
+        cause is a deleted or renamed box — not the wrong service."""
+        for name in config.EXPECTED_ENV:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("SECRET_KEY", "something")
+
+        report = config._env_inventory()
+
+        assert "NONE of them are set" not in report
+        assert "were never added, or were renamed" in report
+
+    def test_every_variable_is_listed_either_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in config.EXPECTED_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+        report = config._env_inventory()
+
+        for name in config.EXPECTED_ENV:
+            assert name in report
+
+    def test_it_never_prints_a_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        THIS TEXT GOES INTO A DEPLOYMENT LOG that gets pasted into chats and
+        screenshots. Names only, always.
+        """
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:sup3rs3cret@host/db")
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "abcdef0123456789")
+
+        report = config._env_inventory()
+
+        assert "sup3rs3cret" not in report
+        assert "abcdef0123456789" not in report
+
+    def test_whitespace_only_counts_as_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An unresolved ${{Service.VAR}} expands to whitespace. It is set as
+        far as the shell is concerned and useless as far as we are."""
+        monkeypatch.setenv("DATABASE_URL", "  \n")
+
+        assert "MISSING  DATABASE_URL" in config._env_inventory()
+
+
+def test_app_env_rejects_the_word_production() -> None:
+    """
+    A guard against advice this project has already given wrongly, twice.
+
+    The literal is dev|test|prod. "production" is the obvious thing to type,
+    reads as correct in a dashboard, and crashes the container on boot — so the
+    help text must name the right value rather than the natural one.
+    """
+    assert "APP_ENV               prod" in config._MISSING_ENV_HELP
+    assert "production" in config._MISSING_ENV_HELP  # as the warning, not the value
+
+    with pytest.raises(ValidationError):
+        build(app_env="production")
