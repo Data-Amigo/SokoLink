@@ -8,10 +8,11 @@ between "the process started" and "the process can serve a request".
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
-from app.config import settings
+from app.config import get_settings, settings
 from app.db import get_db
 from app.main import app
 
@@ -74,3 +75,33 @@ def test_ready_reports_503_when_database_is_down(client: TestClient) -> None:
     assert body["status"] == "degraded"
     assert body["database"] == "down"
     assert "connection refused" in body["detail"]
+
+
+class TestTheRunningVersion:
+    """
+    /health names the commit it is running.
+
+    WHY THIS EARNED A FIELD. "Is my code actually live?" was answered wrongly
+    twice in this project: once because a stale worker held the port and served
+    hours-old code, once because a push went to a branch nothing deploys. Both
+    times the only way to tell was to infer it from behaviour, which is how a
+    wrong answer gets stated confidently.
+    """
+
+    def test_it_reports_the_commit(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(get_settings(), "railway_git_commit_sha", "abc1234def5678")
+
+        body = client.get("/health").json()
+
+        assert body["version"] == "abc1234"
+
+    def test_outside_a_build_it_says_unknown(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A developer machine has no commit injected, and pretending otherwise
+        would make the field untrustworthy where it matters."""
+        monkeypatch.setattr(get_settings(), "railway_git_commit_sha", None)
+
+        assert client.get("/health").json()["version"] == "unknown"

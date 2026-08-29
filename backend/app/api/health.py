@@ -35,6 +35,8 @@ class HealthOut(BaseModel):
     status: Literal["ok"]
     app: str
     env: str
+    #: The commit actually running. See Settings.version for why it is here.
+    version: str
 
 
 class ReadyOut(BaseModel):
@@ -53,7 +55,12 @@ def health() -> HealthOut:
     Deliberately touches nothing external. If this fails, the process itself is
     broken and a restart is the correct response.
     """
-    return HealthOut(status="ok", app=settings.app_name, env=settings.app_env)
+    return HealthOut(
+        status="ok",
+        app=settings.app_name,
+        env=settings.app_env,
+        version=settings.version,
+    )
 
 
 @router.get("/health/ready", response_model=ReadyOut)

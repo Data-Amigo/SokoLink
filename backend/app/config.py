@@ -171,6 +171,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DARAJA_ENVIRONMENT", "MPESA_ENVIRONMENT"),
     )
 
+    # ── Deployment identity ──────────────────────────────────────────────────
+    #: The commit this container was built from, injected by Railway.
+    #:
+    #: WHY THIS IS WORTH A SETTING. "Is my code actually live?" has been
+    #: answered wrongly more than once in this project — once because a stale
+    #: worker held the port, once because a push went to a branch nobody
+    #: deploys. Both times the only way to tell was to guess from behaviour.
+    #: Reading it back from /health turns that into a fact.
+    railway_git_commit_sha: str | None = None
+
+    @property
+    def version(self) -> str:
+        """The running commit, short, or "unknown" outside a Railway build."""
+        return (self.railway_git_commit_sha or "unknown")[:7]
+
     # ── Security ─────────────────────────────────────────────────────────────
     #: Signs sessions AND derives the key that encrypts sellers' Daraja
     #: credentials — see app/secrets_vault.py. Refused in prod if left at the
