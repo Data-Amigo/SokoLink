@@ -32,6 +32,7 @@ from app.api import (
     seller_auth,
     storefront,
     webhooks,
+    whatsapp_cloud,
 )
 from app.api import (
     settings as settings_routes,
@@ -107,6 +108,7 @@ app.include_router(analytics.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
 app.include_router(webhooks.router)
+app.include_router(whatsapp_cloud.router)
 app.include_router(settings_routes.router)
 
 # The design system, and anything else the browser fetches by URL. Version-free

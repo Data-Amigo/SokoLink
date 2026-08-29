@@ -29,6 +29,7 @@ number from the seller before it can go live.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
@@ -57,6 +58,13 @@ DOWNLOAD_TIMEOUT_SECONDS = 30.0
 #: is either a video we cannot read yet or something that will cost real money
 #: to send to a vision model for no gain.
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+#: How a caller hands over the bytes. Twilio media is a URL fetched with basic
+#: auth; Meta's is an id resolved through two authenticated Graph calls. Neither
+#: belongs in here — this module owns the CACHE and the RULES, and the provider
+#: is the caller's business.
+MediaFetch = Callable[[], bytes]
 
 
 class IntakeError(RuntimeError):
@@ -130,7 +138,7 @@ def download_media(url: str) -> bytes:
     return response.content
 
 
-def parse_once(db: Session, media_id: str, caption: str, url: str) -> ProductDraft:
+def parse_once(db: Session, media_id: str, caption: str, fetch: MediaFetch) -> ProductDraft:
     """
     Read one forwarded image, or return what we already paid to learn.
 
@@ -138,7 +146,7 @@ def parse_once(db: Session, media_id: str, caption: str, url: str) -> ProductDra
         db: Session.
         media_id: The provider's media id — the cache key.
         caption: The seller's own words from the message.
-        url: Where to download it if we have not seen it before.
+        fetch: Called ONLY on a cache miss, and returns the image bytes.
 
     Returns:
         The validated draft.
@@ -154,7 +162,10 @@ def parse_once(db: Session, media_id: str, caption: str, url: str) -> ProductDra
             raise IntakeError(seen.error)
         return ProductDraft.model_validate(seen.draft)
 
-    image = download_media(url)
+    # Called here and nowhere earlier: a cache hit must cost neither a download
+    # nor an inference, and putting the fetch behind the lookup is what makes
+    # "parsed once ever" also mean "downloaded once ever".
+    image = fetch()
 
     try:
         draft = get_draft_agent().draft_from_forwarded(caption, image)
@@ -215,7 +226,7 @@ def create_from_draft(db: Session, seller: Seller, draft: ProductDraft) -> Produ
 
 
 def ingest_forwarded_post(
-    db: Session, seller: Seller, *, media_id: str, media_url: str, caption: str
+    db: Session, seller: Seller, *, media_id: str, fetch: MediaFetch, caption: str
 ) -> IntakeResult:
     """
     Turn one forwarded catalogue post into a draft product.
@@ -224,7 +235,7 @@ def ingest_forwarded_post(
         db: Session. The caller commits.
         seller: Whose shop the product joins.
         media_id: The provider's media id, used as the parse cache key.
-        media_url: Where to download the image.
+        fetch: Returns the image bytes. Called only on a cache miss.
         caption: The seller's own words.
 
     Returns:
@@ -234,7 +245,7 @@ def ingest_forwarded_post(
         IntakeError: With a reason that can be shown to the seller verbatim.
     """
     already = db.scalar(select(ParsedMedia).where(ParsedMedia.provider_media_id == media_id))
-    draft = parse_once(db, media_id, caption, media_url)
+    draft = parse_once(db, media_id, caption, fetch)
 
     if not draft.is_product:
         raise IntakeError("That doesn't look like something you're selling.")

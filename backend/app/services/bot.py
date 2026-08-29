@@ -43,7 +43,7 @@ from app.models import (
     WaConversation,
 )
 from app.services.cart import CartError, add_item, clear, get_or_create_cart
-from app.services.intake import IntakeError, ingest_forwarded_post
+from app.services.intake import IntakeError, MediaFetch, ingest_forwarded_post
 from app.services.media import absolute_url
 from app.services.orders import claim_payment, get_payment_method, place_order
 from app.services.storefront import get_categories, get_public_products
@@ -389,7 +389,7 @@ def find_seller_by_phone(db: Session, phone: str) -> Seller | None:
 
 
 def _handle_forward(
-    db: Session, seller: Seller, media_id: str, media_url: str, caption: str
+    db: Session, seller: Seller, media_id: str, fetch: MediaFetch, caption: str
 ) -> list[Reply]:
     """
     Turn one forwarded catalogue post into a draft product, and say what happened.
@@ -401,9 +401,7 @@ def _handle_forward(
     common case, not an error.
     """
     try:
-        result = ingest_forwarded_post(
-            db, seller, media_id=media_id, media_url=media_url, caption=caption
-        )
+        result = ingest_forwarded_post(db, seller, media_id=media_id, fetch=fetch, caption=caption)
     except IntakeError as exc:
         # The message is written to be shown to a seller verbatim.
         return [Reply(str(exc))]
@@ -430,7 +428,7 @@ def handle(
     db: Session,
     phone: str,
     text: str,
-    media: list[tuple[str, str]] | None = None,
+    media: list[tuple[str, MediaFetch]] | None = None,
 ) -> Outcome:
     """
     Advance one buyer's conversation by one message.
@@ -440,7 +438,11 @@ def handle(
             reply cannot leave a half-applied order behind.
         phone: Bare digits with country code.
         text: What they sent, which is the caption when media is attached.
-        media: ``(media_id, url)`` for each attachment, in order.
+        media: ``(media_id, fetch)`` per attachment. The fetch is a callable
+            rather than a URL because the two providers differ: Twilio serves a
+            URL behind basic auth, Meta an id resolved through two Graph calls.
+            Which one delivered this message is the webhook's business, not the
+            conversation's.
 
     Returns:
         An :class:`Outcome` carrying the replies to send back, in order.
@@ -461,8 +463,8 @@ def handle(
         owner = find_seller_by_phone(db, phone)
         if owner is not None:
             replies: list[Reply] = []
-            for media_id, url in media:
-                replies.extend(_handle_forward(db, owner, media_id, url, said))
+            for media_id, fetch in media:
+                replies.extend(_handle_forward(db, owner, media_id, fetch, said))
             return Outcome(replies)
 
     # ── Routing: which shop is this? ────────────────────────────────────────

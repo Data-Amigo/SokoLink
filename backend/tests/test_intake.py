@@ -36,7 +36,17 @@ from app.services.bot import find_seller_by_phone, handle
 from tests.factories import make_seller
 
 MEDIA_ID = "SM123:0"
-MEDIA_URL = "https://api.twilio.com/media/ME123"
+
+#: Only the Twilio downloader still takes a URL; everything above it now takes
+#: a callable, because Meta media is fetched by id through two Graph calls.
+TWILIO_MEDIA_URL = "https://api.twilio.com/media/ME123"
+IMAGE = bytes([0xFF, 0xD8]) + b"fake-jpeg-bytes"
+
+
+def fetch() -> bytes:
+    """Stands in for whichever provider delivered the image. The point of the
+    callable seam: intake owns the cache and the rules, never the transport."""
+    return IMAGE
 
 
 def a_draft(**overrides: Any) -> ProductDraft:
@@ -84,7 +94,7 @@ class TestWhatTheAgentProposes:
         seller = make_seller(db)
 
         result = intake.ingest_forwarded_post(
-            db, seller, media_id=MEDIA_ID, media_url=MEDIA_URL, caption="Fresh stock"
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption="Fresh stock"
         )
 
         assert result.product.title == "Ankara Print Shirt"
@@ -100,7 +110,7 @@ class TestWhatTheAgentProposes:
         seller = make_seller(db)
 
         result = intake.ingest_forwarded_post(
-            db, seller, media_id=MEDIA_ID, media_url=MEDIA_URL, caption=""
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption=""
         )
 
         assert result.product.status == ProductStatus.DRAFT.value
@@ -110,7 +120,7 @@ class TestWhatTheAgentProposes:
         seller = make_seller(db)
 
         result = intake.ingest_forwarded_post(
-            db, seller, media_id=MEDIA_ID, media_url=MEDIA_URL, caption=""
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption=""
         )
 
         assert result.product.price_kes == 1800
@@ -128,7 +138,7 @@ class TestWhatTheAgentProposes:
         seller = make_seller(db)
 
         result = intake.ingest_forwarded_post(
-            db, seller, media_id=MEDIA_ID, media_url=MEDIA_URL, caption=""
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption=""
         )
 
         assert result.product.price_kes is None
@@ -140,7 +150,7 @@ class TestWhatTheAgentProposes:
         seller = make_seller(db)
 
         result = intake.ingest_forwarded_post(
-            db, seller, media_id=MEDIA_ID, media_url=MEDIA_URL, caption="@3000 30pairs"
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption="@3000 30pairs"
         )
 
         assert result.product.unit_quantity == 30
@@ -153,9 +163,7 @@ class TestWhatTheAgentProposes:
         seller = make_seller(db)
 
         with pytest.raises(intake.IntakeError):
-            intake.ingest_forwarded_post(
-                db, seller, media_id=MEDIA_ID, media_url=MEDIA_URL, caption=""
-            )
+            intake.ingest_forwarded_post(db, seller, media_id=MEDIA_ID, fetch=fetch, caption="")
 
         assert db.scalars(select(Product)).all() == []
 
@@ -169,7 +177,7 @@ class TestPaidOnce:
 
     def test_the_same_image_is_read_once_ever(self, db: Session, agent: FakeAgent) -> None:
         for _ in range(4):
-            intake.parse_once(db, MEDIA_ID, "Fresh stock", MEDIA_URL)
+            intake.parse_once(db, MEDIA_ID, "Fresh stock", fetch)
 
         assert len(agent.calls) == 1
 
@@ -184,7 +192,7 @@ class TestPaidOnce:
 
         for _ in range(3):
             with pytest.raises(intake.IntakeError):
-                intake.parse_once(db, MEDIA_ID, "", MEDIA_URL)
+                intake.parse_once(db, MEDIA_ID, "", fetch)
 
         assert len(agent.calls) == 1
         row = db.scalar(select(ParsedMedia).where(ParsedMedia.provider_media_id == MEDIA_ID))
@@ -193,8 +201,8 @@ class TestPaidOnce:
         assert row.draft is None
 
     def test_a_different_image_is_read_again(self, db: Session, agent: FakeAgent) -> None:
-        intake.parse_once(db, "SM1:0", "", MEDIA_URL)
-        intake.parse_once(db, "SM2:0", "", MEDIA_URL)
+        intake.parse_once(db, "SM1:0", "", fetch)
+        intake.parse_once(db, "SM2:0", "", fetch)
 
         assert len(agent.calls) == 2
 
@@ -220,7 +228,7 @@ class TestDownloading:
         monkeypatch.setattr(get_settings(), "twilio_auth_token", "tok")
 
         with pytest.raises(intake.IntakeError, match="only read photos"):
-            intake.download_media(MEDIA_URL)
+            intake.download_media(TWILIO_MEDIA_URL)
 
         assert fake.calls == []
 
@@ -242,7 +250,7 @@ class TestDownloading:
         monkeypatch.setattr(get_settings(), "twilio_account_sid", "AC1")
         monkeypatch.setattr(get_settings(), "twilio_auth_token", "tok")
 
-        intake.download_media(MEDIA_URL)
+        intake.download_media(TWILIO_MEDIA_URL)
 
         assert seen["auth"] == ("AC1", "tok")
 
@@ -274,7 +282,7 @@ class TestWhoIsTalking:
     def test_a_photo_from_a_seller_creates_a_draft(self, db: Session, agent: FakeAgent) -> None:
         seller: Seller = make_seller(db, whatsapp_number="254712345678")
 
-        outcome = handle(db, "254712345678", "Fresh stock", media=[(MEDIA_ID, MEDIA_URL)])
+        outcome = handle(db, "254712345678", "Fresh stock", media=[(MEDIA_ID, fetch)])
 
         said = outcome.replies[0].body
         assert "Ankara Print Shirt" in said
@@ -288,7 +296,7 @@ class TestWhoIsTalking:
         never write to somebody's shop."""
         make_seller(db, whatsapp_number="254712345678")
 
-        handle(db, "254799999999", "is this available?", media=[(MEDIA_ID, MEDIA_URL)])
+        handle(db, "254799999999", "is this available?", media=[(MEDIA_ID, fetch)])
 
         assert agent.calls == []
         assert db.scalars(select(Product)).all() == []
@@ -304,7 +312,7 @@ class TestWhoIsTalking:
             db,
             "254712345678",
             "New arrivals",
-            media=[("SM9:0", MEDIA_URL), ("SM9:1", MEDIA_URL)],
+            media=[("SM9:0", fetch), ("SM9:1", fetch)],
         )
 
         products = db.scalars(select(Product).where(Product.seller_id == seller.id)).all()

@@ -45,6 +45,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import WaMessage
 from app.services.bot import Reply, handle
+from app.services.intake import MediaFetch, download_media
 
 router = APIRouter(tags=["webhooks"])
 
@@ -186,8 +187,17 @@ async def whatsapp_inbound(
     # Twilio numbers attachments: MediaUrl0, MediaContentType0, and so on.
     # A forwarded catalogue post is often several photos in one message, which
     # is why this is a list and not a single optional field.
-    media = [
-        (f"{message_sid}:{index}", params[f"MediaUrl{index}"])
+    # The fetch is bound here, where we know this is Twilio. `url=url` binds the
+    # value per iteration — a bare closure over the loop variable would give
+    # every attachment the LAST url, which is a classic and silent way to parse
+    # the same photo N times.
+    def _twilio_fetch(url: str) -> MediaFetch:
+        """Bind ONE url into a fetch. A bare closure over a loop variable would
+        give every attachment the last url — the same photo parsed N times."""
+        return lambda: download_media(url)
+
+    media: list[tuple[str, MediaFetch]] = [
+        (f"{message_sid}:{index}", _twilio_fetch(params[f"MediaUrl{index}"]))
         for index in range(int(params.get("NumMedia") or 0))
         if params.get(f"MediaUrl{index}")
     ]
