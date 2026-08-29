@@ -69,7 +69,12 @@ class ConversationState:
     #: Order placed; waiting for them to send the M-Pesa code.
     PAYING = "paying"
 
-    ALL = (NEW, BROWSING, LISTING, PRODUCT, CART, ADDRESS, PAYING)
+    #: A SELLER state, not a buyer one. They forwarded a catalogue post, the
+    #: model could not see a price, and we asked for one. Everything above is
+    #: somebody shopping; this is somebody stocking.
+    PRICING = "pricing"
+
+    ALL = (NEW, BROWSING, LISTING, PRODUCT, CART, ADDRESS, PAYING, PRICING)
 
 
 class WaConversation(Base):
@@ -117,13 +122,19 @@ class WaConversation(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "state IN ('new', 'browsing', 'listing', 'product', 'cart', 'address', 'paying')",
+            "state IN ('new', 'browsing', 'listing', 'product', 'cart', "
+            "'address', 'paying', 'pricing')",
             name="ck_wa_conversations_state_valid",
         ),
         # Past 'new' there must be a shop. Every later state's replies are about
         # a specific catalogue, so a conversation browsing nothing is incoherent.
+        #
+        # 'pricing' is exempt: a SELLER pricing their own drafts has never
+        # chosen a shop to browse, and requiring one would force us to point
+        # their conversation at their own storefront as though they were a
+        # customer of it.
         CheckConstraint(
-            "state = 'new' OR seller_id IS NOT NULL",
+            "state IN ('new', 'pricing') OR seller_id IS NOT NULL",
             name="ck_wa_conversations_browsing_needs_seller",
         ),
         # A buyer waiting to pay must know which order they are paying for,

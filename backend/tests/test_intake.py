@@ -284,7 +284,9 @@ class TestWhoIsTalking:
 
         outcome = handle(db, "254712345678", "Fresh stock", media=[(MEDIA_ID, fetch)])
 
-        said = outcome.replies[0].body
+        # The price question is a separate reply now: the forward confirms, then
+        # the pricing queue asks by name.
+        said = " ".join(r.body for r in outcome.replies)
         assert "Ankara Print Shirt" in said
         assert "price" in said.lower()
         product = db.scalars(select(Product).where(Product.seller_id == seller.id)).first()

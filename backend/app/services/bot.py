@@ -31,18 +31,22 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import (
     Cart,
     ConversationState,
     Order,
+    PriceSource,
     Product,
+    ProductStatus,
     Seller,
     WaConversation,
 )
 from app.services.cart import CartError, add_item, clear, get_or_create_cart
+from app.services.catalogue import PublishError, publish_product
 from app.services.intake import IntakeError, MediaFetch, ingest_forwarded_post
 from app.services.media import absolute_url
 from app.services.orders import claim_payment, get_payment_method, place_order
@@ -81,6 +85,26 @@ def _digits(text: str) -> int | None:
     """The number a buyer typed, or None when they typed something else."""
     match = re.fullmatch(r"\s*(\d{1,3})\s*", text)
     return int(match.group(1)) if match else None
+
+
+def _price(text: str) -> int | None:
+    """
+    A price a seller typed, or None.
+
+    Separate from :func:`_digits`, which reads MENU choices and caps at three
+    digits. A price is up to seven, and a seller writes it the way they say it —
+    "1,800", "1800/=", "ksh 1800" all mean the same thing.
+
+    Money here is integer KES, so a decimal point is refused rather than
+    rounded: silently turning 1800.50 into 1800 loses fifty cents of somebody
+    else's money without telling them.
+    """
+    cleaned = re.sub(r"(?i)^(ksh|kes|bei)\s*", "", text.strip())
+    cleaned = cleaned.rstrip("/=").replace(",", "").strip()
+    if not re.fullmatch(r"\d{1,7}", cleaned):
+        return None
+    value = int(cleaned)
+    return value if value > 0 else None
 
 
 def _money(amount: int) -> str:
@@ -390,7 +414,7 @@ def find_seller_by_phone(db: Session, phone: str) -> Seller | None:
 
 def _handle_forward(
     db: Session, seller: Seller, media_id: str, fetch: MediaFetch, caption: str
-) -> list[Reply]:
+) -> tuple[list[Reply], int | None]:
     """
     Turn one forwarded catalogue post into a draft product, and say what happened.
 
@@ -404,22 +428,204 @@ def _handle_forward(
         result = ingest_forwarded_post(db, seller, media_id=media_id, fetch=fetch, caption=caption)
     except IntakeError as exc:
         # The message is written to be shown to a seller verbatim.
-        return [Reply(str(exc))]
+        return [Reply(str(exc))], None
 
     product = result.product
     if result.needs_price:
+        # The CALLER queues it and asks. Asking "reply with the price" here,
+        # once per photo, would put eight unanswerable questions in a row on a
+        # seller's screen — there would be no way to tell which one a number
+        # was answering.
+        return [Reply(f"Added *{product.title}* to your drafts.")], product.id
+
+    return [Reply(f"Added *{product.title}* — {product.price_display}.")], None
+
+
+def _pricing_prompt(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
+    """
+    Ask for the price of the next draft in the queue, or wrap up.
+
+    Args:
+        db: Session.
+        convo: The seller's conversation, carrying the queue in context.
+
+    Returns:
+        The next question, or the summary once nothing is left to price.
+
+    Notes:
+        ONE ITEM AT A TIME, BY NAME. A seller who forwards eight posts and is
+        then asked for "the prices" has to remember an order we never showed
+        them. Naming the item makes a bare number unambiguous, which is the
+        only way a one-word reply can be safe to act on.
+
+        The queue is re-checked against the database rather than trusted: a
+        seller may have priced something in the workspace between messages, and
+        asking again for a price they already set reads as the bot not paying
+        attention.
+    """
+    queue: list[int] = [int(pid) for pid in convo.context.get("pricing_queue", [])]
+
+    while queue:
+        product = db.get(Product, queue[0])
+        if product is None or product.price_kes is not None:
+            queue.pop(0)
+            continue
+        convo.context = {**convo.context, "pricing_queue": queue}
+        remaining = f" ({len(queue)} left)" if len(queue) > 1 else ""
         return [
             Reply(
-                f"Added *{product.title}* to your drafts. ✅\n\n"
-                f"I couldn't see a price on it. Reply with the price in shillings "
-                f"— just the number — and I'll set it."
+                f"What's the price for *{product.title}*?{remaining}\n\n"
+                f"Just the number in shillings — or send *skip* to leave it for later."
             )
+        ]
+
+    # Nothing left needing a price.
+    convo.state = ConversationState.NEW
+    convo.context = {}
+    return _priced_summary(db, seller)
+
+
+def _priced_summary(db: Session, seller: Seller) -> list[Reply]:
+    """
+    Tell the seller what is now ready, and offer the one action that follows.
+
+    A DRAFT WITH A PRICE IS STILL NOT FOR SALE. Publishing stays a deliberate
+    act — this offers it in one word rather than sending them to a browser,
+    which is the whole point of the WhatsApp surface.
+    """
+    ready = db.scalars(
+        select(Product).where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.DRAFT.value,
+            Product.price_kes.is_not(None),
+        )
+    ).all()
+
+    if not ready:
+        return [Reply("All done. ✅ Send another photo whenever you have new stock.")]
+
+    lines = "\n".join(f"• {p.title} — {p.price_display}" for p in ready[:PAGE_SIZE])
+    it = "it" if len(ready) == 1 else "them"
+    return [
+        Reply(
+            f"Ready to go live:\n\n{lines}\n\n"
+            f"Send *publish* to put {it} in your shop, or leave {it} as a draft."
+        )
+    ]
+
+
+def _set_price(db: Session, seller: Seller, convo: WaConversation, amount: int) -> list[Reply]:
+    """
+    Apply a price the seller typed to the draft we asked about.
+
+    Args:
+        db: Session.
+        convo: Carries which product we asked about.
+        amount: Whole shillings.
+
+    Returns:
+        Confirmation, then the next question.
+
+    Notes:
+        THE PRICE IS THE SELLER'S, NEVER THE MODEL'S GUESS. This is the other
+        half of the rule that keeps a wrong price off a buyer's screen: the
+        agent reports only what it could see, and the human supplies the rest.
+    """
+    queue: list[int] = [int(pid) for pid in convo.context.get("pricing_queue", [])]
+    if not queue:
+        return _pricing_prompt(db, seller, convo)
+
+    product = db.get(Product, queue[0])
+    if product is None:
+        convo.context = {**convo.context, "pricing_queue": queue[1:]}
+        return _pricing_prompt(db, seller, convo)
+
+    product.price_kes = amount
+    # The seller typed it, so the source is neither the caption nor the image.
+    product.price_source = PriceSource.SELLER.value
+    product.price_evidence = None
+    db.flush()
+
+    convo.context = {**convo.context, "pricing_queue": queue[1:]}
+    return [Reply(f"*{product.title}* — {product.price_display}. ✅")] + _pricing_prompt(
+        db, seller, convo
+    )
+
+
+def _publish_ready(db: Session, seller: Seller) -> list[Reply]:
+    """
+    Publish every priced draft, and say what a buyer can now reach.
+
+    Notes:
+        IT GOES THROUGH THE SAME GATE the workspace uses. publish_product
+        refuses an unpriced item and names it, so the chat cannot become a
+        second way to go live that skips the rule.
+
+        THE SHOP ITSELF IS NOT OPENED HERE. Publishing an item and opening a
+        storefront are different decisions, and a seller who has not seen their
+        shop should not discover it is live because they priced a shirt.
+    """
+    drafts = db.scalars(
+        select(Product).where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.DRAFT.value,
+            Product.price_kes.is_not(None),
+        )
+    ).all()
+
+    if not drafts:
+        return [Reply("Nothing is priced yet. Send me a photo of what you're selling.")]
+
+    published = []
+    for product in drafts:
+        try:
+            publish_product(db, seller, product.id)
+            published.append(product.title)
+        except PublishError as exc:
+            return [Reply(str(exc))]
+
+    names = "\n".join(f"• {title}" for title in published[:PAGE_SIZE])
+    if seller.is_published:
+        return [
+            Reply(f"Live now:\n\n{names}\n\nYour shop: {settings.app_base_url}/shop/{seller.slug}")
         ]
 
     return [
         Reply(
-            f"Added *{product.title}* — {product.price_display}. ✅\n\n"
-            f"It's a draft until you publish it. Check it in your shop dashboard."
+            f"Published:\n\n{names}\n\n"
+            f"Your shop is still closed, so nobody can see them yet. "
+            f"Send *open* to open it."
+        )
+    ]
+
+
+def _open_shop(db: Session, seller: Seller) -> list[Reply]:
+    """
+    Open the storefront, if it is allowed to open.
+
+    Notes:
+        THE DATABASE ALSO REFUSES a published shop with no WhatsApp number — a
+        live shop nobody can contact is a dead end. That rail cannot fire on
+        this path, though, and it is worth saying why: a seller is RECOGNISED
+        by their WhatsApp number, so one without a number never reaches here as
+        a seller at all. The guard lives in the workspace, where a shop can be
+        opened by someone signed in with an email.
+    """
+    live = db.scalar(
+        select(func.count(Product.id)).where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.PUBLISHED.value,
+        )
+    )
+    if not live:
+        return [Reply("Publish something first, then I can open your shop.")]
+
+    seller.is_published = True
+    db.flush()
+    return [
+        Reply(
+            f"Your shop is open. 🎉\n\n{settings.app_base_url}/shop/{seller.slug}\n\n"
+            f"Share that link anywhere — WhatsApp, TikTok, your status."
         )
     ]
 
@@ -463,8 +669,20 @@ def handle(
         owner = find_seller_by_phone(db, phone)
         if owner is not None:
             replies: list[Reply] = []
+            needs_price: list[int] = []
             for media_id, fetch in media:
-                replies.extend(_handle_forward(db, owner, media_id, fetch, said))
+                said_replies, product_id = _handle_forward(db, owner, media_id, fetch, said)
+                replies.extend(said_replies)
+                if product_id is not None:
+                    needs_price.append(product_id)
+
+            if needs_price:
+                # Queue them and ask about the first BY NAME. Asking "what are
+                # the prices" after eight photos makes the seller reconstruct an
+                # order we never showed them.
+                convo.state = ConversationState.PRICING
+                convo.context = {"pricing_queue": needs_price}
+                replies.extend(_pricing_prompt(db, owner, convo))
             return Outcome(replies)
 
     # ── Routing: which shop is this? ────────────────────────────────────────
@@ -478,6 +696,32 @@ def handle(
             return Outcome([Reply("I can't find that shop. Check the link and try again.")])
         convo.seller_id = seller.id
         return Outcome(_menu(db, seller, convo))
+
+    # ── The seller's own side of the thread ─────────────────────────────────
+    # Checked before anything else a buyer could mean. A number typed by a
+    # seller we just asked for a price is a price, not a menu choice.
+    owner = find_seller_by_phone(db, phone)
+    if owner is not None:
+        if convo.state == ConversationState.PRICING:
+            if lowered in {"skip", "later"}:
+                queue = [int(pid) for pid in convo.context.get("pricing_queue", [])]
+                convo.context = {**convo.context, "pricing_queue": queue[1:]}
+                return Outcome(_pricing_prompt(db, owner, convo))
+            if lowered in {"stop", "done", "cancel"}:
+                convo.state = ConversationState.NEW
+                convo.context = {}
+                return Outcome(_priced_summary(db, owner))
+            amount = _price(said)
+            if amount is not None:
+                return Outcome(_set_price(db, owner, convo, amount))
+            return Outcome([Reply("I need just the number — like *1800*. Or send *skip*.")])
+
+        if lowered == "publish":
+            return Outcome(_publish_ready(db, owner))
+        if lowered in {"open", "open shop", "go live"}:
+            return Outcome(_open_shop(db, owner))
+        if lowered in {"drafts", "stock", "my products"}:
+            return Outcome(_priced_summary(db, owner))
 
     seller = convo.seller
     if seller is None or not seller.is_published:
