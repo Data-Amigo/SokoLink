@@ -273,11 +273,15 @@ def read_message(message: dict[str, Any]) -> tuple[str, str, str, list[tuple[str
         return message_id, sender, caption, ([(media_id, media_id)] if media_id else [])
 
     if kind == "interactive":
-        # Button and list replies. The title is what the person actually saw,
-        # so it is what the bot should read.
+        # Button and list replies. THE ID, NOT THE TITLE. We set both; the id is
+        # a stable key the conversation matches on, while the title is written
+        # for a person and gets reworded — a rewrite of "Add to basket" must not
+        # silently stop adding to the basket.
         interactive = message.get("interactive") or {}
         for key in ("button_reply", "list_reply"):
             chosen = interactive.get(key) or {}
+            if chosen.get("id"):
+                return message_id, sender, str(chosen["id"]), []
             if chosen.get("title"):
                 return message_id, sender, str(chosen["title"]), []
         return message_id, sender, "", []
@@ -293,3 +297,149 @@ def read_message(message: dict[str, Any]) -> tuple[str, str, str, list[tuple[str
 def payload_summary(payload: dict[str, Any]) -> str:
     """A compact rendering of the envelope, for storing beside the message."""
     return json.dumps(payload)[:8000]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# INTERACTIVE MESSAGES
+# ══════════════════════════════════════════════════════════════════════════
+#
+# The reason moving to Meta was worth it for the buyer. Twilio needed a
+# pre-approved content template per shape, which is why buyers got numbered
+# text menus. Here they can be sent free-form inside the 24-hour window a
+# person opens by messaging first — no approval, no template.
+#
+# EVERY LIMIT BELOW IS ENFORCED BY META, NOT SUGGESTED. Exceed one and the
+# whole message is rejected: the buyer sees nothing, and the failure arrives as
+# an API error rather than as anything visible in the chat. Truncating here is
+# the difference between an ugly label and a silent dead end.
+
+#: Reply buttons per message. Meta's hard limit.
+MAX_BUTTONS = 3
+
+#: Rows in a list message, across all sections.
+MAX_ROWS = 10
+
+#: Character caps. A title that overflows fails the whole send.
+BUTTON_TITLE_CHARS = 20
+ROW_TITLE_CHARS = 24
+ROW_DESCRIPTION_CHARS = 72
+LIST_LABEL_CHARS = 20
+BODY_CHARS = 1024
+
+
+def _clip(text: str, limit: int) -> str:
+    """
+    Fit text to one of Meta's caps, with an ellipsis when it had to be cut.
+
+    A cut label is worse than a short one, and both are far better than a
+    message that is never delivered.
+    """
+    text = text.strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def send_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> str:
+    """
+    Send up to three reply buttons.
+
+    Args:
+        to: Recipient, digits with country code.
+        body: The question above the buttons.
+        buttons: ``(id, title)`` pairs. The id comes back to us on tap, which
+            is why it — not the title — is what the conversation matches on:
+            a title is written for a person and may be reworded any time.
+
+    Returns:
+        Meta's message id.
+
+    Raises:
+        CloudApiError: If the send fails.
+    """
+    phone_id = _require("WHATSAPP_PHONE_NUMBER_ID", settings.whatsapp_phone_number_id)
+
+    result = _post(
+        f"{phone_id}/messages",
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": _clip(body, BODY_CHARS)},
+                "action": {
+                    "buttons": [
+                        {
+                            "type": "reply",
+                            "reply": {"id": bid, "title": _clip(title, BUTTON_TITLE_CHARS)},
+                        }
+                        for bid, title in buttons[:MAX_BUTTONS]
+                    ]
+                },
+            },
+        },
+    )
+    return str(result.get("messages", [{}])[0].get("id", ""))
+
+
+def send_list(
+    to: str, body: str, label: str, rows: list[tuple[str, str, str]], header: str = ""
+) -> str:
+    """
+    Send a list picker — the component that replaces a numbered menu.
+
+    Args:
+        to: Recipient, digits with country code.
+        body: The text above the button that opens the list.
+        label: The button that opens it. Kept short; it is not a sentence.
+        rows: ``(id, title, description)``. The description is where a price
+            belongs — it is the second line a buyer reads, and putting it in
+            the title costs the item name its room.
+        header: Optional bold line above the body.
+
+    Returns:
+        Meta's message id.
+
+    Raises:
+        CloudApiError: If the send fails.
+
+    Notes:
+        TEN ROWS, TOTAL. A catalogue longer than that is why categories exist;
+        silently sending the first ten of forty would hide stock a seller
+        believes is listed.
+    """
+    phone_id = _require("WHATSAPP_PHONE_NUMBER_ID", settings.whatsapp_phone_number_id)
+
+    interactive: dict[str, Any] = {
+        "type": "list",
+        "body": {"text": _clip(body, BODY_CHARS)},
+        "action": {
+            "button": _clip(label, LIST_LABEL_CHARS),
+            "sections": [
+                {
+                    "rows": [
+                        {
+                            "id": rid,
+                            "title": _clip(title, ROW_TITLE_CHARS),
+                            **({"description": _clip(desc, ROW_DESCRIPTION_CHARS)} if desc else {}),
+                        }
+                        for rid, title, desc in rows[:MAX_ROWS]
+                    ]
+                }
+            ],
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": _clip(header, 60)}
+
+    result = _post(
+        f"{phone_id}/messages",
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": interactive,
+        },
+    )
+    return str(result.get("messages", [{}])[0].get("id", ""))

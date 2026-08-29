@@ -9,12 +9,19 @@ to the default browser however the message was built. Tested on a real handset �
 plain link and native CTA button both left WhatsApp. So the buyer surface stops
 being a page we link to and becomes the thread itself, which no OS can redirect.
 
-NUMBERED TEXT MENUS, NOT NATIVE LIST WIDGETS. A list picker is prettier and
-needs a pre-approved content template per shape, sent through the REST API. A
-numbered menu is plain text in the webhook's own response: it works on the
-sandbox today, needs no approval, and degrades to something readable on any
-client. The state machine below does not care which renders it, so widgets can
-replace the text later without touching this logic.
+NATIVE COMPONENTS, WITH THE TEXT STILL UNDERNEATH. Replies carry buttons and
+list rows, which Meta's Cloud API draws as real tap targets — free-form, inside
+the 24-hour window a person opens by messaging first, with no template
+approval. That approval requirement is why the first version of this file
+shipped numbered text menus on Twilio.
+
+The body ALWAYS names every option anyway. Twilio cannot render a component and
+gets the text; so does any client that draws neither. A reply whose body reads
+only "Choose:" is a dead end everywhere the buttons do not appear.
+
+A TAP COMES BACK AS AN ID, a typed word as a word, and `handle` accepts both.
+The ids are unambiguous in a way words are not — "cat:Shoes" cannot also be a
+product name — but they are an addition, never a replacement.
 
 EVERY REPLY ENDS BY SAYING WHAT TO SEND NEXT. There is no back button, no menu
 bar and no visible affordance in a chat — the only interface is the last message
@@ -64,14 +71,30 @@ class Reply:
     One outbound WhatsApp message.
 
     Args:
-        body: The text.
+        body: The text. ALWAYS meaningful on its own.
         media_url: An absolute image URL, or None. Relative paths cannot work —
-            Twilio fetches this from its own servers, not from a browser with
-            our origin.
+            the provider fetches this from its own servers, not from a browser
+            with our origin.
+        buttons: ``(id, title)``, at most three, rendered as tap targets.
+        rows: ``(id, title, description)`` for a list picker.
+        list_label: The button that opens the list. Short; not a sentence.
+
+    Notes:
+        THE BODY IS NEVER JUST A HEADER FOR THE COMPONENT. Two providers render
+        these differently — Meta draws real buttons, Twilio cannot and gets the
+        options flattened into numbered text — and one of them may be a client
+        that shows neither. A reply whose body is "Choose:" is a dead end
+        wherever the component does not draw.
+
+        WHICH IDS EXIST IS THE CONVERSATION'S BUSINESS, not the sender's. They
+        are matched in `handle`, so a tap and a typed word take the same path.
     """
 
     body: str
     media_url: str | None = None
+    buttons: list[tuple[str, str]] | None = None
+    rows: list[tuple[str, str, str]] | None = None
+    list_label: str = "Choose"
 
 
 @dataclass
@@ -177,13 +200,22 @@ def _menu(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
     convo.state = ConversationState.BROWSING
     convo.context = {"options": categories}
 
+    # The body still names every option. Meta draws the rows as a picker;
+    # anything that cannot render one — Twilio, an odd client — falls back to
+    # this text, and a body reading only "Choose:" would be a dead end there.
     lines = [f"{i}. {name}" for i, name in enumerate(categories, start=1)]
     body = (
         f"{_greeting(seller)}\n\nWhat are you looking for?\n\n"
         + "\n".join(lines)
-        + "\n\nReply with a number, or send *cart* to see your basket."
+        + "\n\nTap one below, or reply with a number."
     )
-    return [Reply(body)]
+    return [
+        Reply(
+            body,
+            rows=[(f"cat:{name}", name, "") for name in categories],
+            list_label="Browse",
+        )
+    ]
 
 
 def _list_products(
@@ -201,18 +233,24 @@ def _list_products(
     convo.context = {"products": [p.id for p in products], "category": category}
 
     lines = []
+    rows = []
     for i, product in enumerate(products, start=1):
         price = product.price_display or "Ask for price"
         sold_out = " — *sold out*" if product.stock <= 0 else ""
         lines.append(f"{i}. {product.title} — {price}{sold_out}")
+        # The price goes in the row DESCRIPTION, not the title: a title has 24
+        # characters and the item's name needs all of them.
+        rows.append(
+            (
+                f"prod:{product.id}",
+                product.title,
+                f"{price} — sold out" if product.stock <= 0 else price,
+            )
+        )
 
     heading = category or "Everything"
-    body = (
-        f"*{heading}*\n\n"
-        + "\n".join(lines)
-        + "\n\nReply with a number to see it, or *menu* to go back."
-    )
-    return [Reply(body)]
+    body = f"*{heading}*\n\n" + "\n".join(lines) + "\n\nTap one below, or reply with a number."
+    return [Reply(body, rows=rows, list_label="See items")]
 
 
 def _show_product(convo: WaConversation, product: Product) -> list[Reply]:
@@ -230,10 +268,18 @@ def _show_product(convo: WaConversation, product: Product) -> list[Reply]:
 
     if product.stock <= 0:
         parts.append("\n_Sold out right now._\nSend *menu* to see something else.")
+        buttons = [("menu", "See what's in stock")]
     else:
         parts.append("\nSend *add* to put this in your basket, or *menu* to keep looking.")
+        buttons = [("add", "Add to basket"), ("menu", "Keep looking"), ("cart", "My basket")]
 
-    return [Reply("\n".join(parts), media_url=absolute_url(product.cover_url))]
+    return [
+        Reply(
+            "\n".join(parts),
+            media_url=absolute_url(product.cover_url),
+            buttons=buttons,
+        )
+    ]
 
 
 def _show_cart(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
@@ -261,7 +307,16 @@ def _show_cart(db: Session, seller: Seller, convo: WaConversation) -> list[Reply
         + f"\n\nTotal: *{_money(cart.subtotal_kes)}*"
         + "\n\nSend *checkout* to order, *menu* to keep shopping, or *clear* to empty it."
     )
-    return [Reply(body)]
+    return [
+        Reply(
+            body,
+            buttons=[
+                ("checkout", "Checkout"),
+                ("menu", "Keep shopping"),
+                ("clear", "Empty basket"),
+            ],
+        )
+    ]
 
 
 def _start_checkout(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
@@ -734,6 +789,23 @@ def handle(
                 )
             ]
         )
+
+    # ── A tap on a button or a list row ─────────────────────────────────────
+    # These arrive as the ID we set when sending, so they are unambiguous in a
+    # way a typed word never is: "cat:Shoes" cannot also mean a product name or
+    # a menu position. Typed words still work — the ids are an addition, not a
+    # replacement, because a buyer on a client that draws no buttons must not
+    # be stranded.
+    if lowered.startswith("cat:"):
+        return Outcome(_list_products(db, seller, convo, category=said[4:]))
+
+    if lowered.startswith("prod:"):
+        product = db.get(Product, int(said[5:])) if said[5:].isdigit() else None
+        # Scoped to this shop: a product id is guessable, and one shop's chat
+        # must never render another shop's stock.
+        if product is not None and product.seller_id == seller.id:
+            return Outcome(_show_product(convo, product))
+        return Outcome(_menu(db, seller, convo))
 
     # ── Words that work from anywhere ───────────────────────────────────────
     if lowered in {"menu", "hi", "hello", "start", "habari", "niaje"}:

@@ -364,20 +364,42 @@ class TestTheClientItself:
         assert whatsapp_cloud.extract_messages({}) == []
         assert whatsapp_cloud.extract_messages({"entry": [{"changes": [{"value": {}}]}]}) == []
 
-    def test_read_message_handles_an_interactive_reply(self) -> None:
-        """Button and list replies carry the title the person actually saw."""
+    def test_an_interactive_reply_is_read_as_its_ID(self) -> None:
+        """
+        THE ID, NOT THE TITLE. We set both when sending. The id is a stable key
+        the conversation matches on; the title is written for a person and gets
+        reworded — a rewrite of "Add to basket" must not silently stop adding
+        to the basket.
+        """
         message = {
             "from": "254712345678",
             "id": WAMID,
             "type": "interactive",
-            "interactive": {"type": "list_reply", "list_reply": {"id": "1", "title": "Shoes"}},
+            "interactive": {
+                "type": "list_reply",
+                "list_reply": {"id": "cat:Shoes", "title": "Shoes"},
+            },
         }
 
         _, sender, text, media = whatsapp_cloud.read_message(message)
 
         assert sender == "254712345678"
-        assert text == "Shoes"
+        assert text == "cat:Shoes"
         assert media == []
+
+    def test_a_reply_with_no_id_falls_back_to_its_title(self) -> None:
+        """Not every interactive reply is one of ours — a template button we
+        did not define still has to mean something."""
+        message = {
+            "from": "254712345678",
+            "id": WAMID,
+            "type": "interactive",
+            "interactive": {"type": "button_reply", "button_reply": {"title": "Shoes"}},
+        }
+
+        _, _, text, _ = whatsapp_cloud.read_message(message)
+
+        assert text == "Shoes"
 
     def test_read_message_is_silent_on_types_it_cannot_use(self) -> None:
         """Audio, location, stickers. Acknowledged, never guessed at."""

@@ -51,7 +51,9 @@ from app.services.whatsapp_cloud import (
     download_media,
     extract_messages,
     read_message,
+    send_buttons,
     send_image,
+    send_list,
     send_text,
 )
 
@@ -203,8 +205,18 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
     for sender, replies in outgoing:
         for reply in replies:
             try:
+                # An image cannot carry buttons in the same message, so a reply
+                # with both becomes two: the photo, then the choices. Meta has
+                # no combined form, and dropping either half would lose the
+                # product picture or the way to buy it.
                 if reply.media_url:
                     send_image(sender, reply.media_url, caption=reply.body)
+                    if reply.buttons:
+                        send_buttons(sender, "What next?", reply.buttons)
+                elif reply.buttons:
+                    send_buttons(sender, reply.body, reply.buttons)
+                elif reply.rows:
+                    send_list(sender, reply.body, reply.list_label, reply.rows)
                 else:
                     send_text(sender, reply.body)
             except CloudApiError:

@@ -409,3 +409,126 @@ class TestSoldOut:
 
         say(db, "add")
         assert "empty" in say(db, "cart").lower()
+
+
+class TestNativeComponents:
+    """
+    Buttons and list rows, which Meta draws as real tap targets.
+
+    THE TEXT NEVER GOES AWAY. Twilio cannot render a component, and neither can
+    some clients, so every reply's body still names every option. A reply whose
+    body read only "Choose:" would be a dead end everywhere the buttons do not
+    appear — which is most of the places this has to work.
+    """
+
+    def test_the_menu_carries_rows_and_still_reads_as_text(self, db: Session) -> None:
+        seller = open_shop(db)
+        stock(db, seller, "Ankara Shirt", "Fashion")
+        stock(db, seller, "Canvas Sneakers", "Shoes")
+
+        reply = handle(db, PHONE, f"shop {seller.slug}").replies[0]
+
+        assert reply.rows is not None
+        assert [r[0] for r in reply.rows] == ["cat:Fashion", "cat:Shoes"]
+        # And the same options are readable without any component at all.
+        assert "1. Fashion" in reply.body
+        assert "2. Shoes" in reply.body
+
+    def test_a_product_row_carries_the_price_as_its_description(self, db: Session) -> None:
+        """
+        A row title has 24 characters and the item's name needs all of them.
+        The price is the second line a buyer reads, so it belongs there.
+        """
+        seller = open_shop(db)
+        stock(db, seller, "Ankara Shirt", "Fashion", price_kes=1800)
+        say(db, f"shop {seller.slug}")
+
+        reply = handle(db, PHONE, "1").replies[0]
+
+        assert reply.rows is not None
+        row_id, title, description = reply.rows[0]
+        assert title == "Ankara Shirt"
+        assert "1,800" in description
+
+    def test_a_product_offers_three_buttons(self, db: Session) -> None:
+        seller = open_shop(db)
+        stock(db, seller, "Ankara Shirt", "Fashion")
+        say(db, f"shop {seller.slug}")
+        say(db, "1")
+
+        reply = handle(db, PHONE, "1").replies[0]
+
+        assert reply.buttons is not None
+        assert [b[0] for b in reply.buttons] == ["add", "menu", "cart"]
+
+    def test_a_sold_out_product_does_not_offer_add(self, db: Session) -> None:
+        """Offering a control that cannot work is worse than offering none."""
+        seller = open_shop(db)
+        stock(db, seller, "Ankara Shirt", "Fashion", stock=0)
+        say(db, f"shop {seller.slug}")
+        say(db, "1")
+
+        reply = handle(db, PHONE, "1").replies[0]
+
+        assert reply.buttons is not None
+        assert "add" not in [b[0] for b in reply.buttons]
+
+    def test_never_more_than_three_buttons(self, db: Session) -> None:
+        """Meta rejects the whole message at four, and the buyer sees nothing."""
+        seller = open_shop(db)
+        stock(db, seller, "Ankara Shirt", "Fashion")
+        say(db, f"shop {seller.slug}")
+        say(db, "1")
+
+        for text in ("1", "cart"):
+            reply = handle(db, PHONE, text).replies[0]
+            if reply.buttons:
+                assert len(reply.buttons) <= 3
+
+
+class TestTappingVersusTyping:
+    """
+    A tap returns the id we set; typing returns a word. Both must reach the
+    same place, because a buyer on a client that draws no buttons is still a
+    buyer.
+    """
+
+    def test_tapping_a_category_row_lists_it(self, db: Session) -> None:
+        seller = open_shop(db)
+        stock(db, seller, "Canvas Sneakers", "Shoes")
+        say(db, f"shop {seller.slug}")
+
+        said = say(db, "cat:Shoes")
+
+        assert "Canvas Sneakers" in said
+
+    def test_tapping_a_product_row_opens_it(self, db: Session) -> None:
+        seller = open_shop(db)
+        product = stock(db, seller, "Canvas Sneakers", "Shoes")
+        say(db, f"shop {seller.slug}")
+
+        said = say(db, f"prod:{product.id}")
+
+        assert "Canvas Sneakers" in said
+
+    def test_a_product_id_from_another_shop_is_refused(self, db: Session) -> None:
+        """
+        THE ID IS GUESSABLE. One shop's chat must never render another shop's
+        stock just because a buyer sent an integer.
+        """
+        mine = open_shop(db)
+        stock(db, mine, "Ankara Shirt", "Fashion")
+        theirs = open_shop(db, slug="someone-else", display_name="Someone Else")
+        secret = stock(db, theirs, "Their Secret Bag", "Bags")
+        say(db, f"shop {mine.slug}")
+
+        said = say(db, f"prod:{secret.id}")
+
+        assert "Their Secret Bag" not in said
+
+    def test_a_malformed_id_falls_back_to_the_menu(self, db: Session) -> None:
+        seller = open_shop(db)
+        stock(db, seller, "Ankara Shirt", "Fashion")
+        say(db, f"shop {seller.slug}")
+
+        assert "What are you looking for?" in say(db, "prod:not-a-number")
