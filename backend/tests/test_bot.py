@@ -20,11 +20,21 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Order, OrderStatus, Product, ProductStatus, Seller
+from app.models import (
+    Order,
+    OrderStatus,
+    PaymentMethodKind,
+    Product,
+    ProductStatus,
+    Seller,
+)
+from app.secrets_vault import encrypt
 from app.services.bot import handle
+from app.services.daraja import DarajaError, StkPushResult
 from tests.factories import make_payment_method, make_product, make_seller
 
 PHONE = "254712345678"
@@ -532,3 +542,188 @@ class TestTappingVersusTyping:
         say(db, f"shop {seller.slug}")
 
         assert "What are you looking for?" in say(db, "prod:not-a-number")
+
+
+class TestPayingInTheChat:
+    """
+    Two payment paths, and the manual one is permanent.
+
+    Daraja's STK works with Paybill and Buy Goods shortcodes ONLY. A large
+    share of Kenyan micro-sellers run on Pochi la Biashara, which is neither —
+    so "type the code" is not a fallback awaiting removal, it is how most shops
+    will always take money.
+    """
+
+    def _ordered(self, db: Session, seller: Seller, phone: str = PHONE) -> str:
+        """Walk a buyer to the moment payment is asked for."""
+        product = stock(db, seller, "Ankara Shirt", "Fashion", price_kes=1500)
+        say(db, f"shop {seller.slug}", phone=phone)
+        say(db, f"prod:{product.id}", phone=phone)
+        say(db, "add", phone=phone)
+        say(db, "checkout", phone=phone)
+        return say(db, "Akinyi Otieno, Kasarani", phone=phone)
+
+    def test_a_pochi_shop_asks_for_the_code(self, db: Session) -> None:
+        seller = open_shop(db)  # the factory's default kind is Pochi
+
+        said = self._ordered(db, seller)
+
+        assert "reply here with the M-Pesa code" in said
+        assert "prompt" not in said.lower()
+
+    def test_an_stk_shop_pushes_to_the_handset(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.services import bot as bot_module
+
+        pushed: list[int] = []
+
+        class FakeEngine:
+            @staticmethod
+            def push(
+                method: object,
+                *,
+                amount_kes: int,
+                phone: str,
+                reference: str,
+                description: str,
+                callback_url: str,
+            ) -> StkPushResult:
+                pushed.append(amount_kes)
+                return StkPushResult(
+                    checkout_request_id="ws_CO_1",
+                    merchant_request_id="mr_1",
+                    customer_message="Success. Request accepted for processing",
+                )
+
+        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: FakeEngine())
+        seller = make_seller(db, slug="till-shop", display_name="Till Shop")
+        seller.is_published = True
+        make_payment_method(
+            db,
+            seller,
+            kind=PaymentMethodKind.TILL.value,
+            stk_shortcode="174379",
+            consumer_key_enc=encrypt("key"),
+            consumer_secret_enc=encrypt("secret"),
+            passkey_enc=encrypt("passkey"),
+        )
+        db.flush()
+
+        said = self._ordered(db, seller, phone="254733111000")
+
+        assert pushed == [1500]
+        assert "Check your phone" in said
+
+    def test_a_refused_push_falls_back_to_the_number(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        A FAILED PUSH IS NOT A FAILED ORDER. Expired credentials, a shortcode
+        that is not live, Safaricom having a bad afternoon — the buyer is still
+        told where to send money. Abandoning a sale because an API was down is
+        the worst possible response to an API being down.
+        """
+        from app.services import bot as bot_module
+
+        class BrokenEngine:
+            @staticmethod
+            def push(*args: object, **kwargs: object) -> StkPushResult:
+                raise DarajaError("invalid credentials")
+
+        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: BrokenEngine())
+        seller = make_seller(db, slug="broken-till", display_name="Broken Till")
+        seller.is_published = True
+        make_payment_method(
+            db,
+            seller,
+            kind=PaymentMethodKind.TILL.value,
+            stk_shortcode="174379",
+            consumer_key_enc=encrypt("key"),
+            consumer_secret_enc=encrypt("secret"),
+            passkey_enc=encrypt("passkey"),
+        )
+        db.flush()
+
+        said = self._ordered(db, seller, phone="254733222000")
+
+        assert "reply here with the M-Pesa code" in said
+        # And nothing about OUR problem in OUR words.
+        assert "credential" not in said.lower()
+
+    def test_the_code_path_stays_open_after_a_push(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        A buyer whose prompt never arrived must still be able to type the code
+        from their M-Pesa message.
+        """
+        from app.services import bot as bot_module
+
+        class FakeEngine:
+            @staticmethod
+            def push(*args: object, **kwargs: object) -> StkPushResult:
+                return StkPushResult(
+                    checkout_request_id="ws_CO_2",
+                    merchant_request_id="mr_2",
+                    customer_message="Success. Request accepted for processing",
+                )
+
+        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: FakeEngine())
+        seller = make_seller(db, slug="till-two", display_name="Till Two")
+        seller.is_published = True
+        make_payment_method(
+            db,
+            seller,
+            kind=PaymentMethodKind.TILL.value,
+            stk_shortcode="174379",
+            consumer_key_enc=encrypt("key"),
+            consumer_secret_enc=encrypt("secret"),
+            passkey_enc=encrypt("passkey"),
+        )
+        db.flush()
+        buyer = "254733333000"
+        self._ordered(db, seller, phone=buyer)
+
+        said = say(db, "SLK7XA2B9C", phone=buyer)
+
+        assert "SLK7XA2B9C" in said
+
+    def test_a_push_never_marks_the_order_paid(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        THE CALLBACK IS THE ONLY AUTOMATIC PAYMENT TRUTH. A prompt that has been
+        SENT is not money that has ARRIVED — the buyer may cancel, time out, or
+        have no float.
+        """
+        from app.services import bot as bot_module
+
+        class FakeEngine:
+            @staticmethod
+            def push(*args: object, **kwargs: object) -> StkPushResult:
+                return StkPushResult(
+                    checkout_request_id="ws_CO_3",
+                    merchant_request_id="mr_3",
+                    customer_message="Success. Request accepted for processing",
+                )
+
+        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: FakeEngine())
+        seller = make_seller(db, slug="till-three", display_name="Till Three")
+        seller.is_published = True
+        make_payment_method(
+            db,
+            seller,
+            kind=PaymentMethodKind.TILL.value,
+            stk_shortcode="174379",
+            consumer_key_enc=encrypt("key"),
+            consumer_secret_enc=encrypt("secret"),
+            passkey_enc=encrypt("passkey"),
+        )
+        db.flush()
+        self._ordered(db, seller, phone="254733444000")
+
+        order = db.scalars(select(Order).order_by(Order.id.desc())).first()
+        assert order is not None
+        assert order.status == OrderStatus.PENDING.value
+        assert order.paid_at is None

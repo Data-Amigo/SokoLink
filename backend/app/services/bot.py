@@ -54,9 +54,11 @@ from app.models import (
 )
 from app.services.cart import CartError, add_item, clear, get_or_create_cart
 from app.services.catalogue import PublishError, publish_product
+from app.services.daraja import get_stk_engine
 from app.services.intake import IntakeError, MediaFetch, ingest_forwarded_post
 from app.services.media import absolute_url
 from app.services.orders import claim_payment, get_payment_method, place_order
+from app.services.payments import MPESA_CALLBACK_PATH, PaymentError, start_stk_payment
 from app.services.storefront import get_categories, get_public_products
 
 #: How many numbered options one message may offer. Past this a buyer is
@@ -386,14 +388,73 @@ def _place(
     convo.order_reference = order.reference
     convo.context = {}
 
+    return _ask_for_payment(db, seller, order)
+
+
+def _ask_for_payment(db: Session, seller: Seller, order: Order) -> list[Reply]:
+    """
+    Ask for the money the way this seller can actually receive it.
+
+    Args:
+        db: Session.
+        seller: Whose shop.
+        order: The order just placed.
+
+    Returns:
+        A prompt on the buyer's handset when the seller is STK-capable, and the
+        manual instruction otherwise.
+
+    Notes:
+        TWO PATHS, AND THE MANUAL ONE IS PERMANENT. Daraja's STK works with
+        Paybill and Buy Goods shortcodes only, so a Pochi seller can never
+        receive a push — and a large share of Kenyan micro-sellers run on
+        Pochi. This is not a fallback waiting to be removed.
+
+        A FAILED PUSH IS NOT A FAILED ORDER. If Daraja refuses — expired
+        credentials, a shortcode that is not live, Safaricom having a bad
+        afternoon — the buyer is told the number to pay by hand. The order
+        exists either way, and abandoning a sale because an API was unavailable
+        would be the worst possible response to it.
+
+        EVEN AFTER A PUSH, THE CODE PATH STAYS OPEN. The conversation remains
+        in PAYING, so a buyer whose prompt never arrived can still type the
+        code from their M-Pesa message.
+    """
+    method = get_payment_method(db, seller)
     to_name = f" ({order.paid_to_name})" if order.paid_to_name else ""
+
+    manual = Reply(
+        f"*Order {order.reference}*\n"
+        f"Total: *{_money(order.total_kes)}*\n\n"
+        f"Send the money to *{order.paid_to_number}*{to_name} on M-Pesa, "
+        f"then reply here with the M-Pesa code.\n\n"
+        f"_{seller.display_name} confirms it once the money shows up._"
+    )
+
+    if method is None or not method.can_stk:
+        return [manual]
+
+    try:
+        start_stk_payment(
+            db,
+            order,
+            method,
+            get_stk_engine(),
+            f"{settings.app_base_url}{MPESA_CALLBACK_PATH}",
+        )
+    except PaymentError:
+        # Say nothing about the failure: "our payment API is down" is our
+        # problem described in our words, and the buyer can still pay.
+        return [manual]
+
     return [
         Reply(
             f"*Order {order.reference}*\n"
             f"Total: *{_money(order.total_kes)}*\n\n"
-            f"Send the money to *{order.paid_to_number}*{to_name} on M-Pesa, "
-            f"then reply here with the M-Pesa code.\n\n"
-            f"_{seller.display_name} confirms it once the money shows up._"
+            f"Check your phone — there's an M-Pesa prompt waiting. "
+            f"Enter your PIN to pay {seller.display_name}.\n\n"
+            f"_Didn't get it? Send the money to {order.paid_to_number}{to_name} "
+            f"and reply here with the code._"
         )
     ]
 

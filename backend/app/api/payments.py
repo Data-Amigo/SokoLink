@@ -34,14 +34,21 @@ from app.config import get_settings
 from app.db import get_db
 from app.services.daraja import StkEngine, get_stk_engine
 from app.services.orders import get_order, get_payment_method
-from app.services.payments import PaymentError, apply_callback, start_stk_payment
+from app.services.payments import (
+    MPESA_CALLBACK_PATH,
+    PaymentError,
+    apply_callback,
+    start_stk_payment,
+)
 from app.services.storefront import get_public_shop
 
 router = APIRouter(tags=["payments"])
 
 #: Where Daraja posts its verdict. Fixed, because it is registered with
 #: Safaricom and changing it silently would strand every in-flight payment.
-CALLBACK_PATH = "/payments/mpesa/callback"
+#: Re-exported from the service, which owns it — the chat checkout needs the
+#: same path and cannot import it from a route.
+CALLBACK_PATH = MPESA_CALLBACK_PATH
 
 
 @router.post(CALLBACK_PATH)

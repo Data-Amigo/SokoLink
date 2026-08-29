@@ -137,9 +137,21 @@ class Settings(BaseSettings):
     twilio_whatsapp_number: str | None = None
 
     # ── W2: M-Pesa Daraja ────────────────────────────────────────────────────
-    # NOTE: in production the credentials used for an STK push are the SELLER's,
-    # stored encrypted on their PaymentMethod — not these. We are never in the
-    # money path. The keys below exist only for our own sandbox testing.
+    # THE FOUR CREDENTIAL FIELDS BELOW ARE READ BY NOTHING. Verified by grep,
+    # not assumed. Only `daraja_environment` has a job: it picks the sandbox or
+    # production host.
+    #
+    # That is not an oversight, it is the architecture. An STK push deposits
+    # into the shortcode that AUTHORISED it, so pushing with our credentials
+    # would land every buyer's money in our Safaricom account and leave us
+    # owing each seller theirs — a payment intermediary holding other people's
+    # funds, which is the one thing this product refuses to be. The credentials
+    # used for a real push are the SELLER's, encrypted on their PaymentMethod
+    # and entered through the workspace.
+    #
+    # They are kept because they are a convenient place to hold sandbox values
+    # while testing, and because deleting a documented name tends to produce a
+    # deploy that sets it again. Setting them configures nothing.
     #
     # EACH ACCEPTS TWO NAMES. Safaricom's API is called Daraja and its product is
     # called M-Pesa, so both prefixes are in circulation and a .env written from

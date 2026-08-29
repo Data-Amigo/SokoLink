@@ -52,6 +52,18 @@ from app.services.daraja import DarajaError, StkEngine, StkPushResult
 RESULT_OK = 0
 
 
+#: Where Daraja posts the result of a push.
+#:
+#: DEFINED IN THE SERVICE, not the route, because two callers need it and one
+#: of them is not an HTTP route: the chat checkout builds this URL when it
+#: starts a push. A service importing it from ``api/`` would invert the
+#: layering — routes depend on services, never the reverse.
+#:
+#: It is a constant rather than a setting: Safaricom stores it per push, so a
+#: silent change would strand every callback already in flight.
+MPESA_CALLBACK_PATH = "/payments/mpesa/callback"
+
+
 class PaymentError(RuntimeError):
     """A payment could not be started, with a message safe to show a buyer."""
 
