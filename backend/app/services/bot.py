@@ -37,8 +37,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from urllib.parse import quote
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -46,6 +47,7 @@ from app.models import (
     Cart,
     ConversationState,
     Order,
+    OrderStatus,
     PriceSource,
     Product,
     ProductStatus,
@@ -58,7 +60,14 @@ from app.services.catalogue import PublishError, publish_product
 from app.services.daraja import get_stk_engine
 from app.services.intake import IntakeError, MediaFetch, ingest_forwarded_post
 from app.services.media import absolute_url
-from app.services.orders import claim_payment, get_payment_method, place_order
+from app.services.orders import (
+    OrderError,
+    claim_payment,
+    confirm_payment,
+    get_payment_method,
+    place_order,
+)
+from app.services.payment_methods import PaymentSetupError, save_payment_method
 from app.services.payments import MPESA_CALLBACK_PATH, PaymentError, start_stk_payment
 from app.services.storefront import get_categories, get_public_products
 
@@ -204,15 +213,22 @@ def _shop_card(seller: Seller) -> Reply:
     The template message whose CTA button opens this shop INSIDE WhatsApp.
 
     Notes:
-        A BUTTON, NOT A LINK IN THE TEXT. Meta's in-app browser opens links from
-        CTA buttons and interactive messages; a raw URL in a text message is
-        handed to the device's default browser, which is what we watched happen.
+        A BUTTON, NOT A LINK IN THE TEXT. A raw URL in a message body is handed
+        to the device's default browser every time. A cta_url is at least a
+        button, and it is the only free way to send one.
 
-        AN INTERACTIVE cta_url, NOT A TEMPLATE. Both open in-app, but a template
-        needs Meta review and costs per send, while this needs neither and is
-        free inside the 24-hour window a person opens by messaging first. The
-        template path was built first and turned out to be the harder road to
-        the same place.
+        IT MAY STILL LEAVE WHATSAPP, and the docstring here used to claim
+        otherwise. Meta's in-app browser is documented as applying to CTA
+        buttons on approved MARKETING OR UTILITY TEMPLATES; Meta's own reference
+        for interactive cta_url says the URL "will load in the device's default
+        web browser". Support for interactive messages is announced as coming,
+        not shipped. The template path (see whatsapp_shop_template) is the one
+        with the documented guarantee, and it costs per send.
+
+        WHICH IS WHY THIS IS NO LONGER THE THING A SELLER SHARES. The share link
+        is a wa.me deep link — see _share_link — which cannot be routed to a
+        browser at all, because it is not a page request. This card is for
+        LOOKING at a shop from inside a conversation that already exists.
     """
     return Reply(
         f"*{seller.display_name}* — tap to browse everything they have.",
@@ -725,18 +741,155 @@ def _set_price(db: Session, seller: Seller, convo: WaConversation, amount: int) 
     )
 
 
+#: What a seller might type or tap when asked how they take money. The button
+#: ids are the canonical form; the words are what somebody types instead.
+_PAY_ALIASES: dict[str, str] = {
+    "pochi": "pochi",
+    "pochi la biashara": "pochi",
+    "till": "till",
+    "till number": "till",
+    "buy goods": "till",
+    "paybill": "paybill",
+    "pay bill": "paybill",
+}
+
+
+def _find_shop(db: Session, wanted: str) -> Seller | None:
+    """
+    The shop a buyer named, by slug or by the name on the sign.
+
+    Notes:
+        BOTH, BECAUSE THE LINK CARRIES THE NAME. The share link prefills "Shop
+        Book Lounge" rather than "shop book-lounge" — the buyer's own first
+        message appears in their chat, and it should read like something a
+        person wrote, not like a command they mistyped. Matching the slug too
+        keeps every link already in circulation working.
+
+        CLOSED SHOPS ARE NOT FOUND. A buyer must never reach a catalogue whose
+        owner has not opened it; that is the publish gate, and a chat that
+        ignored it would be a way around it.
+    """
+    cleaned = wanted.strip()
+    if not cleaned:
+        return None
+    return db.scalar(
+        select(Seller).where(
+            Seller.is_published.is_(True),
+            or_(
+                Seller.slug == cleaned.lower(),
+                func.lower(Seller.display_name) == cleaned.lower(),
+            ),
+        )
+    )
+
+
+def _resume_pricing(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
+    """
+    Pick the pricing queue back up, for a seller who left it half-done.
+
+    Notes:
+        A SELLER WHO WALKS AWAY MID-QUEUE MUST BE ABLE TO COME BACK. Prices are
+        asked for one at a time immediately after a forward, and a seller
+        interrupted by a customer loses the thread entirely — the drafts sit
+        there, invisible, and the shop looks broken for a reason nothing
+        explains. This rebuilds the queue from what is actually unpriced rather
+        than from whatever the conversation last remembered.
+    """
+    unpriced = [
+        int(pid)
+        for pid in db.scalars(
+            select(Product.id)
+            .where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.DRAFT.value,
+                Product.price_kes.is_(None),
+            )
+            .order_by(Product.id)
+        ).all()
+    ]
+
+    if not unpriced:
+        return [
+            Reply(
+                "Everything you've sent me has a price. 👍",
+                buttons=[("publish", "Add to my shop")],
+            )
+        ]
+
+    convo.state = ConversationState.PRICING
+    convo.context = {"pricing_queue": unpriced}
+    return _pricing_prompt(db, seller, convo)
+
+
+def _plural(count: int, word: str) -> str:
+    """``1 item`` / ``3 items``. Copy that says "1 items" reads as a bug."""
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def _share_link(seller: Seller) -> str | None:
+    """
+    The one link a seller shares. A wa.me deep link, never a web URL.
+
+    Returns:
+        The link, or None when the bot's own number is not configured.
+
+    Notes:
+        WHY A DEEP LINK AND NOT THE STOREFRONT URL. Tapping an http(s) URL hands
+        an intent to the operating system, which is free to open it in Chrome —
+        and does. A wa.me link is not a page request, it opens WhatsApp itself,
+        so nothing can route it away from the app the whole product lives in.
+
+        It also lands the buyer in a CONVERSATION, which opens the 24-hour
+        window. Inside that window we may send interactive messages and buttons
+        for free — including the one offering the full storefront. Arriving by
+        web URL gives us a page view and no way to speak to them.
+
+        NONE RATHER THAN A GUESS. A share link built on a missing number is a
+        seller posting a dead link to their status, which is worse than being
+        told we cannot build one yet.
+    """
+    number = (settings.whatsapp_display_number or "").strip().lstrip("+")
+    if not number:
+        return None
+    return f"https://wa.me/{number}?text={quote(f'Shop {seller.display_name}')}"
+
+
+def _share_card(seller: Seller) -> Reply:
+    """
+    The seller's link, as text they can copy.
+
+    Notes:
+        TEXT, NOT A BUTTON, and that is the whole point. A cta_url button can be
+        tapped but not copied, and this link's entire job is to be pasted into a
+        status, a bio and half a dozen groups. A button here would be a control
+        that looks right and cannot do the one thing it exists for.
+    """
+    link = _share_link(seller)
+    if link is None:
+        return Reply(
+            "I can't build your link yet — our WhatsApp number isn't set up on "
+            "our side. That one's ours to fix, not yours. Try again shortly."
+        )
+    return Reply(
+        "Here's your shop link. Put it in your WhatsApp status, your bio, and "
+        f"the groups you already sell in:\n\n{link}\n\n"
+        "Anyone who taps it opens a chat with me, and I show them your shop "
+        "straight away — they never leave WhatsApp."
+    )
+
+
 def _publish_ready(db: Session, seller: Seller) -> list[Reply]:
     """
-    Publish every priced draft, and say what a buyer can now reach.
+    Put every priced item into the shop, and say what a buyer can now reach.
 
     Notes:
         IT GOES THROUGH THE SAME GATE the workspace uses. publish_product
         refuses an unpriced item and names it, so the chat cannot become a
         second way to go live that skips the rule.
 
-        THE SHOP ITSELF IS NOT OPENED HERE. Publishing an item and opening a
-        storefront are different decisions, and a seller who has not seen their
-        shop should not discover it is live because they priced a shirt.
+        THE SHOP ITSELF IS NOT OPENED HERE. Putting an item in the shop and
+        opening the shop are different decisions, and a seller who has not seen
+        their shop should not discover it is live because they priced a shirt.
     """
     drafts = db.scalars(
         select(Product).where(
@@ -747,7 +900,13 @@ def _publish_ready(db: Session, seller: Seller) -> list[Reply]:
     ).all()
 
     if not drafts:
-        return [Reply("Nothing is priced yet. Send me a photo of what you're selling.")]
+        return [
+            Reply(
+                "Nothing has a price yet, so there's nothing I can put in your "
+                "shop. Forward me a photo of something you're selling and I'll "
+                "set it up."
+            )
+        ]
 
     published = []
     for product in drafts:
@@ -758,50 +917,292 @@ def _publish_ready(db: Session, seller: Seller) -> list[Reply]:
             return [Reply(str(exc))]
 
     names = "\n".join(f"• {title}" for title in published[:PAGE_SIZE])
+
     if seller.is_published:
-        return [
-            Reply(
-                f"Live now:\n\n{names}",
-                link=(f"{settings.app_base_url}/shop/{seller.slug}", "See my shop"),
-            )
-        ]
+        return [Reply(f"In your shop now:\n\n{names}"), _shop_card(seller)]
 
     return [
         Reply(
-            f"Published:\n\n{names}\n\n"
-            f"Your shop is still closed, so nobody can see them yet. "
-            f"Send *open* to open it."
+            f"Added to your shop:\n\n{names}\n\n"
+            "Your shop is still closed, so nobody can see them yet.",
+            buttons=[("open", "Open for business")],
         )
     ]
 
 
 def _open_shop(db: Session, seller: Seller) -> list[Reply]:
     """
-    Open the storefront, if it is allowed to open.
+    Open the shop for business, if it is ready to be open.
 
     Notes:
-        THE DATABASE ALSO REFUSES a published shop with no WhatsApp number — a
-        live shop nobody can contact is a dead end. That rail cannot fire on
-        this path, though, and it is worth saying why: a seller is RECOGNISED
-        by their WhatsApp number, so one without a number never reaches here as
-        a seller at all. The guard lives in the workspace, where a shop can be
-        opened by someone signed in with an email.
+        TWO GUARDS, AND BOTH ARE ABOUT NOT BREAKING A PROMISE TO A BUYER. An
+        empty shop wastes the tap. A shop with no payment method is worse: the
+        buyer chooses, commits, reaches checkout and finds no way to send money
+        — which costs the seller a customer they had already won.
+
+        EACH REFUSAL CARRIES THE FIX AS A BUTTON. Telling somebody they are
+        blocked without handing them the next step is how a seller decides the
+        thing does not work.
+
+        THE DATABASE ALSO REFUSES a published shop with no WhatsApp number. That
+        rail cannot fire here — a seller is RECOGNISED by their number, so one
+        without a number never reaches this function as a seller at all. It
+        guards the workspace, where a shop can be opened from an email login.
     """
-    live = db.scalar(
-        select(func.count(Product.id)).where(
-            Product.seller_id == seller.id,
-            Product.status == ProductStatus.PUBLISHED.value,
+    live = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.PUBLISHED.value,
+            )
         )
+        or 0
     )
     if not live:
-        return [Reply("Publish something first, then I can open your shop.")]
+        return [
+            Reply(
+                "There's nothing in your shop yet, so opening it would show "
+                "buyers an empty room. Forward me a photo of something you're "
+                "selling and I'll set it up."
+            )
+        ]
+
+    if get_payment_method(db, seller) is None:
+        return [
+            Reply(
+                "Before you open — how do buyers pay you?\n\n"
+                "Without this they'd reach your shop, choose what they want, "
+                "and find no way to send you money.",
+                buttons=[("payments", "Set that up")],
+            )
+        ]
 
     seller.is_published = True
     db.flush()
+    return [Reply(f"*{seller.display_name}* is open for business. 🎉"), _share_card(seller)]
+
+
+def _ask_payment_kind(convo: WaConversation) -> list[Reply]:
+    """
+    How does this seller take M-Pesa?
+
+    Notes:
+        THREE BUTTONS BECAUSE THERE ARE THREE ANSWERS, and the difference is not
+        cosmetic: Daraja's STK and C2B APIs work with paybill and buy-goods
+        shortcodes only, so a Pochi seller can never have automatic
+        confirmation. What is chosen here decides the whole checkout path.
+
+        POCHI IS LISTED FIRST, deliberately. It needs no business registration,
+        which is exactly why most Kenyan micro-sellers use it, and a list that
+        buries it reads as though the common case were the exception.
+    """
+    convo.state = ConversationState.PAY_KIND
+    convo.context = {}
     return [
         Reply(
-            "Your shop is open. 🎉\n\nShare it anywhere — WhatsApp, TikTok, your status.",
-            link=(f"{settings.app_base_url}/shop/{seller.slug}", "Open my shop"),
+            "How do your buyers pay you?\n\n"
+            "*Pochi la Biashara* — the number on your phone\n"
+            "*Till* — Buy Goods, usually 6 digits\n"
+            "*Paybill* — a business number plus an account\n\n"
+            "Tap one, or just type the word.",
+            buttons=[
+                ("pay:pochi", "Pochi la Biashara"),
+                ("pay:till", "Till number"),
+                ("pay:paybill", "Paybill"),
+            ],
+        )
+    ]
+
+
+#: What to ask for once the kind is known, and the example that makes the
+#: question answerable. A prompt with no sample format is a guessing game.
+_PAY_PROMPTS: dict[str, str] = {
+    "pochi": (
+        "What number is your Pochi la Biashara on?\n\n"
+        "_Like 0712345678 — the number that receives the money._"
+    ),
+    "till": ("What's your till number?\n\n_The Buy Goods number, usually 6 digits — like 123456._"),
+    "paybill": "What's your paybill number?\n\n_The business short code — like 400200._",
+}
+
+
+def _ask_payment_number(convo: WaConversation, kind: str) -> list[Reply]:
+    """Record which kind was chosen, then ask for the number it needs."""
+    convo.state = ConversationState.PAY_NUMBER
+    convo.context = {"pay_kind": kind}
+    return [Reply(_PAY_PROMPTS[kind])]
+
+
+def _save_payment(db: Session, seller: Seller, convo: WaConversation, said: str) -> list[Reply]:
+    """
+    Take the number, validate it, and save how this seller gets paid.
+
+    Notes:
+        A PAYBILL NEEDS TWO ANSWERS, so this function is asked twice for one.
+        The first reply is the short code, the second the account reference —
+        held in the conversation context between them rather than in a third
+        state, because they are two halves of one question.
+
+        NOTHING IS SAVED UNTIL IT VALIDATES. save_payment_method owns the format
+        rules, and its error text is already written for a seller, so it is
+        shown verbatim rather than replaced with something vaguer.
+
+        CREDENTIALS ARE NOT ASKED FOR HERE. A Daraja consumer secret is a long
+        opaque string nobody should paste into a chat thread, and typing one on
+        a phone is a transcription error waiting to happen. Automatic
+        confirmation stays in the workspace; this path gets the seller PAID,
+        which is the part that cannot wait.
+    """
+    kind = str(convo.context.get("pay_kind", ""))
+    if kind not in _PAY_PROMPTS:
+        # Context lost — a restart mid-answer, or a stale conversation row.
+        # Asking again beats saving a number against a kind we are guessing.
+        return _ask_payment_kind(convo)
+
+    answer = said.strip()
+
+    if kind == "paybill" and "pay_number" not in convo.context:
+        convo.context = {**convo.context, "pay_number": answer}
+        return [
+            Reply(
+                "And what account number should buyers use?\n\n"
+                "_If your paybill doesn't need one, send *none*._"
+            )
+        ]
+
+    number = str(convo.context.get("pay_number", answer))
+    reference: str | None = None
+    if kind == "paybill":
+        reference = None if answer.lower() in {"none", "n/a", "-"} else answer
+
+    try:
+        method = save_payment_method(
+            db,
+            seller,
+            kind=kind,
+            number=number,
+            account_name=seller.display_name,
+            account_reference=reference,
+        )
+    except PaymentSetupError as exc:
+        # They stay in this state: the format was wrong, and the fix is another
+        # attempt, not being thrown back to the start of setup.
+        return [Reply(f"{exc}\n\nTry again.")]
+
+    convo.state = ConversationState.NEW
+    convo.context = {}
+
+    shown = f"{method.kind.title()} · {method.number}"
+    if method.account_reference:
+        shown += f" · account {method.account_reference}"
+
+    replies = [Reply(f"Saved. Buyers will pay you on:\n\n*{shown}*")]
+
+    if not seller.is_published:
+        replies.append(
+            Reply(
+                "That's the last thing you needed. Ready to open?",
+                buttons=[("open", "Open for business")],
+            )
+        )
+    return replies
+
+
+def _seller_orders(db: Session, seller: Seller) -> list[Reply]:
+    """
+    Every order waiting on this seller to say the money arrived.
+
+    Notes:
+        THIS IS THE SCREEN THAT MATTERS DAILY. Adding stock is a weekly job;
+        being paid is the reason anybody uses this. It was missing entirely — a
+        seller could be told an order existed and then had no way to look at it
+        again.
+
+        ONLY THE SELLER MOVES AN ORDER TO PAID, which is why this is a list of
+        things to confirm rather than a receipt. A buyer typing an M-Pesa code
+        is making a CLAIM; the money landing on the seller's phone is the fact.
+
+        A ROW PER ORDER, capped at what a picker can hold. Past ten there is a
+        backlog the chat cannot solve, and the newest are the ones whose buyer
+        is still waiting with their phone in their hand.
+    """
+    orders = list(
+        db.scalars(
+            select(Order)
+            .where(
+                Order.seller_id == seller.id,
+                Order.status == OrderStatus.AWAITING_CONFIRMATION.value,
+            )
+            .order_by(Order.created_at.desc())
+            .limit(10)
+        ).all()
+    )
+
+    if not orders:
+        return [
+            Reply(
+                "Nothing waiting on you. 👍\n\n"
+                "When a buyer says they've paid, the order lands here and you "
+                "confirm it once the money shows up on your phone."
+            )
+        ]
+
+    lines = [f"*{_plural(len(orders), 'order')} waiting on you*", ""]
+    rows: list[tuple[str, str, str]] = []
+
+    for order in orders:
+        claimed = order.payments[-1].claimed_code if order.payments else None
+        lines.append(f"*{order.reference}* · KES {order.total_kes:,} · {order.buyer_name}")
+        lines.append(f"They sent code {claimed}" if claimed else "No code sent yet")
+        lines.append("")
+        rows.append(
+            (
+                f"confirm:{order.reference}",
+                f"Paid · {order.reference}"[:24],
+                f"KES {order.total_kes:,} · {order.buyer_name}"[:72],
+            )
+        )
+
+    lines.append("Check your M-Pesa messages, then confirm the ones that arrived.")
+
+    return [Reply("\n".join(lines), rows=rows, list_label="Confirm paid")]
+
+
+def _confirm_order(db: Session, seller: Seller, reference: str) -> list[Reply]:
+    """
+    The seller vouches that one order's money arrived.
+
+    Args:
+        db: Session. The caller commits.
+        seller: Who is confirming — checked against the order's owner.
+        reference: The order reference from the row they tapped.
+
+    Notes:
+        SCOPED TO THIS SELLER, and that check is the point rather than a
+        formality. An order reference travels: it is in the buyer's receipt and
+        in this thread. Without the ownership test, anybody holding one could
+        mark somebody else's order paid — the most damaging write in the system,
+        because it closes an order and tells a buyer they are square.
+
+        THE SERVICE OWNS THE RULES. confirm_payment refuses an order that is
+        already closed and refuses one with no evidence behind it, so the chat
+        cannot become a second, laxer way to settle money.
+    """
+    order = db.scalar(
+        select(Order).where(Order.reference == reference, Order.seller_id == seller.id)
+    )
+    if order is None:
+        return [Reply("I can't find that order. Send *orders* to see what's waiting.")]
+
+    try:
+        confirm_payment(db, order)
+    except OrderError as exc:
+        return [Reply(str(exc))]
+
+    return [
+        Reply(
+            f"*{order.reference}* is paid. ✅\n\nKES {order.total_kes:,} from {order.buyer_name}.",
+            buttons=[("orders", "What else is waiting")],
         )
     ]
 
@@ -826,7 +1227,8 @@ def _welcome(convo: WaConversation) -> list[Reply]:
         Reply(
             "Karibu! 👋 I'm Biashara Mall.\n\n"
             "I turn your WhatsApp catalogue into a shop people can buy from — "
-            "you forward the posts, I do the rest.\n\n"
+            "you forward the posts, I do the rest. Buyers pay you on M-Pesa, "
+            "directly.\n\n"
             "Are you here to sell, or to shop?",
             buttons=[("sell", "I want to sell"), ("buy", "I'm shopping")],
         )
@@ -874,9 +1276,13 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
         the payload's signature proves the message came from Meta. That is at
         least as strong as an SMS code we sent to a number somebody typed.
 
-        THE SHOP IS CREATED CLOSED, with nothing in it. Publishing is a
-        deliberate act and stays one; a shop that opened itself at signup would
-        be live and empty, which is worse than not existing.
+        THE SHOP IS CREATED CLOSED, with nothing in it. Opening is a deliberate
+        act and stays one; a shop that opened itself at signup would be live and
+        empty, which is worse than not existing.
+
+        ONE INSTRUCTION, NOT THREE. They have just typed a name and are waiting
+        to find out whether this works. Listing pricing, payments and opening
+        here would all be true, and would also be the moment they stop reading.
     """
     clean = name.strip()
     if len(clean) < 2 or len(clean) > 60:
@@ -902,61 +1308,119 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
 
     return [
         Reply(
-            f"*{seller.display_name}* is ready. 🎉\n\nIt's closed until you put something in it.",
-            link=(f"{settings.app_base_url}/shop/{seller.slug}", "See my shop"),
-        ),
-        Reply(
-            "Now forward me a photo of something you're selling — "
-            "straight from your catalogue, caption and all.\n\n"
-            "I'll read it and set it up. If I can't see a price, I'll ask."
-        ),
+            f"*{seller.display_name}* is yours. 🎉\n\n"
+            "It's closed for now — nobody sees it until you say so.\n\n"
+            "Now forward me a post from your catalogue. Photo and caption, "
+            "exactly as you'd send a customer. I'll read it and set the item "
+            "up, and if I can't see a price I'll ask you for one."
+        )
     ]
 
 
 def _seller_home(db: Session, seller: Seller) -> list[Reply]:
     """
-    What a seller sees when they say hello.
+    The seller's business, in one message.
 
     Notes:
-        IT ANSWERS "WHERE AM I UP TO", not "here is a menu". A seller opening
-        this thread has one of three questions — is anything waiting on me, is
-        my shop live, what do I do next — and the answer to all three is the
-        state of their own catalogue.
+        WHAT NEEDS THEM COMES FIRST, and money comes before stock. An earlier
+        version opened with a catalogue count, which answers a question nobody
+        asks on arrival: a seller opening this thread wants to know whether
+        anybody owes them money. Everything else is housekeeping.
+
+        THE STATUS LINE NEVER SAYS "LIVE". It used to read "Closed — buyers
+        can't see it yet" directly above "8 live", which is true in the database
+        and nonsense to a person: one line says nobody can see the shop and the
+        next says eight things are live. One word per idea — a shop is open or
+        closed, an item is in the shop or needs a price.
+
+        IT ALWAYS ENDS WITH A QUESTION AND SOMETHING TO TAP. A chat has no menu
+        bar; the last message on screen is the entire interface, so a reply that
+        states a fact and stops is a dead end. There is always at least the
+        share link, because a seller with nothing outstanding still wants the
+        thing they came for.
     """
-    drafts = db.scalar(
-        select(func.count(Product.id)).where(
-            Product.seller_id == seller.id,
-            Product.status == ProductStatus.DRAFT.value,
+    unpriced = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.DRAFT.value,
+                Product.price_kes.is_(None),
+            )
         )
+        or 0
     )
-    live = db.scalar(
-        select(func.count(Product.id)).where(
-            Product.seller_id == seller.id,
-            Product.status == ProductStatus.PUBLISHED.value,
+    ready = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.DRAFT.value,
+                Product.price_kes.is_not(None),
+            )
         )
+        or 0
     )
+    in_shop = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.PUBLISHED.value,
+            )
+        )
+        or 0
+    )
+    waiting = (
+        db.scalar(
+            select(func.count(Order.id)).where(
+                Order.seller_id == seller.id,
+                Order.status == OrderStatus.AWAITING_CONFIRMATION.value,
+            )
+        )
+        or 0
+    )
+    has_payment = get_payment_method(db, seller) is not None
 
     lines = [f"*{seller.display_name}*"]
-    lines.append(
-        "Open — buyers can find you."
-        if seller.is_published
-        else "Closed — buyers can't see it yet."
-    )
-    lines.append("")
-    lines.append(f"{live} live · {drafts} draft{'' if drafts == 1 else 's'}")
-
-    buttons: list[tuple[str, str]] = []
-    if drafts:
-        lines.append("\nForward another photo, or finish your drafts.")
-        buttons.append(("drafts", "My drafts"))
-        buttons.append(("publish", "Publish them"))
+    if seller.is_published:
+        lines.append(f"Open · {_plural(in_shop, 'item')} for sale")
+    elif in_shop:
+        lines.append(f"Closed · {_plural(in_shop, 'item')} ready to sell")
     else:
-        lines.append("\nForward a photo of something to add it.")
+        lines.append("Closed · nothing in it yet")
 
-    if live and not seller.is_published:
-        buttons.append(("open", "Open my shop"))
+    # Ordered by what costs the seller most to ignore. Money first.
+    todo: list[str] = []
+    if waiting:
+        todo.append(f"💰 {_plural(waiting, 'order')} waiting for you to confirm payment")
+    if unpriced:
+        todo.append(f"🏷️ {_plural(unpriced, 'item')} {'needs' if unpriced == 1 else 'need'} a price")
+    if not has_payment:
+        todo.append("💳 Buyers have no way to pay you yet")
+    if ready:
+        todo.append(f"📦 {_plural(ready, 'item')} ready to go in your shop")
 
-    return [Reply("\n".join(lines), buttons=buttons or None)]
+    if todo:
+        lines.append("")
+        lines.extend(todo)
+
+    lines.append("")
+    lines.append("What do you need?")
+
+    # At most three, in the same order of consequence. Everything else stays
+    # reachable by typing — the buttons are the shortcut, never the only door.
+    candidates: list[tuple[str, str]] = []
+    if waiting:
+        candidates.append(("orders", f"Orders ({waiting})"))
+    if unpriced:
+        candidates.append(("prices", "Add prices"))
+    if not has_payment:
+        candidates.append(("payments", "Get paid"))
+    if ready:
+        candidates.append(("publish", "Add to my shop"))
+    if in_shop and not seller.is_published:
+        candidates.append(("open", "Open for business"))
+    candidates.append(("share", "My shop link"))
+
+    return [Reply("\n".join(lines), buttons=candidates[:3])]
 
 
 def handle(
@@ -1019,12 +1483,23 @@ def handle(
     # first message names the shop. That link opens WhatsApp itself — it is a
     # deep link, not a URL, so nothing can redirect it to a browser.
     if lowered.startswith("shop "):
-        slug = lowered.removeprefix("shop ").strip()
-        seller = db.scalar(select(Seller).where(Seller.slug == slug, Seller.is_published.is_(True)))
+        wanted = said[5:].strip()
+        seller = _find_shop(db, wanted)
         if seller is None:
-            return Outcome([Reply("I can't find that shop. Check the link and try again.")])
+            return Outcome(
+                [
+                    Reply(
+                        f"I can't find a shop called *{wanted}*.\n\n"
+                        "Check the link the seller sent you, or ask them for it again."
+                    )
+                ]
+            )
         convo.seller_id = seller.id
-        return Outcome(_menu(db, seller, convo))
+        # ARRIVAL, so the storefront is offered ALONGSIDE the menu rather than
+        # instead of it. The chat can sell; a page browses forty items better
+        # than a list picker ever will, and the buyer should not have to pick
+        # one surface before seeing either.
+        return Outcome([*_menu(db, seller, convo), _shop_card(seller)])
 
     # ── The seller's own side of the thread ─────────────────────────────────
     # Checked before anything else a buyer could mean. A number typed by a
@@ -1045,23 +1520,52 @@ def handle(
                 return Outcome(_set_price(db, owner, convo, amount))
             return Outcome([Reply("I need just the number — like *1800*. Or send *skip*.")])
 
-        if lowered == "publish":
-            return Outcome(_publish_ready(db, owner))
-        if lowered in {"open", "open shop", "go live"}:
-            return Outcome(_open_shop(db, owner))
-        if lowered in {"drafts", "stock", "my products"}:
-            return Outcome(_priced_summary(db, owner))
+        if convo.state == ConversationState.PAY_KIND:
+            kind = _PAY_ALIASES.get(lowered.removeprefix("pay:").strip())
+            if kind is not None:
+                return Outcome(_ask_payment_number(convo, kind))
+            return Outcome([Reply("Pochi, till or paybill — which of the three is it?")])
 
-        # A seller saying hello, rather than issuing a command. Answer where
-        # they are up to; a menu would be us asking THEM a question.
-        if convo.state == ConversationState.NEW or lowered in {
-            "hi",
-            "hello",
-            "menu",
-            "habari",
-            "niaje",
-            "start",
-        }:
+        if convo.state == ConversationState.PAY_NUMBER:
+            if lowered in {"cancel", "stop", "later"}:
+                convo.state = ConversationState.NEW
+                convo.context = {}
+                return Outcome(_seller_home(db, owner))
+            return Outcome(_save_payment(db, owner, convo, said))
+
+        if lowered in {"orders", "my orders", "sales"}:
+            return Outcome(_seller_orders(db, owner))
+        if lowered.startswith("confirm:"):
+            return Outcome(_confirm_order(db, owner, said.split(":", 1)[1].strip()))
+        if lowered in {"payments", "payment", "get paid", "set that up"}:
+            return Outcome(_ask_payment_kind(convo))
+        if lowered in {"share", "my shop link", "link", "my link"}:
+            return Outcome([_share_card(owner)])
+        if lowered in {"prices", "add prices", "price"}:
+            return Outcome(_resume_pricing(db, owner, convo))
+        if lowered in {"publish", "add to my shop"}:
+            return Outcome(_publish_ready(db, owner))
+        if lowered in {"open", "open shop", "go live", "open for business"}:
+            return Outcome(_open_shop(db, owner))
+        if lowered in {"drafts", "stock", "my products", "items"}:
+            return Outcome(_priced_summary(db, owner))
+        if lowered in {"store", "shop", "my shop", "website"}:
+            # Reachable for a SELLER too. The buyer branch below only fires
+            # once somebody has opened a shop LINK, so without this a seller
+            # asking for their own store fell through to the signup question.
+            return Outcome([_shop_card(owner)])
+
+        # ANYTHING ELSE FROM A SELLER IS ANSWERED WITH THEIR OWN HOME, and that
+        # is a guardrail rather than a nicety. Without it a seller who typed
+        # something we could not read fell through to the stranger's question —
+        # "are you here to sell, or to shop?" — asked of somebody whose shop we
+        # are already running. It read as the system forgetting them.
+        #
+        # The one exception is a seller browsing SOMEBODY ELSE'S shop. They
+        # opened a link like any buyer, and the buyer branch below is theirs
+        # for as long as the conversation points at that shop.
+        browsing_elsewhere = convo.seller_id is not None and convo.seller_id != owner.id
+        if not browsing_elsewhere:
             return Outcome(_seller_home(db, owner))
 
     # ── Somebody with no shop, who has not opened one either ────────────────

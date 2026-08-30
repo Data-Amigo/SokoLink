@@ -36,7 +36,7 @@ from app.models import (
 from app.schemas.draft import ProductDraft
 from app.services import intake
 from app.services.bot import get_conversation, handle
-from tests.factories import make_product, make_seller
+from tests.factories import make_payment_method, make_product, make_seller
 
 SELLER_PHONE = "254712345678"
 
@@ -283,34 +283,49 @@ class TestPublishing:
     def test_publish_with_nothing_priced_says_so(self, db: Session) -> None:
         seller_with_number(db)
 
-        assert "Nothing is priced" in say(db, "publish")
+        assert "Nothing has a price yet" in say(db, "publish")
 
 
 class TestOpeningTheShop:
     def test_open_makes_the_storefront_reachable(self, db: Session, agent: list[str]) -> None:
         seller = seller_with_number(db)
+        make_payment_method(db, seller)
         say(db, "New stock", media=1)
         say(db, "1800")
         say(db, "publish")
 
-        replies = handle(db, SELLER_PHONE, "open").replies
+        said = say(db, "open")
 
         db.refresh(seller)
         assert seller.is_published is True
-        # The link is a BUTTON now, not text in the body — so the slug lives in
-        # the URL. That is the point: a tappable button rather than a wrapped
-        # railway.app address.
-        assert replies[0].link is not None
-        assert replies[0].link[0].endswith(f"/shop/{seller.slug}")
+        assert "open for business" in said.lower()
 
-    def test_it_refuses_with_nothing_published(self, db: Session) -> None:
+    def test_it_refuses_with_nothing_in_the_shop(self, db: Session) -> None:
         seller = seller_with_number(db)
+        make_payment_method(db, seller)
 
         said = say(db, "open")
 
         db.refresh(seller)
         assert seller.is_published is False
-        assert "Publish something first" in said
+        assert "nothing in your shop yet" in said.lower()
+
+    def test_it_refuses_when_nobody_could_pay_them(self, db: Session, agent: list[str]) -> None:
+        """
+        A shop with stock and no payment method is the worst of the three
+        states: the buyer chooses, commits, reaches checkout and finds no way to
+        send money. See tests/test_bot_business.py for the guard in full.
+        """
+        seller = seller_with_number(db)
+        say(db, "New stock", media=1)
+        say(db, "1800")
+        say(db, "publish")
+
+        said = say(db, "open")
+
+        db.refresh(seller)
+        assert seller.is_published is False
+        assert "how do buyers pay you" in said.lower()
 
     def test_a_seller_is_recognised_by_the_very_number_a_live_shop_needs(self, db: Session) -> None:
         """
@@ -420,10 +435,12 @@ class TestOnboardingAStranger:
         assert account is not None
         assert account.seller is not None
         assert account.seller.display_name == "Mama Njeri Fabrics"
-        # The shop link arrives as a BUTTON, so the slug is in the URL rather
-        # than in the message text. That is the point of the change.
-        assert replies[0].link is not None
-        assert replies[0].link[0].endswith(f"/shop/{account.seller.slug}")
+        # NO LINK HERE ANY MORE, on purpose. A shop that has nothing in it has
+        # nothing worth looking at, and the link a seller eventually SHARES is a
+        # wa.me deep link they ask for by name — not a storefront URL pushed at
+        # them thirty seconds after signing up, before it would show anything.
+        assert replies[0].link is None
+        assert "Mama Njeri Fabrics" in replies[0].body
 
     def test_the_new_shop_is_closed_and_empty(self, db: Session) -> None:
         """
@@ -515,7 +532,11 @@ class TestASellerSayingHello:
         said = say(db, "hi")
 
         assert seller.display_name in said
-        assert "1 live" in said
+        # NOT "1 live". A shop is open or closed; an item is in the shop or
+        # needs a price. The card used to say "Closed" and "1 live" in adjacent
+        # lines, which is true in the database and nonsense to a person.
+        assert "1 item ready to sell" in said
+        assert "live" not in said.lower()
 
     def test_a_closed_shop_says_so(self, db: Session) -> None:
         seller_with_number(db)
@@ -531,7 +552,7 @@ class TestASellerSayingHello:
 
         reply = handle(db, SELLER_PHONE, "hi").replies[0]
 
-        assert "1 draft" in reply.body
+        assert "1 item ready to go in your shop" in reply.body
         assert reply.buttons is not None
         assert "publish" in [b[0] for b in reply.buttons]
 

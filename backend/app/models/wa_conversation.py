@@ -78,7 +78,31 @@ class ConversationState:
     #: shop is called. No account exists yet, so there is nothing to point at.
     NAMING = "naming"
 
-    ALL = (NEW, BROWSING, LISTING, PRODUCT, CART, ADDRESS, PAYING, PRICING, NAMING)
+    #: SELLER: choosing how they take M-Pesa — Pochi, till or paybill.
+    PAY_KIND = "pay_kind"
+
+    #: SELLER: giving the number buyers will actually pay to.
+    #:
+    #: WHY PAYMENT SETUP IS IN THE CHAT AT ALL. A seller who cannot be paid has
+    #: a catalogue, not a shop, and sending them to a browser to fix it is the
+    #: one hop this product exists to remove. Only the MANUAL details live here;
+    #: Daraja credentials stay in the workspace, because a consumer secret is
+    #: not something anybody should paste into a chat thread.
+    PAY_NUMBER = "pay_number"
+
+    ALL = (
+        NEW,
+        BROWSING,
+        LISTING,
+        PRODUCT,
+        CART,
+        ADDRESS,
+        PAYING,
+        PRICING,
+        NAMING,
+        PAY_KIND,
+        PAY_NUMBER,
+    )
 
 
 class WaConversation(Base):
@@ -127,7 +151,7 @@ class WaConversation(Base):
     __table_args__ = (
         CheckConstraint(
             "state IN ('new', 'browsing', 'listing', 'product', 'cart', "
-            "'address', 'paying', 'pricing', 'naming')",
+            "'address', 'paying', 'pricing', 'naming', 'pay_kind', 'pay_number')",
             name="ck_wa_conversations_state_valid",
         ),
         # Past 'new' there must be a shop. Every later state's replies are about
@@ -138,7 +162,8 @@ class WaConversation(Base):
         # their conversation at their own storefront as though they were a
         # customer of it.
         CheckConstraint(
-            "state IN ('new', 'pricing', 'naming') OR seller_id IS NOT NULL",
+            "state IN ('new', 'pricing', 'naming', 'pay_kind', 'pay_number') "
+            "OR seller_id IS NOT NULL",
             name="ck_wa_conversations_browsing_needs_seller",
         ),
         # A buyer waiting to pay must know which order they are paying for,

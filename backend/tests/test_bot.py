@@ -92,7 +92,7 @@ class TestFindingTheShop:
         assert "Fashion" in said
 
     def test_an_unknown_shop_says_so(self, db: Session) -> None:
-        assert "can't find that shop" in say(db, "shop no-such-shop")
+        assert "can't find a shop called" in say(db, "shop no-such-shop")
 
     def test_a_closed_shop_is_not_reachable(self, db: Session) -> None:
         """
@@ -103,7 +103,7 @@ class TestFindingTheShop:
         stock(db, seller, "Secret Thing", "Fashion")
         assert seller.is_published is False
 
-        assert "can't find that shop" in say(db, f"shop {seller.slug}")
+        assert "can't find a shop called" in say(db, f"shop {seller.slug}")
 
     def test_someone_with_no_shop_is_asked_which_side_they_are_on(self, db: Session) -> None:
         """The bot number serves both, and a first message cannot say which."""
@@ -789,12 +789,25 @@ class TestTheShopCard:
         assert reply.link is not None
         assert len(reply.link[1]) <= 20
 
-    def test_every_other_reply_carries_no_link(self, db: Session) -> None:
-        """One button per message is Meta's limit, so a link has to be the
-        message's whole purpose."""
+    def test_a_link_is_always_a_message_of_its_own(self, db: Session) -> None:
+        """
+        One button per message is Meta's limit, so a link has to be the whole
+        purpose of the message carrying it — never bolted onto a reply that is
+        already doing something else.
+
+        ARRIVAL IS THE EXCEPTION THAT PROVES IT. Opening a shop link answers
+        with the menu AND a shop card, because a chat sells well and a page
+        browses forty items better than a list picker ever will — but they are
+        two messages, not one message wearing both hats.
+        """
         seller = open_shop(db)
         stock(db, seller, "Ankara Shirt", "Fashion")
 
-        for text in (f"shop {seller.slug}", "1", "cart"):
+        arrival = handle(db, PHONE, f"shop {seller.slug}").replies
+        assert [r.link is not None for r in arrival] == [False, True]
+        assert arrival[-1].buttons is None
+        assert arrival[-1].rows is None
+
+        for text in ("1", "cart"):
             for reply in handle(db, PHONE, text).replies:
                 assert reply.link is None, text
