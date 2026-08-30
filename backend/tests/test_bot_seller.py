@@ -293,11 +293,15 @@ class TestOpeningTheShop:
         say(db, "1800")
         say(db, "publish")
 
-        said = say(db, "open")
+        replies = handle(db, SELLER_PHONE, "open").replies
 
         db.refresh(seller)
         assert seller.is_published is True
-        assert seller.slug in said
+        # The link is a BUTTON now, not text in the body — so the slug lives in
+        # the URL. That is the point: a tappable button rather than a wrapped
+        # railway.app address.
+        assert replies[0].link is not None
+        assert replies[0].link[0].endswith(f"/shop/{seller.slug}")
 
     def test_it_refuses_with_nothing_published(self, db: Session) -> None:
         seller = seller_with_number(db)
@@ -410,13 +414,16 @@ class TestOnboardingAStranger:
         handle(db, phone, "hi")
         handle(db, phone, "sell")
 
-        said = "\n".join(r.body for r in handle(db, phone, "Mama Njeri Fabrics").replies)
+        replies = handle(db, phone, "Mama Njeri Fabrics").replies
 
         account = db.scalar(select(Account).where(Account.phone == phone))
         assert account is not None
         assert account.seller is not None
         assert account.seller.display_name == "Mama Njeri Fabrics"
-        assert account.seller.slug in said
+        # The shop link arrives as a BUTTON, so the slug is in the URL rather
+        # than in the message text. That is the point of the change.
+        assert replies[0].link is not None
+        assert replies[0].link[0].endswith(f"/shop/{account.seller.slug}")
 
     def test_the_new_shop_is_closed_and_empty(self, db: Session) -> None:
         """

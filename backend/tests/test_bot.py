@@ -737,51 +737,37 @@ class TestPayingInTheChat:
 
 class TestTheShopCard:
     """
-    The one reply that can open a page INSIDE WhatsApp.
+    A link sent as a BUTTON, not as text.
 
-    Meta's in-app browser opens links from CTA buttons on approved templates. A
-    link in a free-form message — everything else this bot sends — is handed to
-    the device's default browser. That is documented behaviour, and it is why a
-    raw link opened Chrome when we tested on a real handset.
+    Three ways to send a URL, and only one is right:
 
-    Eligibility is a MESSAGING TIER, not verification itself: the in-app browser
-    needs a limit of at least 1,000 business-initiated conversations a day, and
-    business verification is what moves an account from 250 to 1,000.
+        raw text in a message   goes to the device's default browser
+        CTA on a template       opens in WhatsApp, but needs Meta review and
+                                costs per send
+        interactive cta_url     opens in WhatsApp, no template, no approval,
+                                and free inside the 24-hour window
+
+    The template path was built first. This is the same destination by a much
+    shorter road.
     """
 
-    def test_store_asks_for_the_template(self, db: Session) -> None:
+    def test_store_sends_a_button_not_a_link(self, db: Session) -> None:
         seller = open_shop(db)
         stock(db, seller, "Ankara Shirt", "Fashion")
         say(db, f"shop {seller.slug}")
 
         reply = handle(db, PHONE, "store").replies[0]
 
-        assert reply.template is not None
-        name, body_params, button_param = reply.template
-        assert body_params == [seller.display_name]
-        assert button_param == seller.slug
+        assert reply.link is not None
+        url, label = reply.link
+        assert url.endswith(f"/shop/{seller.slug}")
+        assert label == "Open shop"
 
-    def test_the_button_parameter_is_only_the_slug(self, db: Session) -> None:
+    def test_the_url_is_not_in_the_body(self, db: Session) -> None:
         """
-        Meta approves the DOMAIN at review and appends only the variable tail.
-        Sending a whole URL as the parameter would produce
-        https://host/shop/https://host/shop/x.
-        """
-        seller = open_shop(db)
-        stock(db, seller, "Ankara Shirt", "Fashion")
-        say(db, f"shop {seller.slug}")
-
-        reply = handle(db, PHONE, "store").replies[0]
-
-        assert reply.template is not None
-        assert "http" not in reply.template[2]
-
-    def test_the_body_still_carries_the_link(self, db: Session) -> None:
-        """
-        A provider that cannot send templates, or a template still awaiting
-        review, falls back to the body. A buyer who gets a browser is worse off
-        than one who stays in WhatsApp — and far better off than one who gets a
-        message with no link in it at all.
+        THE WHOLE POINT. A button reading "Open shop" is more tappable and more
+        trustworthy than a wrapped railway.app address, and it stops a long URL
+        eating a phone screen.
         """
         seller = open_shop(db)
         stock(db, seller, "Ankara Shirt", "Fashion")
@@ -789,17 +775,26 @@ class TestTheShopCard:
 
         reply = handle(db, PHONE, "store").replies[0]
 
-        assert f"/shop/{seller.slug}" in reply.body
+        assert "http" not in reply.body
         assert seller.display_name in reply.body
 
-    def test_every_other_reply_stays_free_form(self, db: Session) -> None:
-        """
-        Templates cost money per send and are the wrong tool for a menu. Only
-        the shop card needs the in-app browser.
-        """
+    def test_the_button_label_fits_metas_limit(self, db: Session) -> None:
+        """20 characters, hard. Over it and the whole message is rejected."""
+        seller = open_shop(db)
+        stock(db, seller, "Ankara Shirt", "Fashion")
+        say(db, f"shop {seller.slug}")
+
+        reply = handle(db, PHONE, "store").replies[0]
+
+        assert reply.link is not None
+        assert len(reply.link[1]) <= 20
+
+    def test_every_other_reply_carries_no_link(self, db: Session) -> None:
+        """One button per message is Meta's limit, so a link has to be the
+        message's whole purpose."""
         seller = open_shop(db)
         stock(db, seller, "Ankara Shirt", "Fashion")
 
         for text in (f"shop {seller.slug}", "1", "cart"):
             for reply in handle(db, PHONE, text).replies:
-                assert reply.template is None, text
+                assert reply.link is None, text

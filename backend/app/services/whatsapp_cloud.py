@@ -630,3 +630,82 @@ def create_shop_template(name: str, base_url: str, language: str = "en") -> dict
         raise CloudApiError(f"Template creation returned {response.status_code}: {response.text}")
 
     return dict(response.json())
+
+
+#: Limits Meta enforces on a CTA URL message. Exceeding one rejects the whole
+#: message, so they are clipped rather than trusted.
+CTA_LABEL_CHARS = 20
+CTA_HEADER_CHARS = 60
+CTA_FOOTER_CHARS = 60
+
+
+def send_cta_url(
+    to: str,
+    body: str,
+    url: str,
+    *,
+    label: str = "Open",
+    header: str = "",
+    footer: str = "",
+) -> str:
+    """
+    Send a link as a BUTTON rather than as raw text.
+
+    Args:
+        to: Recipient, digits with country code.
+        body: The message above the button. Up to 1,024 characters.
+        url: Where the button goes.
+        label: The button's text. 20 characters, hard limit.
+        header: Optional bold line above the body, 60 characters.
+        footer: Optional small line below the body, 60 characters.
+
+    Returns:
+        Meta's message id.
+
+    Raises:
+        CloudApiError: If the send fails.
+
+    Notes:
+        THIS IS THE RIGHT WAY TO SEND A LINK, and it took two wrong turns to
+        find. A raw URL in a text message goes to the device's default browser.
+        A CTA button on an APPROVED TEMPLATE opens in WhatsApp's own browser but
+        needs Meta review and costs per send. An interactive cta_url does the
+        same job with NO template, NO approval, and is FREE inside the 24-hour
+        window a person opens by messaging first.
+
+        ONE BUTTON ONLY. Meta supports exactly one URL button per message; a
+        second choice has to be a separate message or a different component.
+
+        THE URL IS NOT SHOWN. That is the point — a button reading "Open my
+        shop" is both more trustworthy and more tappable than a wrapped
+        railway.app address, and it stops a long URL eating a phone screen.
+    """
+    phone_id = _require("WHATSAPP_PHONE_NUMBER_ID", settings.whatsapp_phone_number_id)
+
+    interactive: dict[str, Any] = {
+        "type": "cta_url",
+        "body": {"text": _clip(body, BODY_CHARS)},
+        "action": {
+            "name": "cta_url",
+            "parameters": {
+                "display_text": _clip(label, CTA_LABEL_CHARS),
+                "url": url,
+            },
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": _clip(header, CTA_HEADER_CHARS)}
+    if footer:
+        interactive["footer"] = {"text": _clip(footer, CTA_FOOTER_CHARS)}
+
+    result = _post(
+        f"{phone_id}/messages",
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": interactive,
+        },
+    )
+    return str(result.get("messages", [{}])[0].get("id", ""))

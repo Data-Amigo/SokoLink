@@ -100,14 +100,19 @@ class Reply:
     list_label: str = "Choose"
 
     #: An approved template to send instead of ``body``, as
-    #: ``(name, body_params, button_param)``.
-    #:
-    #: THE ONLY WAY TO OPEN A PAGE INSIDE WHATSAPP. Meta's in-app browser opens
-    #: links from CTA buttons on approved templates; a link in a free-form
-    #: reply — which is everything else here — goes to the device's default
-    #: browser. Providers that cannot send templates ignore this and send the
-    #: body, which is why the body still has to stand alone.
+    #: ``(name, body_params, button_param)``. Rarely needed — see ``link``.
     template: tuple[str, list[str], str] | None = None
+
+    #: A URL to render as a BUTTON rather than as text, as ``(url, label)``.
+    #:
+    #: THE RIGHT WAY TO SEND A LINK, found after two wrong turns. Raw text goes
+    #: to the device's default browser. A CTA button on an approved template
+    #: opens in WhatsApp's own browser but needs Meta review and costs per send.
+    #: An interactive cta_url does the same job with no template, no approval,
+    #: and free inside the 24-hour window.
+    #:
+    #: ONE BUTTON PER MESSAGE — Meta's limit, not ours.
+    link: tuple[str, str] | None = None
 
 
 @dataclass
@@ -199,21 +204,19 @@ def _shop_card(seller: Seller) -> Reply:
     The template message whose CTA button opens this shop INSIDE WhatsApp.
 
     Notes:
-        THIS IS THE ONE MESSAGE THAT CAN OPEN A PAGE WITHOUT LEAVING THE APP.
-        Meta's in-app browser opens links from CTA buttons on approved
-        templates. The same link in a free-form reply is handed to the device's
-        default browser — which is what happened when we tested a raw link and
-        watched it open Chrome.
+        A BUTTON, NOT A LINK IN THE TEXT. Meta's in-app browser opens links from
+        CTA buttons and interactive messages; a raw URL in a text message is
+        handed to the device's default browser, which is what we watched happen.
 
-        THE BODY STILL CARRIES THE LINK. A provider that cannot send templates,
-        or a template still awaiting review, falls back to the body — and a
-        buyer who gets a browser is worse off than one who gets the chat, but
-        far better off than one who gets nothing.
+        AN INTERACTIVE cta_url, NOT A TEMPLATE. Both open in-app, but a template
+        needs Meta review and costs per send, while this needs neither and is
+        free inside the 24-hour window a person opens by messaging first. The
+        template path was built first and turned out to be the harder road to
+        the same place.
     """
-    url = f"{settings.app_base_url}/shop/{seller.slug}"
     return Reply(
-        f"*{seller.display_name}*\n{url}",
-        template=(settings.whatsapp_shop_template, [seller.display_name], seller.slug),
+        f"*{seller.display_name}* — tap to browse everything they have.",
+        link=(f"{settings.app_base_url}/shop/{seller.slug}", "Open shop"),
     )
 
 
@@ -757,7 +760,10 @@ def _publish_ready(db: Session, seller: Seller) -> list[Reply]:
     names = "\n".join(f"• {title}" for title in published[:PAGE_SIZE])
     if seller.is_published:
         return [
-            Reply(f"Live now:\n\n{names}\n\nYour shop: {settings.app_base_url}/shop/{seller.slug}")
+            Reply(
+                f"Live now:\n\n{names}",
+                link=(f"{settings.app_base_url}/shop/{seller.slug}", "See my shop"),
+            )
         ]
 
     return [
@@ -794,8 +800,8 @@ def _open_shop(db: Session, seller: Seller) -> list[Reply]:
     db.flush()
     return [
         Reply(
-            f"Your shop is open. 🎉\n\n{settings.app_base_url}/shop/{seller.slug}\n\n"
-            f"Share that link anywhere — WhatsApp, TikTok, your status."
+            "Your shop is open. 🎉\n\nShare it anywhere — WhatsApp, TikTok, your status.",
+            link=(f"{settings.app_base_url}/shop/{seller.slug}", "Open my shop"),
         )
     ]
 
@@ -896,9 +902,8 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
 
     return [
         Reply(
-            f"*{seller.display_name}* is ready. 🎉\n\n"
-            f"Your shop link:\n{settings.app_base_url}/shop/{seller.slug}\n\n"
-            f"It's closed until you put something in it."
+            f"*{seller.display_name}* is ready. 🎉\n\nIt's closed until you put something in it.",
+            link=(f"{settings.app_base_url}/shop/{seller.slug}", "See my shop"),
         ),
         Reply(
             "Now forward me a photo of something you're selling — "
@@ -932,10 +937,11 @@ def _seller_home(db: Session, seller: Seller) -> list[Reply]:
     )
 
     lines = [f"*{seller.display_name}*"]
-    if seller.is_published:
-        lines.append(f"Open · {settings.app_base_url}/shop/{seller.slug}")
-    else:
-        lines.append("Closed — buyers can't see it yet.")
+    lines.append(
+        "Open — buyers can find you."
+        if seller.is_published
+        else "Closed — buyers can't see it yet."
+    )
     lines.append("")
     lines.append(f"{live} live · {drafts} draft{'' if drafts == 1 else 's'}")
 
