@@ -54,6 +54,7 @@ from app.services.whatsapp_cloud import (
     send_buttons,
     send_image,
     send_list,
+    send_template,
     send_text,
 )
 
@@ -209,7 +210,18 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
                 # with both becomes two: the photo, then the choices. Meta has
                 # no combined form, and dropping either half would lose the
                 # product picture or the way to buy it.
-                if reply.media_url:
+                if reply.template:
+                    # A template, not free-form: this is the ONLY shape whose
+                    # links open in Meta's in-app browser rather than being
+                    # handed to the device's default one.
+                    name, body_params, button_param = reply.template
+                    send_template(
+                        sender,
+                        name,
+                        body_params=body_params,
+                        button_param=button_param,
+                    )
+                elif reply.media_url:
                     send_image(sender, reply.media_url, caption=reply.body)
                     if reply.buttons:
                         send_buttons(sender, "What next?", reply.buttons)

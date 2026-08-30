@@ -99,6 +99,16 @@ class Reply:
     rows: list[tuple[str, str, str]] | None = None
     list_label: str = "Choose"
 
+    #: An approved template to send instead of ``body``, as
+    #: ``(name, body_params, button_param)``.
+    #:
+    #: THE ONLY WAY TO OPEN A PAGE INSIDE WHATSAPP. Meta's in-app browser opens
+    #: links from CTA buttons on approved templates; a link in a free-form
+    #: reply — which is everything else here — goes to the device's default
+    #: browser. Providers that cannot send templates ignore this and send the
+    #: body, which is why the body still has to stand alone.
+    template: tuple[str, list[str], str] | None = None
+
 
 @dataclass
 class Outcome:
@@ -182,6 +192,29 @@ def _basket(db: Session, convo: WaConversation, seller: Seller) -> Cart:
     cart = get_or_create_cart(db, convo.cart_token, seller)
     convo.cart_token = cart.token
     return cart
+
+
+def _shop_card(seller: Seller) -> Reply:
+    """
+    The template message whose CTA button opens this shop INSIDE WhatsApp.
+
+    Notes:
+        THIS IS THE ONE MESSAGE THAT CAN OPEN A PAGE WITHOUT LEAVING THE APP.
+        Meta's in-app browser opens links from CTA buttons on approved
+        templates. The same link in a free-form reply is handed to the device's
+        default browser — which is what happened when we tested a raw link and
+        watched it open Chrome.
+
+        THE BODY STILL CARRIES THE LINK. A provider that cannot send templates,
+        or a template still awaiting review, falls back to the body — and a
+        buyer who gets a browser is worse off than one who gets the chat, but
+        far better off than one who gets nothing.
+    """
+    url = f"{settings.app_base_url}/shop/{seller.slug}"
+    return Reply(
+        f"*{seller.display_name}*\n{url}",
+        template=(settings.whatsapp_shop_template, [seller.display_name], seller.slug),
+    )
 
 
 def _greeting(seller: Seller) -> str:
@@ -1069,6 +1102,10 @@ def handle(
     # ── Words that work from anywhere ───────────────────────────────────────
     if lowered in {"menu", "hi", "hello", "start", "habari", "niaje"}:
         return Outcome(_menu(db, seller, convo))
+
+    if lowered in {"store", "shop", "website", "open store"}:
+        # The only reply that can open a page inside WhatsApp — see _shop_card.
+        return Outcome([_shop_card(seller)])
 
     if lowered == "cart":
         return Outcome(_show_cart(db, seller, convo))

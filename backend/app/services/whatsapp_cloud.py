@@ -443,3 +443,190 @@ def send_list(
         },
     )
     return str(result.get("messages", [{}])[0].get("id", ""))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TEMPLATES, AND THE IN-APP BROWSER
+# ══════════════════════════════════════════════════════════════════════════
+#
+# WHY A TEMPLATE IS THE ONLY WAY TO OPEN A PAGE INSIDE WHATSAPP. Meta's in-app
+# browser opens links from CTA buttons on approved templates. A link in a
+# free-form message — which is everything a bot reply is — goes to the device's
+# default browser instead. That is documented behaviour, not a device quirk:
+# we tested a plain link and a CTA button on a real handset, both left WhatsApp,
+# and the account was below the eligibility threshold at the time.
+#
+# THE THRESHOLD IS A MESSAGING TIER, NOT VERIFICATION ITSELF. The in-app browser
+# needs a limit of at least 1,000 business-initiated conversations per day.
+# Business verification is what moves an account from 250 to 1,000, which is why
+# it looked like verification was the gate.
+#
+# THE BUTTON URL MUST BE A FIXED DOMAIN PLUS A VARIABLE TAIL. Meta approves the
+# domain once, at template review; only the suffix may change per message. A URL
+# that is entirely a placeholder is rejected.
+
+
+def send_template(
+    to: str,
+    name: str,
+    *,
+    language: str = "en",
+    body_params: list[str] | None = None,
+    button_param: str | None = None,
+) -> str:
+    """
+    Send an approved template message.
+
+    Args:
+        to: Recipient, digits with country code.
+        name: The template's registered name.
+        language: Its language code, exactly as registered.
+        body_params: Values for ``{{1}}``, ``{{2}}`` … in the body, in order.
+        button_param: The value appended to the CTA button's URL.
+
+    Returns:
+        Meta's message id.
+
+    Raises:
+        CloudApiError: If the send fails — most often because the template is
+            still pending review, was rejected, or the language code does not
+            match the one it was registered under.
+    """
+    phone_id = _require("WHATSAPP_PHONE_NUMBER_ID", settings.whatsapp_phone_number_id)
+
+    components: list[dict[str, Any]] = []
+    if body_params:
+        components.append(
+            {
+                "type": "body",
+                "parameters": [{"type": "text", "text": v} for v in body_params],
+            }
+        )
+    if button_param is not None:
+        components.append(
+            {
+                "type": "button",
+                "sub_type": "url",
+                "index": "0",
+                "parameters": [{"type": "text", "text": button_param}],
+            }
+        )
+
+    result = _post(
+        f"{phone_id}/messages",
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to.lstrip("+"),
+            "type": "template",
+            "template": {
+                "name": name,
+                "language": {"code": language},
+                "components": components,
+            },
+        },
+    )
+    return str(result.get("messages", [{}])[0].get("id", ""))
+
+
+def list_templates() -> list[dict[str, Any]]:
+    """
+    Every template on the business account, with its review status.
+
+    Returns:
+        Raw template objects. ``status`` is the field that matters: APPROVED,
+        PENDING or REJECTED. Sending a template that is not APPROVED fails, and
+        the API error does not always say that is why.
+
+    Raises:
+        CloudApiError: If the account id or token is missing or refused.
+    """
+    waba = _require("WHATSAPP_BUSINESS_ACCOUNT_ID", settings.whatsapp_business_account_id)
+    token = _require("WHATSAPP_ACCESS_TOKEN", settings.whatsapp_access_token)
+
+    try:
+        response = httpx.get(
+            f"{GRAPH_ROOT}/{waba}/message_templates",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"limit": 100},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        raise CloudApiError(f"Could not list templates: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise CloudApiError(f"Listing templates returned {response.status_code}: {response.text}")
+
+    data = response.json().get("data") or []
+    return [dict(item) for item in data]
+
+
+def create_shop_template(name: str, base_url: str, language: str = "en") -> dict[str, Any]:
+    """
+    Register the template whose CTA button opens a seller's shop in WhatsApp.
+
+    Args:
+        name: What to call it. Lowercase, underscores only — Meta rejects
+            anything else.
+        base_url: The public origin, e.g. ``https://api.biasharamall.com``.
+        language: The language code to register under.
+
+    Returns:
+        Meta's response, carrying the new template id and its initial status.
+
+    Raises:
+        CloudApiError: On rejection, carrying Meta's reason.
+
+    Notes:
+        SUBMITTED AS UTILITY. The message is sent in reply to somebody asking
+        for a shop, which is transactional rather than promotional. Meta
+        re-categorises freely and the in-app browser works for both, so a
+        re-categorisation to MARKETING costs correctness nothing — only price.
+
+        THE BODY CARRIES NO PRICES OR CLAIMS. A template's text is fixed at
+        approval; anything that changes per shop has to be a variable, and
+        every variable is one more thing review can object to.
+    """
+    waba = _require("WHATSAPP_BUSINESS_ACCOUNT_ID", settings.whatsapp_business_account_id)
+    token = _require("WHATSAPP_ACCESS_TOKEN", settings.whatsapp_access_token)
+
+    payload = {
+        "name": name,
+        "language": language,
+        "category": "UTILITY",
+        "components": [
+            {
+                "type": "BODY",
+                "text": "{{1}} is open. Tap below to see what they have.",
+                "example": {"body_text": [["Vitabu Bora"]]},
+            },
+            {
+                "type": "BUTTONS",
+                "buttons": [
+                    {
+                        "type": "URL",
+                        "text": "Open shop",
+                        # Fixed domain, variable tail — the only shape Meta
+                        # approves, because the domain is what it reviews.
+                        "url": f"{base_url.rstrip('/')}/shop/{{{{1}}}}",
+                        "example": [f"{base_url.rstrip('/')}/shop/vitabu-bora"],
+                    }
+                ],
+            },
+        ],
+    }
+
+    try:
+        response = httpx.post(
+            f"{GRAPH_ROOT}/{waba}/message_templates",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            content=json.dumps(payload),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        raise CloudApiError(f"Could not create the template: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise CloudApiError(f"Template creation returned {response.status_code}: {response.text}")
+
+    return dict(response.json())

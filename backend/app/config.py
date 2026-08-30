@@ -124,6 +124,21 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str | None = None
     whatsapp_app_secret: str | None = None
 
+    #: The WhatsApp Business Account id. Distinct from the phone number id:
+    #: templates belong to the ACCOUNT, messages are sent from the NUMBER, and
+    #: one account can own several numbers. Needed only to create or list
+    #: templates, never to send.
+    whatsapp_business_account_id: str | None = None
+
+    #: The approved template whose CTA button opens a shop INSIDE WhatsApp.
+    #:
+    #: WHY A TEMPLATE AT ALL, when the bot can already send a link. Meta's
+    #: in-app browser opens links from CTA buttons on approved templates and
+    #: from interactive messages. A link in a free-form reply — which is
+    #: everything the bot says — is handed to the device's default browser
+    #: instead. The template is the only shape that opens in WhatsApp.
+    whatsapp_shop_template: str = "biashara_shop_link"
+
     # ── WhatsApp: Twilio (used today, for sending the login code) ────────────
     # Twilio is the provider we can use NOW: sending needs no webhook and no
     # Meta business verification. Meta's Cloud API is cheaper at volume and

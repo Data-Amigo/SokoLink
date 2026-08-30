@@ -64,10 +64,38 @@ def _no_sending(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
         sent.append((to, caption or ""))
         return "wamid.out"
 
+    def fake_buttons(to: str, body: str, buttons: list[tuple[str, str]]) -> str:
+        sent.append((to, body))
+        return "wamid.out"
+
+    def fake_list(
+        to: str, body: str, label: str, rows: list[tuple[str, str, str]], header: str = ""
+    ) -> str:
+        sent.append((to, body))
+        return "wamid.out"
+
+    def fake_template(
+        to: str,
+        name: str,
+        *,
+        language: str = "en",
+        body_params: list[str] | None = None,
+        button_param: str | None = None,
+    ) -> str:
+        sent.append((to, f"template:{name}"))
+        return "wamid.out"
+
     # Patched on the ROUTE module, not the service: the route imported these
     # names at import time, so rebinding them in the service would not be seen.
+    # EVERY sender, not just the two. A reply carrying buttons would otherwise
+    # reach the real function, fail on missing credentials, and be swallowed by
+    # the route's deliberate catch — leaving a test that says "nothing was
+    # sent" and means "you patched the wrong thing".
     monkeypatch.setattr(route_module, "send_text", fake_text)
     monkeypatch.setattr(route_module, "send_image", fake_image)
+    monkeypatch.setattr(route_module, "send_buttons", fake_buttons)
+    monkeypatch.setattr(route_module, "send_list", fake_list)
+    monkeypatch.setattr(route_module, "send_template", fake_template)
     return sent
 
 
