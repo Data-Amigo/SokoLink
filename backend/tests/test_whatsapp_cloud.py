@@ -38,7 +38,13 @@ from app.services import whatsapp_cloud
 
 VERIFY_TOKEN = "a-verify-token"
 APP_SECRET = "an-app-secret"
-WAMID = "wamid.HBgMMjU0NzEyMzQ1Njc4FQIAEhgU"
+#: A REAL-LENGTH wamid, taken from production. The earlier fixture was 34
+#: characters — short enough to fit a varchar(64) column sized for Twilio's SM…
+#: SIDs — so every test passed while every real Meta message failed its INSERT,
+#: returned 500 and was redelivered forever.
+#:
+#: Fixture data that is shorter than production data tests nothing about length.
+WAMID = "wamid.HBgMMjU0NzA1MDkzMzkyFQIAEhggQTUzQjEyRjYxQTFFMEY5Qjc4NEEyMTE2M0I1OTI3RDUA"
 
 
 @pytest.fixture(autouse=True)
@@ -437,3 +443,31 @@ class TestTheClientItself:
 
         assert text == ""
         assert media == []
+
+
+class TestRealWorldSizes:
+    """
+    Fixture data that is smaller than production data proves nothing about size.
+
+    Every test here passed while every real message failed: the column was
+    varchar(64), sized for Twilio's 34-character SM… SIDs, and Meta's wamids are
+    around 80. The INSERT raised, the webhook returned 500, Meta redelivered,
+    and the bot never recorded or answered a single message.
+    """
+
+    def test_a_full_length_wamid_is_stored(self, client: TestClient, db: Session) -> None:
+        assert len(WAMID) > 64, "the fixture must be longer than the old column"
+
+        post(client, text_payload())
+
+        record = db.scalar(select(WaMessage).where(WaMessage.provider_message_id == WAMID))
+        assert record is not None
+        assert record.provider_message_id == WAMID
+
+    def test_dedupe_still_works_at_full_length(self, client: TestClient, db: Session) -> None:
+        """Truncation would make two different messages look like one."""
+        for _ in range(3):
+            assert post(client, text_payload()).status_code == 200
+
+        rows = db.scalars(select(WaMessage).where(WaMessage.provider_message_id == WAMID)).all()
+        assert len(rows) == 1

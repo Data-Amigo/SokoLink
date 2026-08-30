@@ -40,7 +40,17 @@ class WaMessage(Base):
 
     #: The provider's own id — Twilio's MessageSid. UNIQUE, and the entire
     #: idempotency story.
-    provider_message_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    #: The provider's own id for this message, and the dedupe key.
+    #:
+    #: 255, NOT 64. This was sized for Twilio's 34-character SM… SIDs. Meta's
+    #: wamids are base64 and run to about 80:
+    #:
+    #:     wamid.HBgMMjU0NzA1MDkzMzkyFQIAEhggQTUzQjEy…
+    #:
+    #: At 64 every inbound Meta message failed the INSERT, returned 500, and was
+    #: redelivered — so nothing was ever recorded and the bot never replied.
+    #: Meta does not document a maximum, so this is generous rather than exact.
+    provider_message_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
 
     #: Bare 2547XXXXXXXX, with the channel prefix stripped, so it matches
     #: Account.phone and Seller.whatsapp_number without every query remembering
