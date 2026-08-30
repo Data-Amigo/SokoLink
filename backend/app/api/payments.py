@@ -23,6 +23,7 @@ which order references exist.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -32,7 +33,9 @@ from starlette.exceptions import HTTPException
 
 from app.config import get_settings
 from app.db import get_db
+from app.models import OrderStatus
 from app.services.daraja import StkEngine, get_stk_engine
+from app.services.notifications import notify_paid
 from app.services.orders import get_order, get_payment_method
 from app.services.payments import (
     MPESA_CALLBACK_PATH,
@@ -41,6 +44,8 @@ from app.services.payments import (
     start_stk_payment,
 )
 from app.services.storefront import get_public_shop
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["payments"])
 
@@ -70,11 +75,22 @@ async def mpesa_callback(request: Request, db: Session = Depends(get_db)) -> Res
     except Exception as exc:  # noqa: BLE001 — any parse failure means "retry me"
         raise HTTPException(status_code=500, detail="Unreadable callback body") from exc
 
-    apply_callback(db, payload)
+    payment = apply_callback(db, payload)
 
     # Daraja expects this exact shape. It means "received", not "paid".
     # Routes commit; get_db does not. See app/db.py.
     db.commit()
+
+    # AFTER THE COMMIT, AND NEVER ALLOWED TO FAIL IT. The money has arrived and
+    # the order is recorded; a message that will not send must not turn that
+    # into a non-200, because Safaricom would redeliver a payment we have
+    # already applied. Both sides can still see the truth without this — the
+    # seller in their workspace, the buyer in their own M-Pesa message.
+    if payment is not None and payment.order.status_enum is OrderStatus.PAID:
+        try:
+            notify_paid(db, payment.order)
+        except Exception:  # noqa: BLE001 — a notifier must never fail a payment
+            logger.exception("could not notify anyone about %s", payment.order.reference)
 
     return JSONResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
 

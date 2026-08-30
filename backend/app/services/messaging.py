@@ -123,6 +123,39 @@ class TwilioMessenger:
         return str(payload.get("sid", ""))
 
 
+class CloudMessenger:
+    """
+    Meta's WhatsApp Cloud API, behind the same one-method seam.
+
+    THIS IS WHAT THE ADAPTER WAS FOR. The module docstring above predicted the
+    switch — "switching is one new class rather than a rewrite" — and this is
+    that class. Callers depending on ``Messenger`` did not change.
+
+    THE 24-HOUR WINDOW APPLIES TO EVERYTHING SENT THROUGH HERE. Meta allows
+    free-form messages only while a conversation is open, which a person opens
+    by messaging us. Outside it, only an approved template is delivered. A
+    receipt to a buyer who just paid is comfortably inside; a "you have a sale"
+    to a seller who has been quiet for a week is not, and will fail. The caller
+    has to be able to survive that, which is why send() reports rather than
+    hides it.
+    """
+
+    def send(self, to: str, body: str) -> str:
+        """
+        Deliver plain text through the Cloud API.
+
+        Raises:
+            MessagingError: On any provider failure, carrying Meta's own text.
+                A closed 24-hour window arrives this way.
+        """
+        from app.services.whatsapp_cloud import CloudApiError, send_text
+
+        try:
+            return send_text(to, body)
+        except CloudApiError as exc:
+            raise MessagingError(str(exc)) from exc
+
+
 def get_messenger() -> Messenger:
     """
     The messenger the application uses.
@@ -130,26 +163,40 @@ def get_messenger() -> Messenger:
     A function rather than a module-level instance so tests can override it as a
     FastAPI dependency, and so nothing is constructed at import time.
 
+    Returns:
+        The Cloud API when it is configured, Twilio otherwise.
+
     Raises:
-        MessagingError: If the Twilio credentials are not configured. Raised
-            here rather than at import so the rest of the app still boots — a
-            missing WhatsApp key must not take the storefront down.
+        MessagingError: If neither provider is configured. Raised here rather
+            than at import so the rest of the app still boots — a missing
+            WhatsApp key must not take the storefront down.
+
+    Notes:
+        META IS PREFERRED WHEN PRESENT, and the order matters. Both sets of
+        credentials will sit side by side during the switch, and a deployment
+        that has configured Meta has done so deliberately; silently continuing
+        to send through Twilio would mean messages arriving from a number the
+        seller has stopped watching.
     """
     from app.config import get_settings
 
     settings = get_settings()
-    if not (
+
+    if settings.whatsapp_access_token and settings.whatsapp_phone_number_id:
+        return CloudMessenger()
+
+    if (
         settings.twilio_account_sid
         and settings.twilio_auth_token
         and settings.twilio_whatsapp_number
     ):
-        raise MessagingError(
-            "WhatsApp is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN "
-            "and TWILIO_WHATSAPP_NUMBER."
+        return TwilioMessenger(
+            account_sid=settings.twilio_account_sid,
+            auth_token=settings.twilio_auth_token,
+            from_number=settings.twilio_whatsapp_number,
         )
 
-    return TwilioMessenger(
-        account_sid=settings.twilio_account_sid,
-        auth_token=settings.twilio_auth_token,
-        from_number=settings.twilio_whatsapp_number,
+    raise MessagingError(
+        "WhatsApp is not configured. Set WHATSAPP_ACCESS_TOKEN and "
+        "WHATSAPP_PHONE_NUMBER_ID, or the three TWILIO_* variables."
     )
