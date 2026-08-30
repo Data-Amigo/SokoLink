@@ -25,7 +25,14 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ConversationState, PriceSource, Product, ProductStatus, Seller
+from app.models import (
+    Account,
+    ConversationState,
+    PriceSource,
+    Product,
+    ProductStatus,
+    Seller,
+)
 from app.schemas.draft import ProductDraft
 from app.services import intake
 from app.services.bot import get_conversation, handle
@@ -325,7 +332,7 @@ class TestOpeningTheShop:
 
         db.refresh(seller)
         assert seller.is_published is False
-        assert "Open a shop's link" in said
+        assert "sell, or to shop" in said
 
 
 class TestSellersAndBuyersDoNotCollide:
@@ -363,3 +370,167 @@ class TestSellersAndBuyersDoNotCollide:
         product = db.scalar(select(Product).where(Product.seller_id == seller.id))
         assert product is not None
         assert product.status == ProductStatus.DRAFT.value
+
+
+class TestOnboardingAStranger:
+    """
+    A number we have never seen, arriving with no shop link.
+
+    THE BOT NUMBER SERVES BOTH SIDES, and a stranger's first message cannot say
+    which they are. Guessing is expensive in both directions: a buyer walked
+    through shop setup abandons, and a seller told to "open a shop's link" has
+    been handed a riddle. So it asks.
+    """
+
+    def test_a_stranger_is_asked_which_they_are(self, db: Session) -> None:
+        outcome = handle(db, "254700111222", "hi")
+
+        reply = outcome.replies[0]
+        assert "sell, or to shop" in reply.body
+        assert reply.buttons is not None
+        assert [b[0] for b in reply.buttons] == ["sell", "buy"]
+
+    def test_choosing_to_sell_asks_for_a_name(self, db: Session) -> None:
+        phone = "254700111222"
+        handle(db, phone, "hi")
+
+        said = "\n".join(r.body for r in handle(db, phone, "sell").replies)
+
+        assert "What's your shop called" in said
+        assert get_conversation(db, phone).state == ConversationState.NAMING
+
+    def test_a_name_creates_a_real_shop(self, db: Session) -> None:
+        """
+        NO OTP, AND THAT IS DELIBERATE. The number is already proven: Meta runs
+        the network and told us who sent the message, and the signature proves
+        the message came from Meta. That is at least as strong as an SMS code
+        sent to a number somebody typed into a form.
+        """
+        phone = "254700111222"
+        handle(db, phone, "hi")
+        handle(db, phone, "sell")
+
+        said = "\n".join(r.body for r in handle(db, phone, "Mama Njeri Fabrics").replies)
+
+        account = db.scalar(select(Account).where(Account.phone == phone))
+        assert account is not None
+        assert account.seller is not None
+        assert account.seller.display_name == "Mama Njeri Fabrics"
+        assert account.seller.slug in said
+
+    def test_the_new_shop_is_closed_and_empty(self, db: Session) -> None:
+        """
+        A shop that opened itself at signup would be live and empty — worse
+        than not existing. Publishing stays a deliberate act.
+        """
+        phone = "254700111222"
+        handle(db, phone, "hi")
+        handle(db, phone, "sell")
+        handle(db, phone, "Mama Njeri Fabrics")
+
+        account = db.scalar(select(Account).where(Account.phone == phone))
+        assert account is not None
+        assert account.seller is not None
+        assert account.seller.is_published is False
+
+    def test_it_says_what_to_do_next(self, db: Session) -> None:
+        """Onboarding that ends in silence has produced an empty shop and a
+        person with no idea what it was for."""
+        phone = "254700111222"
+        handle(db, phone, "hi")
+        handle(db, phone, "sell")
+
+        said = "\n".join(r.body for r in handle(db, phone, "Mama Njeri").replies)
+
+        assert "forward" in said.lower()
+
+    def test_an_unusable_name_asks_again(self, db: Session) -> None:
+        phone = "254700111222"
+        handle(db, phone, "hi")
+        handle(db, phone, "sell")
+
+        said = "\n".join(r.body for r in handle(db, phone, "x").replies)
+
+        assert db.scalar(select(Account).where(Account.phone == phone)) is None
+        assert "won't work" in said
+
+    def test_a_shopper_is_told_they_need_a_link(self, db: Session) -> None:
+        phone = "254700111222"
+        handle(db, phone, "hi")
+
+        said = "\n".join(r.body for r in handle(db, phone, "buy").replies)
+
+        assert "shop's link" in said
+        assert db.scalar(select(Account).where(Account.phone == phone)) is None
+
+    def test_a_shop_link_still_beats_onboarding(self, db: Session) -> None:
+        """
+        Most people arriving here are buyers who tapped a seller's link. That
+        must never be interrupted by a signup question.
+        """
+        seller = seller_with_number(db, slug="already-open", display_name="Already Open")
+        seller.is_published = True
+        make_product(
+            db,
+            seller,
+            title="Ankara Shirt",
+            price_kes=1500,
+            status=ProductStatus.PUBLISHED.value,
+        )
+        db.flush()
+
+        said = "\n".join(r.body for r in handle(db, "254700999888", "shop already-open").replies)
+
+        assert "Already Open" in said
+        assert "Ankara Shirt" in said
+        assert "sell, or to shop" not in said
+
+
+class TestASellerSayingHello:
+    """
+    A seller opening their own thread has one of three questions — is anything
+    waiting on me, is my shop live, what do I do next — and the answer to all
+    three is the state of their catalogue. A menu would be us asking THEM a
+    question.
+    """
+
+    def test_they_get_their_shop_status(self, db: Session) -> None:
+        seller = seller_with_number(db)
+        make_product(
+            db,
+            seller,
+            title="Ankara Shirt",
+            price_kes=1500,
+            status=ProductStatus.PUBLISHED.value,
+        )
+        db.flush()
+
+        said = say(db, "hi")
+
+        assert seller.display_name in said
+        assert "1 live" in said
+
+    def test_a_closed_shop_says_so(self, db: Session) -> None:
+        seller_with_number(db)
+
+        said = say(db, "hi")
+
+        assert "Closed" in said
+
+    def test_drafts_are_offered_as_buttons(self, db: Session) -> None:
+        seller = seller_with_number(db)
+        make_product(db, seller, title="Ankara Shirt", price_kes=1500)
+        db.flush()
+
+        reply = handle(db, SELLER_PHONE, "hi").replies[0]
+
+        assert "1 draft" in reply.body
+        assert reply.buttons is not None
+        assert "publish" in [b[0] for b in reply.buttons]
+
+    def test_they_are_never_offered_the_signup_question(self, db: Session) -> None:
+        """A seller who already has a shop being asked whether they want one
+        would read as the bot having forgotten them."""
+        seller_with_number(db)
+
+        assert "sell, or to shop" not in say(db, "hi")

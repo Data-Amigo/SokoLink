@@ -52,6 +52,7 @@ from app.models import (
     Seller,
     WaConversation,
 )
+from app.services.accounts import SignupError, create_account_for_phone
 from app.services.cart import CartError, add_item, clear, get_or_create_cart
 from app.services.catalogue import PublishError, publish_product
 from app.services.daraja import get_stk_engine
@@ -197,7 +198,11 @@ def _menu(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
     """
     categories = get_categories(db, seller)[:PAGE_SIZE]
     if not categories:
-        return _list_products(db, seller, convo, category=None)
+        # Greeted first, because this is the buyer's ARRIVAL. Without it a shop
+        # whose seller never typed a category is the only one whose name its
+        # buyers never see — they land on a bare product list belonging to
+        # nobody.
+        return _greet_then(db, seller, convo)
 
     convo.state = ConversationState.BROWSING
     convo.context = {"options": categories}
@@ -217,6 +222,22 @@ def _menu(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
             rows=[(f"cat:{name}", name, "") for name in categories],
             list_label="Browse",
         )
+    ]
+
+
+def _greet_then(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
+    """The shop's name, then everything in it — for a shop with no categories."""
+    replies = _list_products(db, seller, convo, category=None)
+    first = replies[0]
+    return [
+        Reply(
+            f"{_greeting(seller)}\n\n{first.body}",
+            media_url=first.media_url,
+            buttons=first.buttons,
+            rows=first.rows,
+            list_label=first.list_label,
+        ),
+        *replies[1:],
     ]
 
 
@@ -746,6 +767,159 @@ def _open_shop(db: Session, seller: Seller) -> list[Reply]:
     ]
 
 
+def _welcome(convo: WaConversation) -> list[Reply]:
+    """
+    What a number we have never seen before is asked.
+
+    Notes:
+        IT ASKS WHICH THEY ARE, because the bot number serves both sides and a
+        stranger's first message cannot tell us. Guessing wrong is expensive in
+        both directions: a buyer walked through shop setup abandons, and a
+        seller told to "open a shop's link" has been handed a riddle.
+
+        NOT "SEND START". That was a placeholder in an early sketch and it read
+        like a vending machine. People arriving here are already mid-conversation
+        in their own heads.
+    """
+    convo.state = ConversationState.NEW
+    convo.context = {}
+    return [
+        Reply(
+            "Karibu! 👋 I'm Biashara Mall.\n\n"
+            "I turn your WhatsApp catalogue into a shop people can buy from — "
+            "you forward the posts, I do the rest.\n\n"
+            "Are you here to sell, or to shop?",
+            buttons=[("sell", "I want to sell"), ("buy", "I'm shopping")],
+        )
+    ]
+
+
+def _ask_shop_name(convo: WaConversation) -> list[Reply]:
+    """
+    The one question onboarding actually needs answered.
+
+    ONE FIELD, AND IT IS THE ONE THEY ALREADY KNOW. No email, no password, no
+    category, no address. The number is already proven — the message arrived
+    from it through a signed webhook — so a name is the entire remaining gap
+    between a stranger and a shop.
+    """
+    convo.state = ConversationState.NAMING
+    convo.context = {}
+    return [
+        Reply(
+            "Nzuri! What's your shop called?\n\n"
+            "_Whatever your customers already call you — like Zuma Fashion or "
+            "Vitabu Bora._"
+        )
+    ]
+
+
+def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> list[Reply]:
+    """
+    Turn the answer into a real shop.
+
+    Args:
+        db: Session. The caller commits.
+        convo: The conversation, moved out of NAMING on success.
+        phone: The seller's number, proven by the signed webhook that carried
+            this message.
+        name: What they typed.
+
+    Returns:
+        A confirmation naming the shop and the one thing to do next, or the
+        question again when the name cannot be used.
+
+    Notes:
+        THE NUMBER IS ALREADY PROVEN, which is why this can skip the OTP the web
+        signup uses. Meta runs the network and told us who sent the message, and
+        the payload's signature proves the message came from Meta. That is at
+        least as strong as an SMS code we sent to a number somebody typed.
+
+        THE SHOP IS CREATED CLOSED, with nothing in it. Publishing is a
+        deliberate act and stays one; a shop that opened itself at signup would
+        be live and empty, which is worse than not existing.
+    """
+    clean = name.strip()
+    if len(clean) < 2 or len(clean) > 60:
+        return [
+            Reply(
+                "That name won't work — it needs to be between 2 and 60 "
+                "characters. What should I call your shop?"
+            )
+        ]
+
+    try:
+        account = create_account_for_phone(db, phone=phone, shop_name=clean)
+    except SignupError as exc:
+        # Names the actual problem: taken, or unusable as a web address.
+        return [Reply(f"{exc}\n\nTry another name.")]
+
+    db.flush()
+    seller = account.seller
+    assert seller is not None
+
+    convo.state = ConversationState.NEW
+    convo.context = {}
+
+    return [
+        Reply(
+            f"*{seller.display_name}* is ready. 🎉\n\n"
+            f"Your shop link:\n{settings.app_base_url}/shop/{seller.slug}\n\n"
+            f"It's closed until you put something in it."
+        ),
+        Reply(
+            "Now forward me a photo of something you're selling — "
+            "straight from your catalogue, caption and all.\n\n"
+            "I'll read it and set it up. If I can't see a price, I'll ask."
+        ),
+    ]
+
+
+def _seller_home(db: Session, seller: Seller) -> list[Reply]:
+    """
+    What a seller sees when they say hello.
+
+    Notes:
+        IT ANSWERS "WHERE AM I UP TO", not "here is a menu". A seller opening
+        this thread has one of three questions — is anything waiting on me, is
+        my shop live, what do I do next — and the answer to all three is the
+        state of their own catalogue.
+    """
+    drafts = db.scalar(
+        select(func.count(Product.id)).where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.DRAFT.value,
+        )
+    )
+    live = db.scalar(
+        select(func.count(Product.id)).where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.PUBLISHED.value,
+        )
+    )
+
+    lines = [f"*{seller.display_name}*"]
+    if seller.is_published:
+        lines.append(f"Open · {settings.app_base_url}/shop/{seller.slug}")
+    else:
+        lines.append("Closed — buyers can't see it yet.")
+    lines.append("")
+    lines.append(f"{live} live · {drafts} draft{'' if drafts == 1 else 's'}")
+
+    buttons: list[tuple[str, str]] = []
+    if drafts:
+        lines.append("\nForward another photo, or finish your drafts.")
+        buttons.append(("drafts", "My drafts"))
+        buttons.append(("publish", "Publish them"))
+    else:
+        lines.append("\nForward a photo of something to add it.")
+
+    if live and not seller.is_published:
+        buttons.append(("open", "Open my shop"))
+
+    return [Reply("\n".join(lines), buttons=buttons or None)]
+
+
 def handle(
     db: Session,
     phone: str,
@@ -839,17 +1013,41 @@ def handle(
         if lowered in {"drafts", "stock", "my products"}:
             return Outcome(_priced_summary(db, owner))
 
+        # A seller saying hello, rather than issuing a command. Answer where
+        # they are up to; a menu would be us asking THEM a question.
+        if convo.state == ConversationState.NEW or lowered in {
+            "hi",
+            "hello",
+            "menu",
+            "habari",
+            "niaje",
+            "start",
+        }:
+            return Outcome(_seller_home(db, owner))
+
+    # ── Somebody with no shop, who has not opened one either ────────────────
+    if convo.state == ConversationState.NAMING:
+        return Outcome(_create_shop(db, convo, phone, said))
+
     seller = convo.seller
     if seller is None or not seller.is_published:
-        return Outcome(
-            [
-                Reply(
-                    "Karibu! 👋 I'm Biashara Mall.\n\n"
-                    "Open a shop's link to start — it looks like "
-                    "_wa.me/…?text=shop yourshop_."
-                )
-            ]
-        )
+        if lowered in {"sell", "i want to sell", "sella"}:
+            return Outcome(_ask_shop_name(convo))
+        if lowered in {"buy", "i'm shopping", "im shopping", "shopping"}:
+            return Outcome(
+                [
+                    Reply(
+                        "Open the shop's link and I'll show you what they have.\n\n"
+                        "_It looks like wa.me/…?text=shop theirshop — ask the "
+                        "seller for theirs._"
+                    )
+                ]
+            )
+        # The bot number serves both sides, and a stranger's first message
+        # cannot tell us which they are. Guessing wrong is expensive both ways:
+        # a buyer walked through shop setup abandons, and a seller told to
+        # "open a shop's link" has been handed a riddle.
+        return Outcome(_welcome(convo))
 
     # ── A tap on a button or a list row ─────────────────────────────────────
     # These arrive as the ID we set when sending, so they are unambiguous in a

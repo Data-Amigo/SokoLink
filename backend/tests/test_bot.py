@@ -37,7 +37,12 @@ from app.services.bot import handle
 from app.services.daraja import DarajaError, StkPushResult
 from tests.factories import make_payment_method, make_product, make_seller
 
-PHONE = "254712345678"
+#: A BUYER's number, and deliberately NOT make_seller's default
+#: whatsapp_number. They were the same until a seller messaging the bot started
+#: getting a different answer from a buyer — at which point every "buyer" in
+#: this file was silently the shop's own owner. The collision was latent for as
+#: long as both sides were treated identically.
+PHONE = "254799000111"
 
 
 def open_shop(db: Session, **overrides: Any) -> Seller:
@@ -100,8 +105,9 @@ class TestFindingTheShop:
 
         assert "can't find that shop" in say(db, f"shop {seller.slug}")
 
-    def test_someone_with_no_shop_is_told_how_to_start(self, db: Session) -> None:
-        assert "Open a shop's link" in say(db, "hello")
+    def test_someone_with_no_shop_is_asked_which_side_they_are_on(self, db: Session) -> None:
+        """The bot number serves both, and a first message cannot say which."""
+        assert "sell, or to shop" in say(db, "hello")
 
 
 class TestBrowsing:
@@ -400,7 +406,7 @@ class TestTwoBuyersDoNotCollide:
         say(db, "1")
 
         # A second buyer arriving fresh must not inherit the first one's screen.
-        assert "Open a shop's link" in say(db, "hi", phone="254788888888")
+        assert "sell, or to shop" in say(db, "hi", phone="254788888888")
 
 
 class TestSoldOut:

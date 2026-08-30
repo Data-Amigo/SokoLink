@@ -74,7 +74,11 @@ class ConversationState:
     #: somebody shopping; this is somebody stocking.
     PRICING = "pricing"
 
-    ALL = (NEW, BROWSING, LISTING, PRODUCT, CART, ADDRESS, PAYING, PRICING)
+    #: Also a SELLER state: they said they want to sell and we asked what the
+    #: shop is called. No account exists yet, so there is nothing to point at.
+    NAMING = "naming"
+
+    ALL = (NEW, BROWSING, LISTING, PRODUCT, CART, ADDRESS, PAYING, PRICING, NAMING)
 
 
 class WaConversation(Base):
@@ -123,7 +127,7 @@ class WaConversation(Base):
     __table_args__ = (
         CheckConstraint(
             "state IN ('new', 'browsing', 'listing', 'product', 'cart', "
-            "'address', 'paying', 'pricing')",
+            "'address', 'paying', 'pricing', 'naming')",
             name="ck_wa_conversations_state_valid",
         ),
         # Past 'new' there must be a shop. Every later state's replies are about
@@ -134,7 +138,7 @@ class WaConversation(Base):
         # their conversation at their own storefront as though they were a
         # customer of it.
         CheckConstraint(
-            "state IN ('new', 'pricing') OR seller_id IS NOT NULL",
+            "state IN ('new', 'pricing', 'naming') OR seller_id IS NOT NULL",
             name="ck_wa_conversations_browsing_needs_seller",
         ),
         # A buyer waiting to pay must know which order they are paying for,
