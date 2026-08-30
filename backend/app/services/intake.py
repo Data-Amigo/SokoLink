@@ -2,8 +2,11 @@
 A forwarded catalogue post becomes a draft product.
 
     WhatsApp media ──▶ download ──▶ [cache] ──▶ draft agent ──▶ DRAFT product
-                                       │
-                                       └── parsed once ever, by media id
+                          │            │                              ▲
+                          │            └── parsed once ever, by media id
+                          │                                           │
+                          └──▶ media/covers/wa_<hash>.jpg ────────────┘
+                               our own copy, because theirs expires
 
 THIS IS THE PRODUCT'S CENTRAL PROMISE. The catalogue is not scraped and not
 typed: it already exists, written by the seller, in the WhatsApp groups they
@@ -20,6 +23,13 @@ PARSED ONCE EVER, KEYED BY MEDIA ID. Inference is the only thing here that costs
 money, and the traffic is the worst case for it — a seller onboarding forwards
 their whole catalogue at once, and Twilio redelivers anything slow. The cache is
 a table rather than a memo so it survives restarts and redeploys.
+
+THE BYTES ARE KEPT, NOT JUST READ. The download happens to show the image to the
+model, and for a long time that was all it was used for — every forwarded product
+reached the storefront as a card saying "No photo", which threw away the better
+half of what the seller sent. The same bytes are now written to our own media
+store on the way past. Meta's media URLs are signed and short-lived, so there is
+no second chance to fetch them later.
 
 A MISSING PRICE IS A RESULT, NOT A FAILURE. Verified against 24 real captions:
 zero mention KSh. Sellers withhold the price deliberately — that is the buyer
@@ -48,6 +58,7 @@ from app.models import (
     Seller,
 )
 from app.schemas.draft import ProductDraft
+from app.services.media import store_image_bytes, stored_image_path
 
 #: Twilio serves media from its own CDN behind account auth. Generous, because
 #: a seller on a Nairobi mobile network has already uploaded this once and a
@@ -138,7 +149,9 @@ def download_media(url: str) -> bytes:
     return response.content
 
 
-def parse_once(db: Session, media_id: str, caption: str, fetch: MediaFetch) -> ProductDraft:
+def parse_once(
+    db: Session, media_id: str, caption: str, fetch: MediaFetch
+) -> tuple[ProductDraft, bytes | None]:
     """
     Read one forwarded image, or return what we already paid to learn.
 
@@ -149,7 +162,10 @@ def parse_once(db: Session, media_id: str, caption: str, fetch: MediaFetch) -> P
         fetch: Called ONLY on a cache miss, and returns the image bytes.
 
     Returns:
-        The validated draft.
+        The validated draft, and the bytes IF they were downloaded on this
+        call. A cache hit returns None for them, because the whole point of the
+        cache is that nothing was fetched — the caller falls back to the copy
+        stored the first time round.
 
     Raises:
         IntakeError: When the image cannot be read. A failure is CACHED, so a
@@ -160,7 +176,7 @@ def parse_once(db: Session, media_id: str, caption: str, fetch: MediaFetch) -> P
     if seen is not None:
         if seen.error:
             raise IntakeError(seen.error)
-        return ProductDraft.model_validate(seen.draft)
+        return ProductDraft.model_validate(seen.draft), None
 
     # Called here and nowhere earlier: a cache hit must cost neither a download
     # nor an inference, and putting the fetch behind the lookup is what makes
@@ -181,10 +197,12 @@ def parse_once(db: Session, media_id: str, caption: str, fetch: MediaFetch) -> P
 
     db.add(ParsedMedia(provider_media_id=media_id, draft=draft.model_dump(mode="json")))
     db.flush()
-    return draft
+    return draft, image
 
 
-def create_from_draft(db: Session, seller: Seller, draft: ProductDraft) -> Product:
+def create_from_draft(
+    db: Session, seller: Seller, draft: ProductDraft, *, cover_path: str | None = None
+) -> Product:
     """
     Persist one draft as a product the seller can review.
 
@@ -192,11 +210,20 @@ def create_from_draft(db: Session, seller: Seller, draft: ProductDraft) -> Produ
         db: Session.
         seller: Whose shop.
         draft: What the agent proposed.
+        cover_path: Our stored copy of the forwarded photo, relative to
+            MEDIA_ROOT. None leaves the card without a picture rather than
+            failing — see the note below.
 
     Returns:
         The created product, always DRAFT.
 
     Notes:
+        THE PHOTO IS THE POST. A seller forwards a catalogue post because the
+        picture is the thing they are selling with; a draft created without it
+        renders "No photo" on the storefront and quietly throws away the better
+        half of what they sent. It was doing exactly that until the bytes were
+        threaded through to here.
+
         PROVENANCE IS ``manual`` + ``upload``, which the database requires to
         agree. A forwarded post has no platform post id, so it can never look
         re-syncable — which matters, because a future feed sync must not
@@ -213,6 +240,7 @@ def create_from_draft(db: Session, seller: Seller, draft: ProductDraft) -> Produ
         platform=Platform.MANUAL.value,
         ingest_method=IngestMethod.UPLOAD.value,
         status=ProductStatus.DRAFT.value,
+        cover_url=cover_path,
         price_kes=draft.price_kes,
         unit_quantity=draft.unit_quantity,
         unit_label=draft.unit_label,
@@ -245,10 +273,15 @@ def ingest_forwarded_post(
         IntakeError: With a reason that can be shown to the seller verbatim.
     """
     already = db.scalar(select(ParsedMedia).where(ParsedMedia.provider_media_id == media_id))
-    draft = parse_once(db, media_id, caption, fetch)
+    draft, image = parse_once(db, media_id, caption, fetch)
 
     if not draft.is_product:
         raise IntakeError("That doesn't look like something you're selling.")
 
-    product = create_from_draft(db, seller, draft)
+    # KEPT, NOT RE-FETCHED. On a cache miss we are holding the bytes the model
+    # just read; on a hit we were deliberately not given any, so we look for the
+    # copy the first forward stored under the same media id.
+    cover = store_image_bytes(image, key=media_id) if image else stored_image_path(media_id)
+
+    product = create_from_draft(db, seller, draft, cover_path=cover)
     return IntakeResult(product=product, draft=draft, cached=already is not None)

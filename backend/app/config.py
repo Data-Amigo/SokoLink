@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     #: Public base URL, no trailing slash. Used to build storefront links.
     app_base_url: str = "http://localhost:8000"
 
+    #: Where stored product images live. Empty means a directory inside the
+    #: application, which is right for development and WRONG in production: a
+    #: container's filesystem is rebuilt on every deploy, so every photo a
+    #: seller forwarded would vanish the next time we push. Point this at a
+    #: mounted volume — the storefront reads the same relative paths either way.
+    media_root: str = ""
+
     # ── P0: database ─────────────────────────────────────────────────────────
     #: Full Postgres URL. Required — the app cannot do anything without it.
     database_url: PostgresDsn
@@ -138,6 +145,15 @@ class Settings(BaseSettings):
     #: everything the bot says — is handed to the device's default browser
     #: instead. The template is the only shape that opens in WhatsApp.
     whatsapp_shop_template: str = "biashara_shop_link"
+
+    #: The bot's own number in international digits, e.g. 254118198343 — no
+    #: plus, no spaces. Builds the wa.me link a seller shares.
+    #:
+    #: WHY IT IS NOT DERIVED FROM whatsapp_phone_number_id. That id is a Meta
+    #: object id, not a phone number, and there is no offline way to turn one
+    #: into the other. Unset means we cannot build a share link at all, and the
+    #: chat says so rather than handing a seller a broken one.
+    whatsapp_display_number: str | None = None
 
     # ── WhatsApp: Twilio (used today, for sending the login code) ────────────
     # Twilio is the provider we can use NOW: sending needs no webhook and no

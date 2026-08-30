@@ -25,9 +25,44 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import settings
+from app import config
+from app.config import get_settings, settings
 from app.db import Base, get_db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def settings_singleton_survives() -> Generator[None, None, None]:
+    """
+    Whatever a test does to the settings cache, the singleton is intact after.
+
+    WHY THIS IS NOT PARANOIA. Every module in the application holds the object
+    bound by ``from app.config import settings`` at import time. ``get_settings``
+    is an lru_cache over that same object — until a test calls ``cache_clear()``,
+    after which ``get_settings()`` builds a NEW one and the two silently diverge.
+
+    Nothing raises when they do. Later tests write ``monkeypatch.setattr(
+    get_settings(), "gemini_api_key", "key")`` and patch an object the
+    application has never heard of; their assertions then fail naming the
+    endpoint rather than the pollution. That cost four failures which passed
+    individually, failed only together, and read as flakiness.
+
+    The cache cannot be primed directly, so the original instance is handed back
+    through the constructor the cache calls.
+    """
+    yield
+
+    cached = get_settings() if get_settings.cache_info().currsize else None
+    if cached is settings:
+        return
+
+    get_settings.cache_clear()
+    real = config.Settings
+    config.Settings = lambda **_: settings  # type: ignore[assignment,misc]
+    try:
+        get_settings()
+    finally:
+        config.Settings = real  # type: ignore[misc]
 
 
 def _test_database_url() -> str | None:

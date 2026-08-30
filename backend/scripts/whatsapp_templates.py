@@ -74,7 +74,9 @@ def create() -> int:
         print("Set it to the public host before creating the template.")
         return 1
 
-    existing = {t.get("name") for t in list_templates()} if settings.whatsapp_access_token else set()
+    existing: set[object] = set()
+    if settings.whatsapp_access_token:
+        existing = {t.get("name") for t in list_templates()}
     if name in existing:
         print(f"{name!r} already exists. Run `list` to see its status.")
         return 0

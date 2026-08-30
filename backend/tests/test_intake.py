@@ -21,6 +21,7 @@ Google's problem and unfalsifiable here. These prove the rules AROUND the model:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -31,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import ParsedMedia, Product, ProductStatus, Seller
 from app.schemas.draft import ProductDraft
-from app.services import intake
+from app.services import intake, media
 from app.services.bot import find_seller_by_phone, handle
 from tests.factories import make_seller
 
@@ -78,6 +79,22 @@ class FakeAgent:
         if self._error:
             raise self._error
         return self._draft
+
+
+@pytest.fixture(autouse=True)
+def covers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """
+    Every test in this module writes its photos to a temporary directory.
+
+    AUTOUSE, DELIBERATELY. Intake now stores the forwarded image, so any test
+    that ingests writes a file. Without this the suite would slowly fill the
+    repository's own media directory with fake JPEGs, and the tests that count
+    what is stored would pass or fail depending on what a previous run left
+    behind.
+    """
+    directory = tmp_path / "covers"
+    monkeypatch.setattr(media, "COVERS_DIR", directory)
+    return directory
 
 
 @pytest.fixture
@@ -319,3 +336,95 @@ class TestWhoIsTalking:
 
         products = db.scalars(select(Product).where(Product.seller_id == seller.id)).all()
         assert len(products) == 2
+
+
+class TestThePhotoSurvives:
+    """
+    THE PHOTO IS THE POST. A seller forwards a catalogue post because the
+    picture is what they sell with. For a long time intake downloaded the image,
+    showed it to the model and dropped it — so every forwarded product reached
+    the storefront as a card reading "No photo", and the seller's own photograph
+    was the one thing the pipeline threw away.
+
+    Meta's media URLs are signed and short-lived. There is no fetching it back
+    later, which is why these tests are about the bytes being KEPT, not about
+    them being retrievable.
+    """
+
+    def test_a_forwarded_photo_is_stored_and_attached(
+        self, db: Session, agent: FakeAgent, covers: Path
+    ) -> None:
+        seller = make_seller(db)
+
+        result = intake.ingest_forwarded_post(
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption="Fresh stock"
+        )
+
+        assert result.product.cover_url is not None
+        assert result.product.cover_url.startswith("covers/")
+
+        stored = covers / Path(result.product.cover_url).name
+        assert stored.read_bytes() == IMAGE
+
+    def test_the_storefront_gets_a_url_it_can_render(self, db: Session, agent: FakeAgent) -> None:
+        """The template asks for ``product.cover_url | media``; a stored path
+        that does not survive that filter is the same bug wearing a hat."""
+        seller = make_seller(db)
+
+        result = intake.ingest_forwarded_post(
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption=""
+        )
+
+        assert media.public_url(result.product.cover_url) == f"/media/{result.product.cover_url}"
+
+    def test_a_redelivery_reuses_the_copy_it_already_kept(
+        self, db: Session, agent: FakeAgent
+    ) -> None:
+        """
+        The parse cache means a redelivered forward is never downloaded again,
+        so the second pass holds no bytes. It must still find the photo — or
+        Meta retrying a message would produce a product worse than the first.
+        """
+        seller = make_seller(db)
+
+        first = intake.ingest_forwarded_post(db, seller, media_id=MEDIA_ID, fetch=fetch, caption="")
+
+        def refuse() -> bytes:
+            raise AssertionError("a cache hit must not download anything")
+
+        second = intake.ingest_forwarded_post(
+            db, seller, media_id=MEDIA_ID, fetch=refuse, caption=""
+        )
+
+        assert second.cached is True
+        assert second.product.cover_url == first.product.cover_url
+
+    def test_a_png_is_not_stored_as_a_jpeg(self, db: Session, agent: FakeAgent) -> None:
+        """The extension becomes the Content-Type. A PNG served as image/jpeg
+        renders in a browser — which is why it survives review — and then fails
+        in the link-preview crawler that takes the header at its word."""
+        seller = make_seller(db)
+        png = b"\x89PNG\r\n\x1a\n" + b"fake"
+
+        result = intake.ingest_forwarded_post(
+            db, seller, media_id="PNG:0", fetch=lambda: png, caption=""
+        )
+
+        assert result.product.cover_url is not None
+        assert result.product.cover_url.endswith(".png")
+
+    def test_an_unwritable_store_still_produces_the_product(
+        self, db: Session, agent: FakeAgent, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A missing photo costs one card. A lost draft costs the seller the
+        thing they forwarded, so a full disk must never reach them as an error."""
+        seller = make_seller(db)
+        monkeypatch.setattr(media, "store_image_bytes", lambda data, *, key: None)
+        monkeypatch.setattr(intake, "store_image_bytes", lambda data, *, key: None)
+
+        result = intake.ingest_forwarded_post(
+            db, seller, media_id=MEDIA_ID, fetch=fetch, caption=""
+        )
+
+        assert result.product.cover_url is None
+        assert result.product.status == ProductStatus.DRAFT.value
