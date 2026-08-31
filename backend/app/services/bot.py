@@ -71,6 +71,11 @@ from app.services.payment_methods import PaymentSetupError, save_payment_method
 from app.services.payments import MPESA_CALLBACK_PATH, PaymentError, start_stk_payment
 from app.services.storefront import get_categories, get_public_products
 
+#: How many sizes a picker may offer. Meta's list caps at ten rows, and a
+#: catalogue with more sizes than that is a shop the chat cannot serve well
+#: anyway — the storefront exists for those.
+VARIANT_LIMIT = 10
+
 #: How many numbered options one message may offer. Past this a buyer is
 #: scrolling a wall of text on a phone and stops reading; categories exist
 #: precisely so a catalogue never has to be shown flat.
@@ -240,46 +245,63 @@ def _greeting(seller: Seller) -> str:
     return f"*{seller.display_name}*\nKaribu! 👋"
 
 
-def _menu(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
+def _menu(
+    db: Session, seller: Seller, convo: WaConversation, *, arriving: bool = False
+) -> list[Reply]:
     """
     The category menu, and the state that makes its numbers meaningful.
 
-    A shop with no categories skips straight to the product list rather than
-    showing an empty menu — a seller who never typed a category should not cost
-    their buyer a dead screen.
+    Args:
+        db: Session.
+        seller: The shop.
+        convo: The conversation, moved into BROWSING.
+        arriving: True only on the buyer's FIRST message to this shop.
+
+    Notes:
+        THE GREETING IS AN ARRIVAL, NOT A HEADER. This used to open with the
+        shop's name and "Karibu!" every single time — and because an
+        unrecognised word falls back to here, a buyer mid-purchase who typed
+        something we could not read was greeted again, from the top, as though
+        they had just walked in. Nothing else in the thread said "robot" louder.
+
+        A shop introduces itself once. After that it is simply who you are
+        talking to, and repeating the name on every message is what a machine
+        does to compensate for not being a person.
+
+        A shop with no categories skips straight to the product list rather than
+        showing an empty menu — a seller who never typed a category should not
+        cost their buyer a dead screen.
     """
     categories = get_categories(db, seller)[:PAGE_SIZE]
     if not categories:
-        # Greeted first, because this is the buyer's ARRIVAL. Without it a shop
-        # whose seller never typed a category is the only one whose name its
-        # buyers never see — they land on a bare product list belonging to
-        # nobody.
-        return _greet_then(db, seller, convo)
+        return _greet_then(db, seller, convo, arriving=arriving)
 
     convo.state = ConversationState.BROWSING
     convo.context = {"options": categories}
 
-    # The body still names every option. Meta draws the rows as a picker;
-    # anything that cannot render one — Twilio, an odd client — falls back to
-    # this text, and a body reading only "Choose:" would be a dead end there.
+    # The body still lists every option. Meta draws the rows as a picker, but a
+    # buyer on a cheap handset replying "2" is a real pattern here, and the
+    # numbers are what make that work.
     lines = [f"{i}. {name}" for i, name in enumerate(categories, start=1)]
-    body = (
-        f"{_greeting(seller)}\n\nWhat are you looking for?\n\n"
-        + "\n".join(lines)
-        + "\n\nTap one below, or reply with a number."
-    )
+    question = "What are you looking for?"
+    opening = f"{_greeting(seller)}\n\n{question}" if arriving else question
     return [
         Reply(
-            body,
+            f"{opening}\n\n" + "\n".join(lines),
             rows=[(f"cat:{name}", name, "") for name in categories],
             list_label="Browse",
         )
     ]
 
 
-def _greet_then(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
-    """The shop's name, then everything in it — for a shop with no categories."""
+def _greet_then(
+    db: Session, seller: Seller, convo: WaConversation, *, arriving: bool = False
+) -> list[Reply]:
+    """Everything in the shop — for a shop whose seller never typed a category."""
     replies = _list_products(db, seller, convo, category=None)
+    if not arriving:
+        return replies
+
     first = replies[0]
     return [
         Reply(
@@ -302,7 +324,12 @@ def _list_products(
     if not products:
         convo.state = ConversationState.BROWSING
         convo.context = {}
-        return [Reply("Nothing in stock there yet. Send *menu* to look at something else.")]
+        return [
+            Reply(
+                "Nothing in there just yet.",
+                buttons=[("menu", "See everything else")],
+            )
+        ]
 
     convo.state = ConversationState.LISTING
     convo.context = {"products": [p.id for p in products], "category": category}
@@ -324,12 +351,21 @@ def _list_products(
         )
 
     heading = category or "Everything"
-    body = f"*{heading}*\n\n" + "\n".join(lines) + "\n\nTap one below, or reply with a number."
+    body = f"*{heading}*\n\n" + "\n".join(lines)
     return [Reply(body, rows=rows, list_label="See items")]
 
 
 def _show_product(convo: WaConversation, product: Product) -> list[Reply]:
-    """One product, with its photo, and the two things a buyer can do next."""
+    """
+    One product, with its photo, and the things a buyer can do next.
+
+    Notes:
+        THE BUTTONS ARE THE INSTRUCTIONS. This used to end with "Send *add* to
+        put this in your basket, or *menu* to keep looking" — printed directly
+        above buttons that already said Add to basket and Keep looking. The
+        narration is what a system writes when it cannot draw a control; we can
+        draw the control, and saying it twice is how a shop sounds like a form.
+    """
     convo.state = ConversationState.PRODUCT
     convo.context = {"product": product.id}
 
@@ -338,14 +374,13 @@ def _show_product(convo: WaConversation, product: Product) -> list[Reply]:
         parts.append(product.price_display)
     if product.description:
         parts.append(product.description)
-    if product.sizes:
-        parts.append("Sizes: " + ", ".join(product.sizes))
 
     if product.stock <= 0:
-        parts.append("\n_Sold out right now._\nSend *menu* to see something else.")
+        parts.append("\n_Sold out right now._")
         buttons = [("menu", "See what's in stock")]
     else:
-        parts.append("\nSend *add* to put this in your basket, or *menu* to keep looking.")
+        if product.sizes:
+            parts.append("Sizes: " + ", ".join(product.sizes))
         buttons = [("add", "Add to basket"), ("menu", "Keep looking"), ("cart", "My basket")]
 
     return [
@@ -357,6 +392,76 @@ def _show_product(convo: WaConversation, product: Product) -> list[Reply]:
     ]
 
 
+def _ask_variant(convo: WaConversation, product: Product) -> list[Reply]:
+    """
+    Which size? Asked BEFORE the basket, because afterwards is too late.
+
+    Notes:
+        THE HOLE THIS CLOSES. The card printed the sizes and then added the item
+        without asking which — so a seller opened an order for sandals with no
+        size on it and had to go back to the buyer to find out. The column has
+        been on the cart line and the order line the whole time; only the
+        question was missing.
+
+        ROWS RATHER THAN BUTTONS. Three buttons is Meta's limit and shoes come
+        in more sizes than that. A list picker holds ten, which covers every
+        real case, and the body lists them too so a typed "40" also works.
+    """
+    convo.state = ConversationState.VARIANT
+    convo.context = {"product": product.id, "sizes": list(product.sizes)}
+
+    return [
+        Reply(
+            f"*{product.title}*\n\nWhich size do you need?\n\n"
+            + "  ".join(product.sizes[:VARIANT_LIMIT]),
+            rows=[
+                (f"size:{size}", f"Size {size}"[:24], "") for size in product.sizes[:VARIANT_LIMIT]
+            ],
+            list_label="Pick a size",
+        )
+    ]
+
+
+def _add_to_basket(
+    db: Session, seller: Seller, convo: WaConversation, product: Product, variant: str = ""
+) -> list[Reply]:
+    """
+    Put one item in the basket and show what is now in it.
+
+    Notes:
+        ONE MESSAGE, NOT TWO. The old version sent "Added ✅" and then appended
+        ``_show_cart(...)[1:]`` — a slice written when the basket was two
+        messages, which by then returned exactly one. So the slice was always
+        empty: the buyer got a bare sentence with NO buttons, and had to type
+        their way to checkout. That is the bug in the screenshot.
+
+        Acknowledgement and next step belong together anyway. A shopkeeper says
+        "got it — that's two things, four thousand, shall we ring it up?", not
+        "got it" followed by silence.
+    """
+    try:
+        cart = _basket(db, convo, seller)
+        add_item(db, cart, product.id, quantity=1, selected_variant=variant)
+    except CartError:
+        # Sold out, or gone from the catalogue since we showed it.
+        return [
+            Reply(
+                "That's just gone, sorry — someone got there first.",
+                buttons=[("menu", "See what's left")],
+            )
+        ]
+
+    named = f"{product.title} ({variant})" if variant else product.title
+    replies = _show_cart(db, seller, convo)
+    replies[0] = Reply(
+        f"Added *{named}*. ✅\n\n{replies[0].body}",
+        buttons=replies[0].buttons,
+        rows=replies[0].rows,
+        list_label=replies[0].list_label,
+    )
+    return replies
+
+
 def _show_cart(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
     """The basket, and the decision it exists to prompt."""
     cart = _basket(db, convo, seller)
@@ -364,27 +469,29 @@ def _show_cart(db: Session, seller: Seller, convo: WaConversation) -> list[Reply
     if not cart.items:
         convo.state = ConversationState.BROWSING
         convo.context = {}
-        return [Reply("Your basket is empty. Send *menu* to start shopping.")]
+        return [
+            Reply(
+                "Your basket is empty.",
+                buttons=[("menu", "Start shopping")],
+            )
+        ]
 
     convo.state = ConversationState.CART
     convo.context = {}
 
-    lines = [
+    lines = []
+    for item in cart.items:
         # The cart reads through to the live product on purpose. Only an ORDER
         # line copies the name and price, so a rename mid-basket is fine but a
         # rename after checkout can never rewrite what somebody paid.
-        f"• {item.product.title} × {item.quantity} — {_money(item.line_total_kes)}"
-        for item in cart.items
-    ]
-    body = (
-        "*Your basket*\n\n"
-        + "\n".join(lines)
-        + f"\n\nTotal: *{_money(cart.subtotal_kes)}*"
-        + "\n\nSend *checkout* to order, *menu* to keep shopping, or *clear* to empty it."
-    )
+        variant = f" ({item.selected_variant})" if item.selected_variant else ""
+        lines.append(
+            f"• {item.product.title}{variant} × {item.quantity} — {_money(item.line_total_kes)}"
+        )
+
     return [
         Reply(
-            body,
+            "*Your basket*\n\n" + "\n".join(lines) + f"\n\nTotal: *{_money(cart.subtotal_kes)}*",
             buttons=[
                 ("checkout", "Checkout"),
                 ("menu", "Keep shopping"),
@@ -396,65 +503,104 @@ def _show_cart(db: Session, seller: Seller, convo: WaConversation) -> list[Reply
 
 def _start_checkout(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
     """
-    Ask for the one thing an order needs that a chat does not already know.
+    Begin checkout by asking the first of three short questions.
 
-    WhatsApp gives us the phone, which is both the M-Pesa line and the way to
-    reach them. It does not give us a name or an address, and asking for both in
-    one message costs one round trip instead of two — which matters on a slow
-    connection far more than tidy parsing does.
+    Notes:
+        ONE QUESTION PER MESSAGE. This used to be a single message asking for
+        "your name and where to deliver, separated by a comma" — which is a form
+        pasted into a chat, and it fails in the ordinary case of somebody whose
+        estate has a comma in its name. Three small questions cost three round
+        trips and no thinking; one compound question costs one round trip and
+        an error message.
+
+        NOTHING IS ASKED IF THE MONEY HAS NOWHERE TO GO. A shop with no payment
+        method cannot take an order, and finding that out after typing a name
+        and an address is the worst possible moment to be told.
     """
     cart = _basket(db, convo, seller)
     if not cart.items:
         return _show_cart(db, seller, convo)
 
     if get_payment_method(db, seller) is None:
-        # Nowhere for the money to go. Say so plainly rather than taking an
-        # order the seller cannot be paid for.
         return [
             Reply(
-                "This shop hasn't set up payments yet, so I can't take the order. "
-                "Send *menu* to keep looking."
+                f"{seller.display_name} hasn't set up M-Pesa yet, so I can't take "
+                "the order just yet.",
+                buttons=[("menu", "Keep looking")],
             )
         ]
 
-    convo.state = ConversationState.ADDRESS
+    convo.state = ConversationState.CHECKOUT_NAME
     convo.context = {}
+    return [Reply("Lovely. Who is this order for?\n\n_Just a name is fine._")]
+
+
+def _ask_delivery(convo: WaConversation, name: str) -> list[Reply]:
+    """
+    Delivered, or collected? The question that was never asked at all.
+
+    Notes:
+        IT WAS ASSUMED. Checkout demanded an address from everybody, including
+        buyers who meant to collect — and the seller then had a delivery
+        address for an order nobody was delivering.
+
+        NO FEE IS ADDED HERE. The order carries delivery_fee_kes and it stays
+        zero: what delivery costs in Nairobi depends on where, and inventing a
+        number would put a price on the buyer's screen that the seller never
+        agreed to. The two of them settle it in the thread, which is what
+        already happens today.
+    """
+    convo.state = ConversationState.CHECKOUT_DELIVERY
+    convo.context = {"buyer_name": name}
     return [
         Reply(
-            "Almost done. Reply with your *name and where to deliver*, "
-            "separated by a comma.\n\nFor example: _Akinyi Otieno, Kasarani_"
+            f"Thanks, {name}. Would you like it delivered, or will you collect it?",
+            buttons=[("deliver", "Deliver to me"), ("collect", "I'll collect")],
+        )
+    ]
+
+
+def _ask_address(convo: WaConversation) -> list[Reply]:
+    """Where to. Asked only of buyers who said they wanted it delivered."""
+    convo.state = ConversationState.ADDRESS
+    return [
+        Reply(
+            "Where should it go?\n\n_An estate or landmark is enough — "
+            "like Kasarani, near Hunters._"
         )
     ]
 
 
 def _place(
-    db: Session, seller: Seller, convo: WaConversation, phone: str, text: str
+    db: Session,
+    seller: Seller,
+    convo: WaConversation,
+    phone: str,
+    *,
+    name: str,
+    address: str | None,
 ) -> list[Reply]:
     """Turn the basket into an order, and tell them exactly how to pay."""
-    name, _, address = text.partition(",")
-    name, address = name.strip(), address.strip()
-    if not name or not address:
-        return [
-            Reply(
-                "I need both, separated by a comma — your name, then where to deliver.\n\n"
-                "For example: _Akinyi Otieno, Kasarani_"
-            )
-        ]
-
     cart = _basket(db, convo, seller)
     if not cart.items:
         return _show_cart(db, seller, convo)
 
-    order = place_order(
-        db,
-        cart=cart,
-        buyer_name=name,
-        buyer_phone=phone,
-        delivery_address=address,
-        # They are talking to us on WhatsApp; the receipt goes to the same
-        # thread. Consent is the act of ordering here, not a checkbox.
-        whatsapp_opt_in=True,
-    )
+    try:
+        order = place_order(
+            db,
+            cart=cart,
+            buyer_name=name,
+            buyer_phone=phone,
+            delivery_address=address,
+            # They are talking to us on WhatsApp; the receipt goes to the same
+            # thread. Consent is the act of ordering here, not a checkbox.
+            whatsapp_opt_in=True,
+        )
+    except OrderError as exc:
+        convo.state = ConversationState.CART
+        convo.context = {}
+        return [Reply(str(exc), buttons=[("menu", "Keep shopping")])]
+
     db.flush()
 
     convo.state = ConversationState.PAYING
@@ -1495,17 +1641,46 @@ def handle(
                 ]
             )
         convo.seller_id = seller.id
+
+        # A SELLER WHO OPENED SOMEBODY ELSE'S LINK IS A BUYER NOW, and is told
+        # so rather than left to discover it. One number is not one role: the
+        # bot number is shared, and the same person runs a shop on Monday and
+        # buys shoes on Tuesday. Announcing the switch — and naming the way
+        # back — is what makes a shared number honest instead of confusing.
+        owner_here = find_seller_by_phone(db, phone)
+        switched = (
+            [
+                Reply(
+                    f"You're shopping at *{seller.display_name}* now.\n\n"
+                    f"_Send *my shop* whenever you want to get back to running "
+                    f"{owner_here.display_name}._"
+                )
+            ]
+            if owner_here is not None and owner_here.id != seller.id
+            else []
+        )
+
         # ARRIVAL, so the storefront is offered ALONGSIDE the menu rather than
         # instead of it. The chat can sell; a page browses forty items better
         # than a list picker ever will, and the buyer should not have to pick
         # one surface before seeing either.
-        return Outcome([*_menu(db, seller, convo), _shop_card(seller)])
+        return Outcome([*switched, *_menu(db, seller, convo, arriving=True), _shop_card(seller)])
 
     # ── The seller's own side of the thread ─────────────────────────────────
     # Checked before anything else a buyer could mean. A number typed by a
     # seller we just asked for a price is a price, not a menu choice.
     owner = find_seller_by_phone(db, phone)
     if owner is not None:
+        # THE WAY BACK OUT OF SOMEBODY ELSE'S SHOP. Checked before the buyer
+        # branch claims the message, because a seller stuck inside another
+        # shop's conversation with no exit is worse than never having let them
+        # browse at all.
+        if lowered in {"my shop", "back to my shop", "my store"}:
+            convo.seller_id = None
+            convo.state = ConversationState.NEW
+            convo.context = {}
+            return Outcome(_seller_home(db, owner))
+
         if convo.state == ConversationState.PRICING:
             if lowered in {"skip", "later"}:
                 queue = [int(pid) for pid in convo.context.get("pricing_queue", [])]
@@ -1610,32 +1785,44 @@ def handle(
         return Outcome(_menu(db, seller, convo))
 
     # ── Words that work from anywhere ───────────────────────────────────────
-    if lowered in {"menu", "hi", "hello", "start", "habari", "niaje"}:
+    if lowered in {"menu", "hi", "hello", "start", "habari", "niaje", "keep shopping"}:
         return Outcome(_menu(db, seller, convo))
 
-    if lowered in {"store", "shop", "website", "open store"}:
+    if lowered in {"store", "shop", "website", "open store", "see everything"}:
         # The only reply that can open a page inside WhatsApp — see _shop_card.
         return Outcome([_shop_card(seller)])
 
-    if lowered == "cart":
+    if lowered in {"cart", "my basket", "basket"}:
         return Outcome(_show_cart(db, seller, convo))
 
-    if lowered == "clear":
+    if lowered in {"clear", "empty basket"}:
         clear(db, _basket(db, convo, seller))
         convo.state = ConversationState.BROWSING
-        return Outcome([Reply("Basket emptied. Send *menu* to start again.")])
+        convo.context = {}
+        return Outcome([Reply("Basket emptied.", buttons=[("menu", "Start again")])])
 
-    if lowered == "checkout":
+    # SPELLED BOTH WAYS ON PURPOSE. A buyer typed "Check out" and got the shop
+    # menu, because the match was `== "checkout"` and a space is not nothing.
+    # The button sends the id, so this only ever bites somebody typing — which
+    # is exactly the buyer least able to recover from it.
+    if lowered in {"checkout", "check out", "pay", "order"}:
         return Outcome(_start_checkout(db, seller, convo))
 
     if lowered == "help":
         return Outcome(
             [
                 Reply(
+                    f"I'm here to help you buy from *{seller.display_name}*.\n\n"
+                    "Tap the buttons, or send a word:\n"
                     "*menu* — see what's on sale\n"
                     "*cart* — your basket\n"
                     "*checkout* — place your order\n"
-                    "*clear* — empty the basket"
+                    "*clear* — empty the basket",
+                    buttons=[
+                        ("menu", "See what's on sale"),
+                        ("cart", "My basket"),
+                        ("checkout", "Checkout"),
+                    ],
                 )
             ]
         )
@@ -1656,23 +1843,82 @@ def handle(
                 return Outcome(_show_product(convo, product))
 
     elif convo.state == ConversationState.PRODUCT:
-        if lowered in {"add", "add to cart", "buy"}:
+        if lowered in {"add", "add to cart", "add to basket", "buy"}:
             product_id = convo.context.get("product")
-            if not isinstance(product_id, int):
+            product = db.get(Product, product_id) if isinstance(product_id, int) else None
+            if product is None or product.seller_id != seller.id:
                 return Outcome(_menu(db, seller, convo))
-            try:
-                cart = _basket(db, convo, seller)
-                add_item(db, cart, product_id, quantity=1)
-            except CartError:
-                # Sold out, or gone from the catalogue since we showed it.
-                return Outcome([Reply("That's just sold out. Send *menu* to see what's left.")])
-            return Outcome(
-                [Reply("Added. ✅ Send *cart* to check out, or *menu* to keep shopping.")]
-                + _show_cart(db, seller, convo)[1:]
-            )
+
+            # CHECKED HERE, because the cart service deliberately does not.
+            # `_purchasable` asks whether a buyer may put this shop's product in
+            # a basket at all; having run out is a different question, answered
+            # again at checkout by `unavailable_lines` for the web flow.
+            #
+            # The card already says "sold out" and offers no Add button — but a
+            # typed "add" went straight past it, and the buyer only found out at
+            # checkout that their basket could not be ordered.
+            if product.stock <= 0:
+                return Outcome(
+                    [
+                        Reply(
+                            f"*{product.title}* is sold out just now.",
+                            buttons=[("menu", "See what's in stock")],
+                        )
+                    ]
+                )
+
+            # THE SIZE IS ASKED BEFORE THE BASKET, because afterwards the seller
+            # is the one who has to go and ask.
+            if product.sizes:
+                return Outcome(_ask_variant(convo, product))
+            return Outcome(_add_to_basket(db, seller, convo, product))
+
+    elif convo.state == ConversationState.VARIANT:
+        product_id = convo.context.get("product")
+        sizes = [str(s) for s in convo.context.get("sizes", [])]
+        product = db.get(Product, product_id) if isinstance(product_id, int) else None
+        if product is None or product.seller_id != seller.id:
+            return Outcome(_menu(db, seller, convo))
+
+        # Named apart from the numeric `chosen` above: that one is a menu
+        # position and this one is a size, and mypy caught them sharing a name.
+        wanted = said.removeprefix("size:").strip() if lowered.startswith("size:") else said.strip()
+        # Matched case-insensitively against what we actually offered: a typed
+        # "40" has to mean the same as the row that says Size 40, and a size we
+        # never listed must not reach the order as though the seller stocked it.
+        picked = next((s for s in sizes if s.lower() == wanted.lower()), None)
+        if picked is None:
+            return Outcome(_ask_variant(convo, product))
+        return Outcome(_add_to_basket(db, seller, convo, product, variant=picked))
+
+    elif convo.state == ConversationState.CHECKOUT_NAME:
+        name = said.strip()
+        if len(name) < 2 or len(name) > 120:
+            return Outcome([Reply("Sorry — what name should I put on the order?")])
+        return Outcome(_ask_delivery(convo, name))
+
+    elif convo.state == ConversationState.CHECKOUT_DELIVERY:
+        name = str(convo.context.get("buyer_name", ""))
+        if lowered in {"collect", "i'll collect", "ill collect", "pickup", "pick up"}:
+            return Outcome(_place(db, seller, convo, phone, name=name, address=None))
+        if lowered in {"deliver", "deliver to me", "delivery"}:
+            return Outcome(_ask_address(convo))
+        return Outcome(_ask_delivery(convo, name))
 
     elif convo.state == ConversationState.ADDRESS:
-        return Outcome(_place(db, seller, convo, phone, said))
+        address = said.strip()
+        if len(address) < 3:
+            return Outcome(_ask_address(convo))
+        return Outcome(
+            _place(
+                db,
+                seller,
+                convo,
+                phone,
+                name=str(convo.context.get("buyer_name", "")),
+                address=address,
+            )
+        )
 
     elif convo.state == ConversationState.PAYING:
         return Outcome(_claim(db, convo, said))
@@ -1680,4 +1926,8 @@ def handle(
     # ── Anything we could not read ──────────────────────────────────────────
     # Re-offering the menu beats "I didn't understand": the buyer's problem is
     # not that we failed to parse, it is that they cannot see their options.
+    #
+    # NOT GREETED AGAIN, THOUGH. _menu only introduces the shop on arrival, so
+    # landing here mid-purchase no longer reads as being met at the door by
+    # somebody who has forgotten the last ten minutes.
     return Outcome(_menu(db, seller, convo))

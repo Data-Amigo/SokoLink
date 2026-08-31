@@ -229,9 +229,21 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
                         button_param=button_param,
                     )
                 elif reply.media_url:
-                    send_image(sender, reply.media_url, caption=reply.body)
                     if reply.buttons:
-                        send_buttons(sender, "What next?", reply.buttons)
+                        # THE PHOTO CARRIES NO CAPTION HERE, and the card that
+                        # follows carries the buttons. Meta cannot put buttons
+                        # on an image, so this used to send the details as a
+                        # caption and then a second message headed "What next?"
+                        # — a filler line, written by us, that appeared in every
+                        # product card a buyer ever saw.
+                        #
+                        # Sending the picture bare and the card whole reads the
+                        # way a shopkeeper hands something over: here it is,
+                        # then what it costs and what you can do.
+                        send_image(sender, reply.media_url)
+                        send_buttons(sender, reply.body, reply.buttons)
+                    else:
+                        send_image(sender, reply.media_url, caption=reply.body)
                 elif reply.buttons:
                     send_buttons(sender, reply.body, reply.buttons)
                 elif reply.rows:

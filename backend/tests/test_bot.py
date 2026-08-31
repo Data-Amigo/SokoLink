@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    CartItem,
     Order,
     OrderStatus,
     PaymentMethodKind,
@@ -222,7 +223,13 @@ class TestTheBasketSurvives:
 
         say(db, "clear")
 
-        assert "empty" in say(db, "cart").lower()
+        # ASSERTED ON THE BASKET, NOT ON THE WORD. This used to check that
+        # "empty" appeared anywhere in the reply — and the basket's own
+        # boilerplate said "clear to empty it", so it passed whether or not
+        # anything had been cleared. It had not: deleting the rows left the
+        # loaded collection untouched, so the next read showed them all again.
+        assert "Ankara Shirt" not in say(db, "cart")
+        assert db.scalar(select(CartItem)) is None
 
 
 class TestCheckout:
@@ -244,14 +251,19 @@ class TestCheckout:
 
         said = say(db, "checkout")
 
-        assert "name" in said.lower()
-        assert "deliver" in said.lower()
+        # ONE QUESTION PER MESSAGE. Asking for a name and an address in a single
+        # comma-separated line is a form, and it broke for anybody whose estate
+        # has a comma in its name.
+        assert "who is this order for" in said.lower()
+        assert "comma" not in said.lower()
 
     def test_it_places_a_real_order(self, db: Session) -> None:
         self._with_one_item(db)
         say(db, "checkout")
 
-        said = say(db, "Akinyi Otieno, Kasarani")
+        say(db, "Akinyi Otieno")
+        say(db, "deliver")
+        said = say(db, "Kasarani")
 
         order = db.scalars(select(Order).order_by(Order.id.desc())).first()
         assert order is not None
@@ -266,18 +278,23 @@ class TestCheckout:
         seller = self._with_one_item(db)
         say(db, "checkout")
 
-        said = say(db, "Akinyi Otieno, Kasarani")
+        say(db, "Akinyi Otieno")
+        said = say(db, "collect")
 
         assert seller.payment_method is not None
         assert seller.payment_method.number in said
 
-    def test_a_malformed_answer_asks_again(self, db: Session) -> None:
+    def test_an_unanswerable_delivery_choice_asks_again(self, db: Session) -> None:
+        """No comma to get wrong any more — but a buyer who replies to the
+        delivery question with something else still has to be re-asked rather
+        than dropped into an order with no address."""
         self._with_one_item(db)
         say(db, "checkout")
+        say(db, "Akinyi Otieno")
 
-        said = say(db, "Kasarani")
+        said = say(db, "maybe?")
 
-        assert "comma" in said.lower()
+        assert "delivered" in said.lower()
         assert db.scalars(select(Order)).first() is None
 
     def test_checkout_refuses_when_the_seller_cannot_be_paid(self, db: Session) -> None:
@@ -294,7 +311,7 @@ class TestCheckout:
         say(db, "1")
         say(db, "add")
 
-        assert "hasn't set up payments" in say(db, "checkout")
+        assert "hasn't set up M-Pesa" in say(db, "checkout")
 
     def test_an_empty_basket_cannot_check_out(self, db: Session) -> None:
         seller = open_shop(db)
@@ -313,7 +330,8 @@ class TestPaying:
         say(db, "1")
         say(db, "add")
         say(db, "checkout")
-        say(db, "Akinyi Otieno, Kasarani")
+        say(db, "Akinyi Otieno")
+        say(db, "collect")
         order = db.scalars(select(Order).order_by(Order.id.desc())).first()
         assert order is not None
         return order
@@ -423,8 +441,10 @@ class TestSoldOut:
         said = say(db, "1")
         assert "sold out" in said.lower()
 
-        say(db, "add")
-        assert "empty" in say(db, "cart").lower()
+        # A typed "add" used to walk straight past the sold-out card, and the
+        # buyer only discovered at checkout that their basket was unorderable.
+        assert "sold out" in say(db, "add").lower()
+        assert db.scalar(select(CartItem)) is None
 
 
 class TestNativeComponents:
@@ -567,7 +587,8 @@ class TestPayingInTheChat:
         say(db, f"prod:{product.id}", phone=phone)
         say(db, "add", phone=phone)
         say(db, "checkout", phone=phone)
-        return say(db, "Akinyi Otieno, Kasarani", phone=phone)
+        say(db, "Akinyi Otieno", phone=phone)
+        return say(db, "collect", phone=phone)
 
     def test_a_pochi_shop_asks_for_the_code(self, db: Session) -> None:
         seller = open_shop(db)  # the factory's default kind is Pochi

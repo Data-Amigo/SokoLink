@@ -62,8 +62,20 @@ class ConversationState:
     LISTING = "listing"
     #: One product on screen, deciding whether to add it.
     PRODUCT = "product"
+    #: Chose a product that comes in sizes, and is picking one.
+    #:
+    #: WHY THIS IS A STATE AND NOT A FLAG. The card printed "Sizes: 37, 38, 39,
+    #: 40" and then added to the basket without ever asking which — so the
+    #: seller received an order for sandals with no size on it. The column to
+    #: hold the answer already existed on both the cart line and the order line;
+    #: only the question was missing.
+    VARIANT = "variant"
     #: Basket shown, deciding whether to check out.
     CART = "cart"
+    #: Asked who the order is for.
+    CHECKOUT_NAME = "checkout_name"
+    #: Asked whether they want it delivered or will collect it.
+    CHECKOUT_DELIVERY = "checkout_delivery"
     #: Asked for a delivery address.
     ADDRESS = "address"
     #: Order placed; waiting for them to send the M-Pesa code.
@@ -95,7 +107,10 @@ class ConversationState:
         BROWSING,
         LISTING,
         PRODUCT,
+        VARIANT,
         CART,
+        CHECKOUT_NAME,
+        CHECKOUT_DELIVERY,
         ADDRESS,
         PAYING,
         PRICING,
@@ -150,8 +165,9 @@ class WaConversation(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "state IN ('new', 'browsing', 'listing', 'product', 'cart', "
-            "'address', 'paying', 'pricing', 'naming', 'pay_kind', 'pay_number')",
+            "state IN ('new', 'browsing', 'listing', 'product', 'variant', "
+            "'cart', 'checkout_name', 'checkout_delivery', 'address', 'paying', "
+            "'pricing', 'naming', 'pay_kind', 'pay_number')",
             name="ck_wa_conversations_state_valid",
         ),
         # Past 'new' there must be a shop. Every later state's replies are about

@@ -234,10 +234,23 @@ def clear(db: Session, cart: Cart) -> None:
 
     Called after an order is placed. The row survives so the buyer's cookie
     stays valid and their next visit does not start by minting a new cart.
+
+    Notes:
+        THE COLLECTION IS EXPIRED, not just flushed. Deleting the rows does not
+        empty ``cart.items`` on an instance the session has already loaded, and
+        the session runs with autoflush off — so the very next read handed back
+        the basket that had just been emptied.
+
+        In the chat that meant "clear" answered "Basket emptied" and then showed
+        every item still in it. It went unnoticed because the test asserted the
+        word "empty" appeared, and the basket's own boilerplate said "clear to
+        empty it" — so the assertion passed on the instructions rather than on
+        the basket.
     """
     for item in list(cart.items):
         db.delete(item)
     db.flush()
+    db.expire(cart, ["items"])
 
 
 def unavailable_lines(cart: Cart) -> list[CartItem]:
