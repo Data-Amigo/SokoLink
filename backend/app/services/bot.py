@@ -60,6 +60,11 @@ from app.services.catalogue import PublishError, publish_product
 from app.services.daraja import get_stk_engine
 from app.services.intake import IntakeError, MediaFetch, ingest_forwarded_post
 from app.services.media import absolute_url
+from app.services.notifications import (
+    buyer_receipt,
+    order_placed_alert,
+    payment_claimed_alert,
+)
 from app.services.orders import (
     OrderError,
     claim_payment,
@@ -131,9 +136,32 @@ class Reply:
 
 @dataclass
 class Outcome:
-    """What one inbound message produced."""
+    """
+    What one inbound message produced.
+
+    Args:
+        replies: Messages back to whoever sent the inbound one.
+        notify: ``(phone, Reply)`` for OTHER people the message concerns.
+
+    Notes:
+        WHY THE SECOND LIST EXISTS. A conversation is not only between us and
+        the person typing. A buyer placing an order is news the seller needs
+        without having to think to ask for it, and a seller confirming a payment
+        is news the buyer was explicitly promised — "you'll get a message here
+        when they do" was already in the copy, unbacked by anything.
+
+        Without this the loop only closed for shops on STK, because the Daraja
+        callback was the single place anything notified anybody. Every Pochi
+        seller — most of them — had a silent one.
+
+        SENT AFTER THE COMMIT, like replies, and failures are swallowed the same
+        way. An order that exists but whose alert did not send is recoverable:
+        the seller sends `orders` and sees it. An alert that sent for an order
+        that was rolled back is not.
+    """
 
     replies: list[Reply] = field(default_factory=list)
+    notify: list[tuple[str, Reply]] = field(default_factory=list)
 
 
 def _digits(text: str) -> int | None:
@@ -241,12 +269,38 @@ def _shop_card(seller: Seller) -> Reply:
     )
 
 
-def _greeting(seller: Seller) -> str:
-    return f"*{seller.display_name}*\nKaribu! 👋"
+def _greeting(db: Session, seller: Seller) -> str:
+    """
+    How the shop introduces itself: who it is, and what it has in.
+
+    Notes:
+        IT NAMES THE SHOP AND THE STOCK. A buyer arriving from a status post has
+        no idea whose thread they are in — the chat header says Biasharamall,
+        because the number is shared. Opening with "What are you looking for?"
+        is a form; a shopkeeper says who they are and what they have, and the
+        item count is the honest version of "we have plenty in".
+
+        THE COUNT IS NOT DECORATION. It is the difference between a shop worth
+        browsing and one worth leaving, and a buyer decides that in the first
+        two seconds on this line.
+    """
+    count = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.PUBLISHED.value,
+            )
+        )
+        or 0
+    )
+    hello = f"*{seller.display_name}*\nKaribu! 👋"
+    if not count:
+        return hello
+    return f"{hello} We've got {_plural(count, 'item')} in the shop today."
 
 
 def _menu(
-    db: Session, seller: Seller, convo: WaConversation, *, arriving: bool = False
+    db: Session, seller: Seller, convo: WaConversation, *, greet: bool = False
 ) -> list[Reply]:
     """
     The category menu, and the state that makes its numbers meaningful.
@@ -255,18 +309,24 @@ def _menu(
         db: Session.
         seller: The shop.
         convo: The conversation, moved into BROWSING.
-        arriving: True only on the buyer's FIRST message to this shop.
+        greet: Whether to introduce the shop before asking anything.
 
     Notes:
-        THE GREETING IS AN ARRIVAL, NOT A HEADER. This used to open with the
-        shop's name and "Karibu!" every single time — and because an
-        unrecognised word falls back to here, a buyer mid-purchase who typed
-        something we could not read was greeted again, from the top, as though
-        they had just walked in. Nothing else in the thread said "robot" louder.
+        A GREETING IS ANSWERED WITH A GREETING. Somebody who types "Hi" is
+        saying hello, and replying with a bare "What are you looking for?" is
+        the rudest thing in the flow — it answers a person with a form. Somebody
+        who taps "Keep shopping" mid-basket is not saying hello, and being
+        introduced to the shop again is the opposite failure.
 
-        A shop introduces itself once. After that it is simply who you are
-        talking to, and repeating the name on every message is what a machine
-        does to compensate for not being a person.
+        So the CALLER decides, from what was actually said, rather than this
+        function guessing from state. Greeting words and arrival greet; menu
+        taps, fallbacks and mid-flow returns do not.
+
+        BOTH MISTAKES HAVE NOW BEEN MADE HERE, in that order. First it greeted
+        every single time, so an unreadable word mid-purchase met the buyer at
+        the door as though they had just walked in. Then it greeted almost
+        never, and somebody opening with "Hi" was answered by a numbered list
+        belonging to nobody.
 
         A shop with no categories skips straight to the product list rather than
         showing an empty menu — a seller who never typed a category should not
@@ -274,7 +334,7 @@ def _menu(
     """
     categories = get_categories(db, seller)[:PAGE_SIZE]
     if not categories:
-        return _greet_then(db, seller, convo, arriving=arriving)
+        return _greet_then(db, seller, convo, greet=greet)
 
     convo.state = ConversationState.BROWSING
     convo.context = {"options": categories}
@@ -284,7 +344,7 @@ def _menu(
     # numbers are what make that work.
     lines = [f"{i}. {name}" for i, name in enumerate(categories, start=1)]
     question = "What are you looking for?"
-    opening = f"{_greeting(seller)}\n\n{question}" if arriving else question
+    opening = f"{_greeting(db, seller)}\n\n{question}" if greet else question
     return [
         Reply(
             f"{opening}\n\n" + "\n".join(lines),
@@ -295,17 +355,17 @@ def _menu(
 
 
 def _greet_then(
-    db: Session, seller: Seller, convo: WaConversation, *, arriving: bool = False
+    db: Session, seller: Seller, convo: WaConversation, *, greet: bool = False
 ) -> list[Reply]:
     """Everything in the shop — for a shop whose seller never typed a category."""
     replies = _list_products(db, seller, convo, category=None)
-    if not arriving:
+    if not greet:
         return replies
 
     first = replies[0]
     return [
         Reply(
-            f"{_greeting(seller)}\n\n{first.body}",
+            f"{_greeting(db, seller)}\n\n{first.body}",
             media_url=first.media_url,
             buttons=first.buttons,
             rows=first.rows,
@@ -579,11 +639,20 @@ def _place(
     *,
     name: str,
     address: str | None,
-) -> list[Reply]:
-    """Turn the basket into an order, and tell them exactly how to pay."""
+) -> Outcome:
+    """
+    Turn the basket into an order, tell the buyer how to pay, tell the seller
+    it happened.
+
+    Notes:
+        THE SELLER IS TOLD AT PLACEMENT, not at payment. Until this, the only
+        thing that notified anybody was the Daraja callback — so a seller on
+        Pochi, which is most of them, found out about orders by happening to
+        type `orders`. Their phone never rang.
+    """
     cart = _basket(db, convo, seller)
     if not cart.items:
-        return _show_cart(db, seller, convo)
+        return Outcome(_show_cart(db, seller, convo))
 
     try:
         order = place_order(
@@ -599,7 +668,7 @@ def _place(
     except OrderError as exc:
         convo.state = ConversationState.CART
         convo.context = {}
-        return [Reply(str(exc), buttons=[("menu", "Keep shopping")])]
+        return Outcome([Reply(str(exc), buttons=[("menu", "Keep shopping")])])
 
     db.flush()
 
@@ -607,7 +676,10 @@ def _place(
     convo.order_reference = order.reference
     convo.context = {}
 
-    return _ask_for_payment(db, seller, order)
+    return Outcome(
+        _ask_for_payment(db, seller, order),
+        notify=_tell_seller(seller, Reply(order_placed_alert(order))),
+    )
 
 
 def _ask_for_payment(db: Session, seller: Seller, order: Order) -> list[Reply]:
@@ -678,7 +750,7 @@ def _ask_for_payment(db: Session, seller: Seller, order: Order) -> list[Reply]:
     ]
 
 
-def _claim(db: Session, convo: WaConversation, text: str) -> list[Reply]:
+def _claim(db: Session, convo: WaConversation, text: str) -> Outcome:
     """
     Record the code the buyer says they paid with.
 
@@ -689,28 +761,43 @@ def _claim(db: Session, convo: WaConversation, text: str) -> list[Reply]:
     """
     code = text.strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{6,15}", code):
-        return [
-            Reply(
-                "That doesn't look like an M-Pesa code. It's the reference in "
-                "the M-Pesa message, like _SLK7XA2B9C_.\n\n"
-                "Send it here once you've paid."
-            )
-        ]
+        return Outcome(
+            [
+                Reply(
+                    "That doesn't look like an M-Pesa code. It's the reference in "
+                    "the M-Pesa message, like _SLK7XA2B9C_.\n\n"
+                    "Send it here once you've paid."
+                )
+            ]
+        )
 
     order = db.scalar(select(Order).where(Order.reference == convo.order_reference))
     if order is None:
         convo.state = ConversationState.BROWSING
         convo.order_reference = None
-        return [Reply("I've lost track of that order. Send *menu* to start again.")]
+        return Outcome([Reply("I've lost track of that order. Send *menu* to start again.")])
 
     claim_payment(db, order, code=code)
-    return [
-        Reply(
-            f"Got it — *{code}* recorded against order *{order.reference}*.\n\n"
-            "The seller will confirm once the money shows in their M-Pesa. "
-            "You'll get a message here when they do."
-        )
-    ]
+
+    # THE SELLER IS TOLD, WITH THE CONFIRM BUTTON ON IT. The reply below has
+    # always promised the buyer "you'll get a message here when they do" — a
+    # promise nothing kept, because nothing told the seller there was anything
+    # to confirm. They had to guess to type `orders`.
+    alert = Reply(
+        payment_claimed_alert(order, code),
+        buttons=[(f"confirm:{order.reference}", "Confirm paid"[:20])],
+    )
+
+    return Outcome(
+        [
+            Reply(
+                f"Got it — *{code}* recorded against order *{order.reference}*.\n\n"
+                "The seller will confirm once the money shows in their M-Pesa. "
+                "You'll get a message here when they do."
+            )
+        ],
+        notify=_tell_seller(order.seller, alert),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -965,6 +1052,32 @@ def _resume_pricing(db: Session, seller: Seller, convo: WaConversation) -> list[
     convo.state = ConversationState.PRICING
     convo.context = {"pricing_queue": unpriced}
     return _pricing_prompt(db, seller, convo)
+
+
+def _tell_seller(seller: Seller, reply: Reply) -> list[tuple[str, Reply]]:
+    """
+    Address one message to a seller, if we have a number to send it to.
+
+    Returns:
+        A single ``(phone, Reply)``, or nothing at all.
+
+    Notes:
+        EMPTY RATHER THAN A GUESS. A seller with no WhatsApp number cannot be
+        reached, and the database already refuses to publish such a shop — so in
+        practice this is belt and braces. It returns a list so callers can
+        splice it in without checking.
+
+        WHAT THIS CANNOT FIX. Meta's 24-hour window means a free-form message
+        only reaches somebody who has written to us within the last day. A
+        seller who has not opened the thread since yesterday will not get this,
+        and the send fails silently at the webhook. The order is still there and
+        `orders` still lists it — which is why that screen exists, and why the
+        alert is a convenience rather than the system of record. Making it
+        reliable needs an approved utility template, which is its own piece of
+        work.
+    """
+    phone = (seller.whatsapp_number or "").strip()
+    return [(phone, reply)] if phone else []
 
 
 def _plural(count: int, word: str) -> str:
@@ -1314,7 +1427,7 @@ def _seller_orders(db: Session, seller: Seller) -> list[Reply]:
     return [Reply("\n".join(lines), rows=rows, list_label="Confirm paid")]
 
 
-def _confirm_order(db: Session, seller: Seller, reference: str) -> list[Reply]:
+def _confirm_order(db: Session, seller: Seller, reference: str) -> Outcome:
     """
     The seller vouches that one order's money arrived.
 
@@ -1338,19 +1451,29 @@ def _confirm_order(db: Session, seller: Seller, reference: str) -> list[Reply]:
         select(Order).where(Order.reference == reference, Order.seller_id == seller.id)
     )
     if order is None:
-        return [Reply("I can't find that order. Send *orders* to see what's waiting.")]
+        return Outcome([Reply("I can't find that order. Send *orders* to see what's waiting.")])
 
     try:
         confirm_payment(db, order)
     except OrderError as exc:
-        return [Reply(str(exc))]
+        return Outcome([Reply(str(exc))])
 
-    return [
-        Reply(
-            f"*{order.reference}* is paid. ✅\n\nKES {order.total_kes:,} from {order.buyer_name}.",
-            buttons=[("orders", "What else is waiting")],
-        )
-    ]
+    # THE BUYER IS TOLD. `_claim` promised them "you'll get a message here
+    # when they do" and nothing delivered it — the buyer was left watching a
+    # thread that had gone quiet on the one question that mattered to them.
+    receipt = Reply(buyer_receipt(order, seller))
+
+    return Outcome(
+        [
+            Reply(
+                f"*{order.reference}* is paid. ✅\n\n"
+                f"KES {order.total_kes:,} from {order.buyer_name}.\n\n"
+                f"_I've told {order.buyer_name} it's confirmed._",
+                buttons=[("orders", "What else is waiting")],
+            )
+        ],
+        notify=[(order.buyer_phone, receipt)],
+    )
 
 
 def _welcome(convo: WaConversation) -> list[Reply]:
@@ -1664,7 +1787,7 @@ def handle(
         # instead of it. The chat can sell; a page browses forty items better
         # than a list picker ever will, and the buyer should not have to pick
         # one surface before seeing either.
-        return Outcome([*switched, *_menu(db, seller, convo, arriving=True), _shop_card(seller)])
+        return Outcome([*switched, *_menu(db, seller, convo, greet=True), _shop_card(seller)])
 
     # ── The seller's own side of the thread ─────────────────────────────────
     # Checked before anything else a buyer could mean. A number typed by a
@@ -1711,7 +1834,7 @@ def handle(
         if lowered in {"orders", "my orders", "sales"}:
             return Outcome(_seller_orders(db, owner))
         if lowered.startswith("confirm:"):
-            return Outcome(_confirm_order(db, owner, said.split(":", 1)[1].strip()))
+            return _confirm_order(db, owner, said.split(":", 1)[1].strip())
         if lowered in {"payments", "payment", "get paid", "set that up"}:
             return Outcome(_ask_payment_kind(convo))
         if lowered in {"share", "my shop link", "link", "my link"}:
@@ -1785,7 +1908,14 @@ def handle(
         return Outcome(_menu(db, seller, convo))
 
     # ── Words that work from anywhere ───────────────────────────────────────
-    if lowered in {"menu", "hi", "hello", "start", "habari", "niaje", "keep shopping"}:
+    # SAYING HELLO IS SAYING HELLO. Answered with the shop's name and what it
+    # has in — not with a bare question, which is what a form does.
+    if lowered in {"hi", "hello", "start", "habari", "niaje", "mambo", "sasa"}:
+        return Outcome(_menu(db, seller, convo, greet=True))
+
+    # Tapping "Keep shopping" is not a greeting. Introducing the shop again
+    # here is the repetition that made the thread feel like a machine.
+    if lowered in {"menu", "keep shopping", "see what's in stock", "start again"}:
         return Outcome(_menu(db, seller, convo))
 
     if lowered in {"store", "shop", "website", "open store", "see everything"}:
@@ -1900,7 +2030,7 @@ def handle(
     elif convo.state == ConversationState.CHECKOUT_DELIVERY:
         name = str(convo.context.get("buyer_name", ""))
         if lowered in {"collect", "i'll collect", "ill collect", "pickup", "pick up"}:
-            return Outcome(_place(db, seller, convo, phone, name=name, address=None))
+            return _place(db, seller, convo, phone, name=name, address=None)
         if lowered in {"deliver", "deliver to me", "delivery"}:
             return Outcome(_ask_address(convo))
         return Outcome(_ask_delivery(convo, name))
@@ -1909,25 +2039,55 @@ def handle(
         address = said.strip()
         if len(address) < 3:
             return Outcome(_ask_address(convo))
-        return Outcome(
-            _place(
-                db,
-                seller,
-                convo,
-                phone,
-                name=str(convo.context.get("buyer_name", "")),
-                address=address,
-            )
+        return _place(
+            db,
+            seller,
+            convo,
+            phone,
+            name=str(convo.context.get("buyer_name", "")),
+            address=address,
         )
 
     elif convo.state == ConversationState.PAYING:
-        return Outcome(_claim(db, convo, said))
+        return _claim(db, convo, said)
+
+    # ── Taking them at their word ───────────────────────────────────────────
+    # Somebody who types "handbag" has said exactly what they want, and sending
+    # them back to a category list to find it themselves is the machine asking
+    # the person to do the machine's job. Searched before the fallback, so a
+    # real request is never mistaken for a parse failure.
+    if len(said) >= 3 and _digits(said) is None:
+        found = get_public_products(db, seller, search=said)[:PAGE_SIZE]
+        if len(found) == 1:
+            return Outcome(_show_product(convo, found[0]))
+        if found:
+            convo.state = ConversationState.LISTING
+            convo.context = {"products": [p.id for p in found], "category": None}
+            lines = [
+                f"{i}. {product.title} — {product.price_display or 'Ask for price'}"
+                for i, product in enumerate(found, start=1)
+            ]
+            return Outcome(
+                [
+                    Reply(
+                        f'Here is what we have for "{said}":\n\n' + "\n".join(lines),
+                        rows=[
+                            (
+                                f"prod:{product.id}",
+                                product.title,
+                                product.price_display or "Ask for price",
+                            )
+                            for product in found
+                        ],
+                        list_label="See items",
+                    )
+                ]
+            )
 
     # ── Anything we could not read ──────────────────────────────────────────
     # Re-offering the menu beats "I didn't understand": the buyer's problem is
     # not that we failed to parse, it is that they cannot see their options.
     #
-    # NOT GREETED AGAIN, THOUGH. _menu only introduces the shop on arrival, so
-    # landing here mid-purchase no longer reads as being met at the door by
-    # somebody who has forgotten the last ten minutes.
+    # NOT GREETED AGAIN, THOUGH. Landing here mid-purchase must not read as
+    # being met at the door by somebody who has forgotten the last ten minutes.
     return Outcome(_menu(db, seller, convo))

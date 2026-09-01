@@ -56,6 +56,52 @@ def buyer_receipt(order: Order, seller: Seller) -> str:
     )
 
 
+def order_placed_alert(order: Order) -> str:
+    """
+    What the seller reads the moment an order is placed — before any money.
+
+    Notes:
+        SEPARATE FROM ``seller_alert``, which says "paid" and must keep saying
+        it. This one is the opposite: nothing has arrived yet, and telling a
+        seller they have been paid when they have not is the one lie that would
+        cost them real money — they would hand over the goods.
+
+        IT GOES OUT AT PLACEMENT, not at payment. A seller who only hears about
+        an order once it is settled cannot set anything aside, and the buyer is
+        standing in a shop somewhere waiting to be told it is coming.
+    """
+    lines = [f"• {item.title} × {item.quantity}" for item in order.items]
+    where = f"\n{order.delivery_address}" if order.delivery_address else ""
+    collecting = "" if order.delivery_address else "\n_Collecting in person._"
+    return (
+        f"New order. 🛒\n\n"
+        f"*{order.reference}*\n\n" + "\n".join(lines) + f"\n\n"
+        f"Total: *{_money(order.total_kes)}*\n\n"
+        f"{order.buyer_name}\n"
+        f"{order.buyer_phone}{where}{collecting}\n\n"
+        f"_They are paying now. I'll tell you when they send the code._"
+    )
+
+
+def payment_claimed_alert(order: Order, code: str) -> str:
+    """
+    What the seller reads when a buyer says they have paid.
+
+    Notes:
+        THE WORDING IS CAREFUL AND HAS TO BE. A code is text the buyer typed; it
+        looks identical whether it came off a real M-Pesa message or was
+        invented. So this says what the buyer SAYS, names the amount to check
+        against, and asks the seller to look at their own phone. Anything
+        shorter reads as "you have been paid", which is not ours to assert.
+    """
+    return (
+        f"{order.buyer_name} says they've paid.\n\n"
+        f"*{order.reference}* — *{_money(order.total_kes)}*\n"
+        f"M-Pesa code: *{code}*\n\n"
+        f"_Check your M-Pesa, then confirm it below._"
+    )
+
+
 def seller_alert(order: Order) -> str:
     """
     What the seller reads when they make a sale.

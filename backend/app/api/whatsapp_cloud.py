@@ -197,6 +197,13 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
         outcome = handle(db, sender, text, media=fetches)
         outgoing.append((sender, outcome.replies))
 
+        # MESSAGES FOR OTHER PEOPLE, queued the same way and sent after the same
+        # commit. A buyer placing an order is news the seller needs without
+        # having to ask for it, and a seller confirming a payment is news the
+        # buyer was promised in writing. Each goes to its own number.
+        for other, reply in outcome.notify:
+            outgoing.append((other, [reply]))
+
     # ONE COMMIT for every message record and everything the bot did. A reply
     # promising "added to your basket" must not survive a failed basket write.
     db.commit()

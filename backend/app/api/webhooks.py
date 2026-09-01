@@ -208,4 +208,13 @@ async def whatsapp_inbound(
     # promising "added to your basket" must not survive a failed basket write.
     db.commit()
 
+    # ``outcome.notify`` IS DROPPED HERE, and that is a known limit of the
+    # Twilio path rather than an oversight. A TwiML response can only answer the
+    # person who wrote in; reaching a third party needs a separate REST call
+    # with its own credentials and failure modes. Meta is the live provider and
+    # its webhook sends them — see api/whatsapp_cloud.py.
+    #
+    # The consequence, if a shop ever runs on Twilio again: order alerts and
+    # buyer receipts go unsent. Nothing is lost, because `orders` remains the
+    # system of record, but nobody's phone rings.
     return PlainTextResponse(_twiml(outcome.replies), media_type="application/xml")

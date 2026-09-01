@@ -196,24 +196,55 @@ class TestTheSizeIsAsked:
 
 
 class TestItDoesNotRepeatItself:
-    def test_the_shop_introduces_itself_once(self, db: Session) -> None:
-        """
-        Arrival is a greeting. Everything after it is a conversation already in
-        progress, and a shop that says "Karibu!" every message is a machine
-        compensating for not being a person.
-        """
-        a_shop(db)
-        make_product(
-            db,
-            make_seller(db, slug="x", display_name="X", whatsapp_number="254799000111"),
-            title="Other",
-        )
+    def test_arriving_is_greeted(self, db: Session) -> None:
+        seller = a_shop(db)
+        plain_item(db, seller)
 
         arrival = screen(say(db, "Shop Vitabu Bora"))
-        later = screen(say(db, "menu"))
 
         assert "Karibu" in arrival
-        assert "Karibu" not in later
+        assert "Vitabu Bora" in arrival
+
+    def test_the_greeting_says_what_is_in_the_shop(self, db: Session) -> None:
+        """
+        A buyer decides whether a shop is worth browsing in the first two
+        seconds, and decides it on this line. "What are you looking for?" is a
+        form; a shopkeeper tells you who they are and what they have.
+        """
+        seller = a_shop(db)
+        plain_item(db, seller)
+        sized_item(db, seller)
+
+        arrival = screen(say(db, "Shop Vitabu Bora"))
+
+        assert "2 items in the shop today" in arrival
+
+    def test_saying_hi_is_answered_with_a_greeting(self, db: Session) -> None:
+        """
+        THE OVER-CORRECTION. Repetition was killed by greeting almost never, so
+        a buyer opening with "Hi" got a bare numbered list belonging to nobody —
+        ruder than the repetition it replaced. A greeting is answered with a
+        greeting.
+        """
+        seller = a_shop(db)
+        plain_item(db, seller)
+        say(db, "Shop Vitabu Bora")
+        say(db, "menu")
+
+        replies = say(db, "Hi")
+
+        assert "Karibu" in screen(replies)
+        assert "Vitabu Bora" in screen(replies)
+
+    def test_tapping_keep_shopping_is_not_a_greeting(self, db: Session) -> None:
+        """The other half of the rule. Somebody mid-basket did not say hello,
+        and introducing the shop to them again is the repetition."""
+        seller = a_shop(db)
+        plain_item(db, seller)
+        say(db, "Shop Vitabu Bora")
+
+        assert "Karibu" not in screen(say(db, "menu"))
+        assert "Karibu" not in screen(say(db, "keep shopping"))
 
     def test_an_unreadable_word_does_not_restart_the_conversation(self, db: Session) -> None:
         """
@@ -369,3 +400,60 @@ class TestOneNumberIsNotOneRole:
         assert "Book Lounge" in screen(replies)
         assert "Vitabu Bora" not in screen(replies)
         assert get_conversation(db, "254733000111").seller_id is None
+
+
+class TestItTakesThemAtTheirWord:
+    """
+    Somebody who types "handbag" has said exactly what they want. Sending them
+    to a category list to find it themselves is the machine asking the person to
+    do the machine's job.
+    """
+
+    def test_naming_one_item_goes_straight_to_it(self, db: Session) -> None:
+        seller = a_shop(db)
+        plain_item(db, seller)
+        say(db, "Shop Vitabu Bora")
+
+        replies = say(db, "tote")
+
+        assert "Leather Tote Bag" in screen(replies)
+        assert "add" in taps(replies)
+
+    def test_naming_something_broader_lists_the_matches(self, db: Session) -> None:
+        seller = a_shop(db)
+        plain_item(db, seller)
+        make_product(
+            db,
+            seller,
+            title="Woven Tote Basket",
+            price_kes=1600,
+            status=ProductStatus.PUBLISHED.value,
+            platform_post_id="7100000000000008888",
+            stock=3,
+        )
+        say(db, "Shop Vitabu Bora")
+
+        replies = say(db, "tote")
+
+        assert "Leather Tote Bag" in screen(replies)
+        assert "Woven Tote Basket" in screen(replies)
+
+    def test_a_word_that_matches_nothing_still_leaves_them_somewhere(self, db: Session) -> None:
+        """
+        The fallback has to stay: not finding a match is no reason to leave
+        somebody with nothing.
+
+        ASSERTED ON BEING OFFERED THE STOCK, not on a particular sentence. This
+        shop's products carry no category, so the menu is the whole catalogue
+        rather than a list of pills — checking for "What are you looking for?"
+        was checking which BRANCH ran, when the rule is that the buyer can still
+        get somewhere.
+        """
+        seller = a_shop(db)
+        plain_item(db, seller)
+        say(db, "Shop Vitabu Bora")
+
+        replies = say(db, "helicopter")
+
+        assert "Leather Tote Bag" in screen(replies)
+        assert taps(replies), "a reply with nothing to tap is a dead end"
