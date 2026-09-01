@@ -90,6 +90,14 @@ class ConversationState:
     #: shop is called. No account exists yet, so there is nothing to point at.
     NAMING = "naming"
 
+    #: SELLER: writing the line that tells buyers what their shop sells.
+    #:
+    #: WHY THEY WRITE IT AND NOT US. The welcome can derive a description from
+    #: their categories, and it is serviceable — but nothing generated will
+    #: describe somebody's business as well as they can, and this is the first
+    #: thing every one of their customers reads.
+    ABOUT = "about"
+
     #: SELLER: choosing how they take M-Pesa — Pochi, till or paybill.
     PAY_KIND = "pay_kind"
 
@@ -115,6 +123,7 @@ class ConversationState:
         PAYING,
         PRICING,
         NAMING,
+        ABOUT,
         PAY_KIND,
         PAY_NUMBER,
     )
@@ -167,7 +176,7 @@ class WaConversation(Base):
         CheckConstraint(
             "state IN ('new', 'browsing', 'listing', 'product', 'variant', "
             "'cart', 'checkout_name', 'checkout_delivery', 'address', 'paying', "
-            "'pricing', 'naming', 'pay_kind', 'pay_number')",
+            "'pricing', 'naming', 'about', 'pay_kind', 'pay_number')",
             name="ck_wa_conversations_state_valid",
         ),
         # Past 'new' there must be a shop. Every later state's replies are about
@@ -178,8 +187,8 @@ class WaConversation(Base):
         # their conversation at their own storefront as though they were a
         # customer of it.
         CheckConstraint(
-            "state IN ('new', 'pricing', 'naming', 'pay_kind', 'pay_number') "
-            "OR seller_id IS NOT NULL",
+            "state IN ('new', 'pricing', 'naming', 'about', 'pay_kind', "
+            "'pay_number') OR seller_id IS NOT NULL",
             name="ck_wa_conversations_browsing_needs_seller",
         ),
         # A buyer waiting to pay must know which order they are paying for,

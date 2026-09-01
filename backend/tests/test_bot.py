@@ -396,7 +396,9 @@ class TestTheWordsThatAlwaysWork:
         say(db, f"shop {seller.slug}")
         say(db, "1")
 
-        assert "What are you looking for?" in say(db, "niaje")
+        # The welcome closes with "What are you after today?" now — a
+        # greeting is answered with a greeting, not with a bare question.
+        assert "Karibu" in say(db, "niaje")
 
 
 class TestTwoBuyersDoNotCollide:
@@ -466,9 +468,13 @@ class TestNativeComponents:
 
         assert reply.rows is not None
         assert [r[0] for r in reply.rows] == ["cat:Fashion", "cat:Shoes"]
-        # And the same options are readable without any component at all.
-        assert "1. Fashion" in reply.body
-        assert "2. Shoes" in reply.body
+        # And the same options are readable without any component at all. The
+        # number is what a buyer types on a handset that draws no picker; the
+        # icon between it and the name is decoration.
+        assert "1." in reply.body
+        assert "Fashion" in reply.body
+        assert "2." in reply.body
+        assert "Shoes" in reply.body
 
     def test_a_product_row_carries_the_price_as_its_description(self, db: Session) -> None:
         """

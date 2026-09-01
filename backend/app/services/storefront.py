@@ -133,6 +133,7 @@ def get_public_products(
     category: str | None = None,
     search: str | None = None,
     sort: str | None = None,
+    max_price_kes: int | None = None,
 ) -> list[Product]:
     """
     The shop's visible catalogue, optionally filtered.
@@ -152,6 +153,9 @@ def get_public_products(
         search: Free text matched against title and description.
         sort: One of ``SORT_OPTIONS``. Anything else falls back to newest,
             silently — a buyer who edits the URL gets a sane page, not a 500.
+        max_price_kes: Ceiling, inclusive. Added for the chat, where a buyer
+            types "anything under 1000" — a question people genuinely ask a
+            shopkeeper and could not previously ask here.
 
     Returns:
         Published products, filtered and ordered.
@@ -177,6 +181,16 @@ def get_public_products(
                 Product.title.ilike(pattern),
                 Product.description.ilike(pattern),
             )
+        )
+
+    if max_price_kes is not None:
+        # UNPRICED ITEMS ARE EXCLUDED, not treated as free. A draft that never
+        # got a price is not "under 1000"; it is unknown, and putting it in
+        # front of somebody who asked about their budget answers a question
+        # they did not ask.
+        query = query.where(
+            Product.price_kes.is_not(None),
+            Product.price_kes <= max_price_kes,
         )
 
     # In-stock always leads, whatever the sort. A sold-out item at the top of a

@@ -269,20 +269,97 @@ def _shop_card(seller: Seller) -> Reply:
     )
 
 
-def _greeting(db: Session, seller: Seller) -> str:
+#: Emoji for the categories Kenyan sellers actually type, matched on a keyword
+#: rather than the whole string so "School Supplies" and "supplies" both land.
+#:
+#: DECORATION, NOT DATA. An unmatched category gets a neutral bullet rather than
+#: a wrong picture — a guess here costs nothing, but a confident wrong guess on
+#: anything a buyer might act on would.
+_CATEGORY_EMOJI: tuple[tuple[str, str], ...] = (
+    ("book", "📚"),
+    ("revision", "📝"),
+    ("stationer", "✏️"),
+    ("school", "🎓"),
+    ("shoe", "👟"),
+    ("sandal", "👡"),
+    ("bag", "👜"),
+    ("cloth", "👕"),
+    ("fashion", "👗"),
+    ("dress", "👗"),
+    ("beauty", "💄"),
+    ("hair", "💇"),
+    ("phone", "📱"),
+    ("electronic", "🔌"),
+    ("kitchen", "🍳"),
+    ("home", "🏠"),
+    ("food", "🍲"),
+    ("baby", "🧸"),
+    ("jewel", "💍"),
+    ("watch", "⌚"),
+)
+
+
+def _category_icon(name: str) -> str:
+    """A picture for one category, or a bullet when nothing fits."""
+    lowered = name.lower()
+    for keyword, emoji in _CATEGORY_EMOJI:
+        if keyword in lowered:
+            return emoji
+    return "•"
+
+
+def _shop_blurb(db: Session, seller: Seller) -> str:
     """
-    How the shop introduces itself: who it is, and what it has in.
+    One line saying what this shop actually sells.
 
     Notes:
-        IT NAMES THE SHOP AND THE STOCK. A buyer arriving from a status post has
-        no idea whose thread they are in — the chat header says Biasharamall,
-        because the number is shared. Opening with "What are you looking for?"
-        is a form; a shopkeeper says who they are and what they have, and the
-        item count is the honest version of "we have plenty in".
+        THE SELLER'S OWN WORDS FIRST. ``bio`` is what they wrote about
+        themselves, and nothing we generate will describe their shop better than
+        they can. `about` in the chat is how they set it.
 
-        THE COUNT IS NOT DECORATION. It is the difference between a shop worth
-        browsing and one worth leaving, and a buyer decides that in the first
-        two seconds on this line.
+        DERIVED FROM CATEGORIES OTHERWISE, because the alternative is a welcome
+        that names a shop and says nothing about it — which is the difference
+        between "Karibu Vitabu Bora" and "Karibu Vitabu Bora, we sell books and
+        revision materials". The categories are the seller's own words too; they
+        typed them onto their products.
+
+        EMPTY WHEN WE KNOW NOTHING. A sentence invented to fill the gap would be
+        us describing somebody's business to their own customers on no evidence.
+    """
+    if seller.bio and seller.bio.strip():
+        return seller.bio.strip()
+
+    categories = get_categories(db, seller)
+    if not categories:
+        return ""
+
+    lowered = [c.lower() for c in categories]
+    listed = lowered[0] if len(lowered) == 1 else ", ".join(lowered[:-1]) + f" and {lowered[-1]}"
+    return f"{seller.display_name} sells {listed}, straight here on WhatsApp."
+
+
+def _greeting(db: Session, seller: Seller) -> list[Reply]:
+    """
+    The shop's welcome: who it is, what it sells, what it has, how to ask.
+
+    Notes:
+        THIS IS THE SHOP FRONT. A buyer arrives from a status post into a thread
+        whose header reads "Biasharamall", because the number is shared — so
+        everything they learn about whose shop this is, they learn here. Two
+        earlier versions got it wrong in opposite directions: one repeated
+        "Karibu!" on every single message, the other answered "Hi" with a bare
+        numbered list belonging to nobody.
+
+        IT TEACHES THE INTERFACE BY EXAMPLE. The buyer can type what they want
+        in their own words — but nothing told them so, and a person handed a
+        numbered menu assumes numbers are all it takes. The examples are the
+        cheapest way to say "talk to me normally", and each one is a query that
+        genuinely works: a name, a description, a budget.
+
+        NO EXAMPLE PROMISES SOMETHING WE CANNOT DO. That rule cost a feature —
+        "what do you have under KSh 1,000" was written first and the price
+        filter built afterwards, rather than shipping a suggestion that would
+        have dropped the buyer into a fallback.
     """
     count = (
         db.scalar(
@@ -293,10 +370,44 @@ def _greeting(db: Session, seller: Seller) -> str:
         )
         or 0
     )
-    hello = f"*{seller.display_name}*\nKaribu! 👋"
-    if not count:
-        return hello
-    return f"{hello} We've got {_plural(count, 'item')} in the shop today."
+
+    parts = [f"Karibu {seller.display_name}! 👋"]
+
+    blurb = _shop_blurb(db, seller)
+    if blurb:
+        parts.append(blurb)
+
+    if count:
+        parts.append(f"We have *{_plural(count, 'item')}* available right now.")
+
+    parts.append(
+        "Tell me what you're looking for and I'll find it — you can say things like:\n\n"
+        '_"Show me school bags"_\n'
+        '_"I\'m looking for a revision book"_\n'
+        '_"What do you have under 1000?"_'
+    )
+
+    categories = get_categories(db, seller)[:PAGE_SIZE]
+    if categories:
+        # NUMBERED AS WELL AS PICTURED. The list picker is the nice path,
+        # and the typed number is the one that works on a handset that
+        # draws no picker — which is a lot of them here. Dropping the
+        # numbers left BROWSING still mapping "2" to a category with
+        # nothing on screen saying so.
+        listed = "\n".join(
+            f"{i}. {_category_icon(name)}  {name}" for i, name in enumerate(categories, start=1)
+        )
+        parts.append(f"Or browse what we have:\n\n{listed}")
+
+    parts.append("What are you after today? 😊")
+
+    return [
+        Reply(
+            "\n\n".join(parts),
+            rows=[(f"cat:{name}", name, "") for name in categories] or None,
+            list_label="Browse",
+        )
+    ]
 
 
 def _menu(
@@ -343,11 +454,15 @@ def _menu(
     # buyer on a cheap handset replying "2" is a real pattern here, and the
     # numbers are what make that work.
     lines = [f"{i}. {name}" for i, name in enumerate(categories, start=1)]
-    question = "What are you looking for?"
-    opening = f"{_greeting(db, seller)}\n\n{question}" if greet else question
+    # THE WELCOME IS A WHOLE MESSAGE, not a prefix. It names the shop, says
+    # what it sells, counts the stock and teaches the buyer they can simply
+    # ask — a numbered list bolted under a greeting does none of that.
+    if greet:
+        return _greeting(db, seller)
+
     return [
         Reply(
-            f"{opening}\n\n" + "\n".join(lines),
+            "What are you looking for?\n\n" + "\n".join(lines),
             rows=[(f"cat:{name}", name, "") for name in categories],
             list_label="Browse",
         )
@@ -362,17 +477,9 @@ def _greet_then(
     if not greet:
         return replies
 
-    first = replies[0]
-    return [
-        Reply(
-            f"{_greeting(db, seller)}\n\n{first.body}",
-            media_url=first.media_url,
-            buttons=first.buttons,
-            rows=first.rows,
-            list_label=first.list_label,
-        ),
-        *replies[1:],
-    ]
+    # Welcome first, then the whole catalogue — two messages, because the
+    # welcome has its own job and a shop with no categories still deserves one.
+    return [*_greeting(db, seller), *replies]
 
 
 def _list_products(
@@ -1054,6 +1161,33 @@ def _resume_pricing(db: Session, seller: Seller, convo: WaConversation) -> list[
     return _pricing_prompt(db, seller, convo)
 
 
+#: How a buyer says "nothing over this much". Matched before the text search,
+#: because "under 1000" is a budget, not a product called "under 1000".
+_BUDGET = re.compile(
+    r"(?i)\b(?:under|below|less than|cheaper than|upto|up to|max|maximum|si zaidi ya)\b"
+    r"[^0-9]{0,10}(?:ksh|kes)?\s*([0-9][0-9,]{1,6})"
+)
+
+
+def _max_price(text: str) -> int | None:
+    """
+    The ceiling a buyer named, or None.
+
+    Notes:
+        THE GREETING PROMISES THIS. It offers "What do you have under 1000?" as
+        an example, and an example that drops the buyer into a fallback teaches
+        them the shop does not listen. The suggestion was written first and this
+        was built to make it true.
+    """
+    match = _BUDGET.search(text)
+    if match is None:
+        return None
+    try:
+        return int(match.group(1).replace(",", ""))
+    except ValueError:  # pragma: no cover - the pattern only matches digits
+        return None
+
+
 def _tell_seller(seller: Seller, reply: Reply) -> list[tuple[str, Reply]]:
     """
     Address one message to a seller, if we have a number to send it to.
@@ -1365,6 +1499,59 @@ def _save_payment(db: Session, seller: Seller, convo: WaConversation, said: str)
             )
         )
     return replies
+
+
+def _ask_about(seller: Seller, convo: WaConversation) -> list[Reply]:
+    """
+    Ask the seller to describe their own shop.
+
+    Notes:
+        IT SHOWS THEM WHAT IS THERE NOW. A seller who has never set this has
+        a description derived from their categories, and one who has set it
+        wants to see it before replacing it. Asking somebody to describe
+        their shop without showing what they already wrote is how a form
+        feels.
+    """
+    convo.state = ConversationState.ABOUT
+    convo.context = {}
+
+    current = seller.bio.strip() if seller.bio and seller.bio.strip() else ""
+    lead = (
+        f"Buyers currently read this:\n\n_{current}_\n\nSend a new one to replace it."
+        if current
+        else "Tell buyers what your shop sells, in a sentence."
+    )
+    return [
+        Reply(
+            f"{lead}\n\n"
+            "_Something like: Vitabu Bora sells school books and revision "
+            "materials, delivered around Nairobi._"
+        )
+    ]
+
+
+def _save_about(db: Session, seller: Seller, convo: WaConversation, said: str) -> list[Reply]:
+    """Store the line, and show it back the way a buyer will see it."""
+    text = " ".join(said.split())
+    if len(text) < 10 or len(text) > 400:
+        return [
+            Reply(
+                "A bit more than that — one sentence saying what you sell, "
+                "between 10 and 400 characters."
+            )
+        ]
+
+    seller.bio = text
+    db.flush()
+
+    convo.state = ConversationState.NEW
+    convo.context = {}
+    return [
+        Reply(
+            f"Saved. Every buyer who opens your shop now reads:\n\n_{text}_",
+            buttons=[("share", "My shop link")],
+        )
+    ]
 
 
 def _seller_orders(db: Session, seller: Seller) -> list[Reply]:
@@ -1831,6 +2018,15 @@ def handle(
                 return Outcome(_seller_home(db, owner))
             return Outcome(_save_payment(db, owner, convo, said))
 
+        if convo.state == ConversationState.ABOUT:
+            if lowered in {"cancel", "stop", "later"}:
+                convo.state = ConversationState.NEW
+                convo.context = {}
+                return Outcome(_seller_home(db, owner))
+            return Outcome(_save_about(db, owner, convo, said))
+
+        if lowered in {"about", "about my shop", "describe my shop", "my description"}:
+            return Outcome(_ask_about(owner, convo))
         if lowered in {"orders", "my orders", "sales"}:
             return Outcome(_seller_orders(db, owner))
         if lowered.startswith("confirm:"):
@@ -2052,14 +2248,25 @@ def handle(
         return _claim(db, convo, said)
 
     # ── Taking them at their word ───────────────────────────────────────────
-    # Somebody who types "handbag" has said exactly what they want, and sending
-    # them back to a category list to find it themselves is the machine asking
-    # the person to do the machine's job. Searched before the fallback, so a
-    # real request is never mistaken for a parse failure.
-    if len(said) >= 3 and _digits(said) is None:
-        found = get_public_products(db, seller, search=said)[:PAGE_SIZE]
+    # A buyer who types "a revision book" or "anything under 1000" has said
+    # exactly what they want. Sending them to a category list to find it is
+    # the machine asking the person to do the machine's job — and the welcome
+    # explicitly invites both, so both have to work.
+    ceiling = _max_price(said)
+    if ceiling is not None or (len(said) >= 3 and _digits(said) is None):
+        # A budget is not a search term: "under 1000" must not also be matched
+        # against titles, or a product called "1000 Riddles" answers a
+        # question about money.
+        found = get_public_products(
+            db,
+            seller,
+            search=None if ceiling is not None else said,
+            max_price_kes=ceiling,
+        )[:PAGE_SIZE]
+
         if len(found) == 1:
             return Outcome(_show_product(convo, found[0]))
+
         if found:
             convo.state = ConversationState.LISTING
             convo.context = {"products": [p.id for p in found], "category": None}
@@ -2067,10 +2274,15 @@ def handle(
                 f"{i}. {product.title} — {product.price_display or 'Ask for price'}"
                 for i, product in enumerate(found, start=1)
             ]
+            heading = (
+                f"Here is what we have under *KES {ceiling:,}*:"
+                if ceiling is not None
+                else f'Here is what we have for "{said}":'
+            )
             return Outcome(
                 [
                     Reply(
-                        f'Here is what we have for "{said}":\n\n' + "\n".join(lines),
+                        heading + "\n\n" + "\n".join(lines),
                         rows=[
                             (
                                 f"prod:{product.id}",
@@ -2080,6 +2292,18 @@ def handle(
                             for product in found
                         ],
                         list_label="See items",
+                    )
+                ]
+            )
+
+        if ceiling is not None:
+            # A budget that matches nothing deserves a real answer, not a menu
+            # that silently ignores the number they named.
+            return Outcome(
+                [
+                    Reply(
+                        f"I don't have anything under *KES {ceiling:,}* right now.",
+                        buttons=[("menu", "See everything")],
                     )
                 ]
             )

@@ -28,7 +28,9 @@ tapped, and what is not said twice.
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import ConversationState, Order, OrderItem, Product, ProductStatus, Seller
@@ -205,19 +207,62 @@ class TestItDoesNotRepeatItself:
         assert "Karibu" in arrival
         assert "Vitabu Bora" in arrival
 
-    def test_the_greeting_says_what_is_in_the_shop(self, db: Session) -> None:
+    def test_the_welcome_says_who_what_and_how_many(self, db: Session) -> None:
         """
-        A buyer decides whether a shop is worth browsing in the first two
-        seconds, and decides it on this line. "What are you looking for?" is a
-        form; a shopkeeper tells you who they are and what they have.
+        A buyer decides whether a shop is worth browsing in about two seconds,
+        and decides it here. The welcome names the shop, says what it sells,
+        counts the stock, and shows how to ask — "What are you looking for?" on
+        its own is a form.
         """
         seller = a_shop(db)
+        seller.bio = "Vitabu Bora sells books and learning materials."
         plain_item(db, seller)
         sized_item(db, seller)
+        db.flush()
 
         arrival = screen(say(db, "Shop Vitabu Bora"))
 
-        assert "2 items in the shop today" in arrival
+        assert "Karibu Vitabu Bora" in arrival
+        assert "books and learning materials" in arrival
+        assert "*2 items* available" in arrival
+
+    def test_the_description_is_the_sellers_own_words(self, db: Session) -> None:
+        """Nothing we generate describes somebody's shop better than they can."""
+        seller = a_shop(db)
+        seller.bio = "Nairobi's home for second-hand novels."
+        plain_item(db, seller)
+        db.flush()
+
+        assert "Nairobi's home for second-hand novels." in screen(say(db, "Shop Vitabu Bora"))
+
+    def test_with_no_bio_it_describes_the_shop_from_its_categories(self, db: Session) -> None:
+        """Those are the seller's words too — they typed them onto the products."""
+        seller = a_shop(db)
+        make_product(
+            db,
+            seller,
+            title="Atlas",
+            category="Books",
+            price_kes=900,
+            status=ProductStatus.PUBLISHED.value,
+            platform_post_id="7100000000000007777",
+        )
+        assert seller.bio is None
+
+        arrival = screen(say(db, "Shop Vitabu Bora"))
+
+        assert "Vitabu Bora sells books" in arrival
+
+    def test_it_teaches_the_buyer_they_can_just_ask(self, db: Session) -> None:
+        """A person handed a numbered menu assumes numbers are all it takes.
+        The examples are the cheapest way to say "talk to me normally"."""
+        seller = a_shop(db)
+        plain_item(db, seller)
+
+        arrival = screen(say(db, "Shop Vitabu Bora"))
+
+        assert "you can say things like" in arrival
+        assert "under 1000" in arrival
 
     def test_saying_hi_is_answered_with_a_greeting(self, db: Session) -> None:
         """
@@ -457,3 +502,97 @@ class TestItTakesThemAtTheirWord:
 
         assert "Leather Tote Bag" in screen(replies)
         assert taps(replies), "a reply with nothing to tap is a dead end"
+
+
+class TestABudgetIsAQuestion:
+    """
+    The welcome offers "What do you have under 1000?" as an example. An example
+    that drops the buyer into a fallback teaches them the shop does not listen,
+    so the suggestion and the feature have to ship together.
+    """
+
+    def test_it_answers_a_budget(self, db: Session) -> None:
+        seller = a_shop(db)
+        make_product(
+            db,
+            seller,
+            title="Cheap Notebook",
+            price_kes=200,
+            status=ProductStatus.PUBLISHED.value,
+            platform_post_id="7100000000000006666",
+        )
+        plain_item(db, seller)  # 2,800 — over the ceiling
+
+        replies = say(db, "Shop Vitabu Bora")
+        replies = say(db, "what do you have under 1000?")
+
+        assert "Cheap Notebook" in screen(replies)
+        assert "Leather Tote Bag" not in screen(replies)
+
+    def test_several_ways_of_saying_it(self, db: Session) -> None:
+        seller = a_shop(db)
+        make_product(
+            db,
+            seller,
+            title="Cheap Notebook",
+            price_kes=200,
+            status=ProductStatus.PUBLISHED.value,
+            platform_post_id="7100000000000006666",
+        )
+        say(db, "Shop Vitabu Bora")
+
+        for phrasing in ("below 500", "less than 900", "up to 1,000", "si zaidi ya 400"):
+            assert "Cheap Notebook" in screen(say(db, phrasing)), phrasing
+
+    def test_a_budget_is_not_matched_against_titles(self, db: Session) -> None:
+        """ "under 1000" is money, not a product called "1000 Riddles"."""
+        seller = a_shop(db)
+        make_product(
+            db,
+            seller,
+            title="1000 Riddles",
+            price_kes=4000,
+            status=ProductStatus.PUBLISHED.value,
+            platform_post_id="7100000000000005555",
+        )
+        say(db, "Shop Vitabu Bora")
+
+        assert "1000 Riddles" not in screen(say(db, "anything under 1000"))
+
+    def test_nothing_in_budget_says_so_rather_than_ignoring_it(self, db: Session) -> None:
+        """A menu that silently drops the number they named is worse than a no."""
+        seller = a_shop(db)
+        plain_item(db, seller)  # 2,800
+        say(db, "Shop Vitabu Bora")
+
+        replies = say(db, "under 500")
+
+        assert "under *KES 500*" in screen(replies)
+        assert taps(replies), "a dead end is never the answer"
+
+    def test_an_unpriced_item_cannot_reach_a_buyer_at_all(self, db: Session) -> None:
+        """
+        The budget filter excludes NULL prices, and this test was written to
+        prove it — by publishing an unpriced product, which the database
+        refuses outright:
+
+            ck_products_published_requires_price
+
+        So the scenario cannot occur, and the guard in the query is belt and
+        braces rather than the thing standing between a buyer and a wrong
+        answer. Worth knowing which of the two is load-bearing.
+        """
+        seller = a_shop(db)
+
+        # The factory flushes, so the rail fires inside this call rather than
+        # on a later one.
+        with pytest.raises(IntegrityError):
+            make_product(
+                db,
+                seller,
+                title="Mystery Item",
+                price_kes=None,
+                status=ProductStatus.PUBLISHED.value,
+                platform_post_id="7100000000000004444",
+            )
+        db.rollback()

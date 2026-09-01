@@ -382,3 +382,51 @@ class TestABuyerArriving:
         replies = handle(db, "254700111222", "Shop Book Lounge").replies
 
         assert "can't find" in said(replies)
+
+
+class TestTheSellerDescribesTheirOwnShop:
+    """
+    The buyer's welcome opens with a line saying what the shop sells. It can be
+    derived from the seller's categories and that is serviceable — but nothing
+    generated describes somebody's business as well as they can, and this is the
+    first thing every one of their customers reads.
+    """
+
+    def test_about_shows_what_buyers_read_now(self, db: Session) -> None:
+        seller = make_seller(db, whatsapp_number=PHONE)
+        seller.bio = "We sell school books around Kasarani."
+        db.flush()
+
+        replies = handle(db, PHONE, "about").replies
+
+        assert "We sell school books around Kasarani." in said(replies)
+        assert get_conversation(db, PHONE).state == ConversationState.ABOUT
+
+    def test_a_seller_with_none_is_simply_asked(self, db: Session) -> None:
+        make_seller(db, whatsapp_number=PHONE)
+
+        replies = handle(db, PHONE, "about").replies
+
+        assert "what your shop sells" in said(replies)
+
+    def test_what_they_send_is_what_buyers_get(self, db: Session) -> None:
+        seller = make_seller(db, whatsapp_number=PHONE)
+
+        handle(db, PHONE, "about")
+        replies = handle(db, PHONE, "Vitabu Bora sells revision books and atlases.").replies
+
+        db.refresh(seller)
+        assert seller.bio == "Vitabu Bora sells revision books and atlases."
+        assert "Vitabu Bora sells revision books and atlases." in said(replies)
+        assert get_conversation(db, PHONE).state == ConversationState.NEW
+
+    def test_something_too_short_is_refused_without_losing_the_thread(self, db: Session) -> None:
+        """A two-word description is worse than the derived one it replaces."""
+        seller = make_seller(db, whatsapp_number=PHONE)
+
+        handle(db, PHONE, "about")
+        handle(db, PHONE, "books")
+
+        db.refresh(seller)
+        assert seller.bio is None
+        assert get_conversation(db, PHONE).state == ConversationState.ABOUT
