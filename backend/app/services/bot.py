@@ -2156,6 +2156,64 @@ def _relay_answer(db: Session, seller: Seller, convo: WaConversation, said: str)
     )
 
 
+#: What we are waiting on, when an intent was understood but the thing it
+#: needs was not said. Held in the conversation's context rather than in a
+#: state, because it lasts exactly one message and needs no rail of its own.
+_ASKING_FOR = "awaiting"
+
+#: The question to ask for each, and it is a QUESTION rather than a menu.
+#: "First change my shops name you got it wrong" is a perfectly clear request
+#: with the new name missing; the human answer is "sure, what should it be?"
+#: and the old code's answer was the status card, again.
+_MISSING: dict[str, str] = {
+    "shop_name": "Sure — what should it be called instead?",
+    "about": ("Go on then — tell buyers what your shop sells, in a sentence."),
+    "query": "What are you looking for?",
+    "budget": "What are you looking to spend?",
+}
+
+
+def _ask_for(convo: WaConversation, what: str) -> Outcome:
+    """
+    Ask for the one thing that was missing, and remember we asked.
+
+    Notes:
+        THE HOLE THIS CLOSES. The model can understand a request perfectly and
+        still have nothing to hand back — somebody saying "change my shop's
+        name, you got it wrong" has named an intent and no name. Every one of
+        those fell through to the fallback, which is how a system that
+        understood you still looks like it did not.
+    """
+    convo.context = {**convo.context, _ASKING_FOR: what}
+    return Outcome([Reply(_MISSING[what])])
+
+
+def _answer_to_what_we_asked(
+    db: Session, convo: WaConversation, said: str, *, owner: Seller | None, seller: Seller | None
+) -> Outcome | None:
+    """
+    Take the answer to the question :func:`_ask_for` put, if one is pending.
+
+    Returns:
+        What to do, or None when nothing was outstanding.
+    """
+    what = convo.context.get(_ASKING_FOR)
+    if not isinstance(what, str) or not said.strip():
+        return None
+
+    convo.context = {k: v for k, v in convo.context.items() if k != _ASKING_FOR}
+
+    if what == "shop_name" and owner is not None:
+        return Outcome(_rename_shop(db, owner, said))
+    if what == "about" and owner is not None:
+        return Outcome(_save_about(db, owner, convo, said))
+    if what in {"query", "budget"} and seller is not None:
+        # Handed back to the ordinary buyer path, which already knows how to
+        # search a catalogue and read a budget out of a sentence.
+        return None
+    return None
+
+
 def _seller_said_something(db: Session, convo: WaConversation, said: str, owner: Seller) -> Outcome:
     """
     A seller wrote a sentence rather than tapping a button. Work out what it was.
@@ -2176,11 +2234,17 @@ def _seller_said_something(db: Session, convo: WaConversation, said: str, owner:
     if reading is None:
         return Outcome(_seller_home(db, owner))
 
-    if reading.intent is Intent.SHOP_NAME and reading.name:
-        return Outcome(_rename_shop(db, owner, reading.name))
+    if reading.intent is Intent.SHOP_NAME:
+        # ASKED FOR, NOT SHRUGGED AT. "Change my shop's name, you got it wrong"
+        # is a clear request carrying no new name — the answer is a question.
+        if reading.name:
+            return Outcome(_rename_shop(db, owner, reading.name))
+        return _ask_for(convo, "shop_name")
 
-    if reading.intent is Intent.SET_ABOUT and reading.about:
-        return Outcome(_save_about(db, owner, convo, reading.about))
+    if reading.intent is Intent.SET_ABOUT:
+        if reading.about:
+            return Outcome(_save_about(db, owner, convo, reading.about))
+        return _ask_for(convo, "about")
 
     if reading.intent is Intent.SELLER_ORDERS:
         return Outcome(_seller_orders(db, owner))
@@ -2249,6 +2313,12 @@ def _buyer_said_something(
     reading = _understand(db, convo, said, owner=None, shopping_at=seller)
     if reading is None:
         return None
+
+    if reading.intent is Intent.FIND_PRODUCT and not reading.query:
+        return _ask_for(convo, "query")
+
+    if reading.intent is Intent.BUDGET and not reading.max_price_kes:
+        return _ask_for(convo, "budget")
 
     if reading.intent is Intent.FIND_PRODUCT and reading.query:
         found = get_public_products(db, seller, search=reading.query)[:PAGE_SIZE]
@@ -2514,6 +2584,13 @@ def handle(
                 return Outcome(_seller_home(db, owner))
             return Outcome(_save_payment(db, owner, convo, said))
 
+        # WHAT WE JUST ASKED FOR COMES FIRST. A seller answering "Biggie
+        # Books" to "what should it be called instead?" must not have that
+        # word matched against commands or handed to the model again.
+        pending = _answer_to_what_we_asked(db, convo, said, owner=owner, seller=None)
+        if pending is not None:
+            return pending
+
         if convo.state == ConversationState.ANSWERING:
             if lowered in {"cancel", "stop", "later"}:
                 convo.state = ConversationState.NEW
@@ -2640,6 +2717,11 @@ def handle(
     if lowered in {"store", "shop", "website", "open store", "see everything"}:
         # The only reply that can open a page inside WhatsApp — see _shop_card.
         return Outcome([_shop_card(seller)])
+
+    # A buyer answering "what are you looking for?" is answering, not issuing
+    # a command. Cleared here so the search below sees their words plainly.
+    if convo.context.get(_ASKING_FOR) in {"query", "budget"}:
+        convo.context = {k: v for k, v in convo.context.items() if k != _ASKING_FOR}
 
     if lowered in {"ask", "ask the shop", "ask the seller"}:
         convo.context = {**convo.context, "awaiting_question": True}
