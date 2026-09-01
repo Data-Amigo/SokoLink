@@ -19,6 +19,7 @@ see.
 from app.db import Base
 from app.models.account import Account
 from app.models.account_claim import AccountClaim
+from app.models.buyer_question import BuyerQuestion
 from app.models.cart import Cart, CartItem
 from app.models.enums import (
     IngestMethod,
@@ -74,6 +75,7 @@ __all__ = [
     "SocialAccount",
     "VerificationMethod",
     "ConversationState",
+    "BuyerQuestion",
     "ParsedMedia",
     "WaConversation",
     "WaMessage",

@@ -32,6 +32,27 @@ from app.main import app
 
 
 @pytest.fixture(autouse=True)
+def the_model_is_never_called(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    No test reaches Gemini, whatever the developer's .env happens to hold.
+
+    WHY THIS IS AUTOUSE AND NOT OPT-IN. The conversation now falls back to a
+    model when its keyword paths miss, and that fallback is reached from dozens
+    of tests that have nothing to do with the model. On a machine with a real
+    GEMINI_API_KEY every one of them made a live call: the bot suites went from
+    four minutes to over thirty, and each run quietly spent real quota.
+
+    Nobody wrote a test that hits a paid API. The default did it for them, which
+    is exactly why the default has to be off. A test that WANTS the model swaps
+    in its own fake and sets a key — see tests/test_bot_understanding.py.
+
+    Setting the key to None is enough: `_understand` checks it before
+    constructing a client, so no network stack is ever entered.
+    """
+    monkeypatch.setattr(get_settings(), "gemini_api_key", None)
+
+
+@pytest.fixture(autouse=True)
 def settings_singleton_survives() -> Generator[None, None, None]:
     """
     Whatever a test does to the settings cache, the singleton is intact after.

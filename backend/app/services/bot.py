@@ -42,6 +42,7 @@ from urllib.parse import quote
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.agent.understand import UnderstandingError, get_understander
 from app.config import settings
 from app.models import (
     Cart,
@@ -54,7 +55,9 @@ from app.models import (
     Seller,
     WaConversation,
 )
-from app.services.accounts import SignupError, create_account_for_phone
+from app.schemas.conversation import Intent, Understanding
+from app.services.accounts import SignupError, create_account_for_phone, reserve_slug
+from app.services.bot_context import describe
 from app.services.cart import CartError, add_item, clear, get_or_create_cart
 from app.services.catalogue import PublishError, publish_product
 from app.services.daraja import get_stk_engine
@@ -74,6 +77,7 @@ from app.services.orders import (
 )
 from app.services.payment_methods import PaymentSetupError, save_payment_method
 from app.services.payments import MPESA_CALLBACK_PATH, PaymentError, start_stk_payment
+from app.services.questions import answer, ask, get_for_seller, open_questions
 from app.services.storefront import get_categories, get_public_products
 
 #: How many sizes a picker may offer. Meta's list caps at ten rows, and a
@@ -1188,6 +1192,89 @@ def _max_price(text: str) -> int | None:
         return None
 
 
+def _understand(
+    db: Session,
+    convo: WaConversation,
+    said: str,
+    *,
+    owner: Seller | None,
+    shopping_at: Seller | None,
+) -> Understanding | None:
+    """
+    Read a message the keyword matcher could not.
+
+    Returns:
+        What the model made of it, or None — no API key, a provider failure, an
+        unusable answer, or an answer it was not confident enough about.
+
+    Notes:
+        NEVER RAISES, and that is the whole contract. This sits in the middle of
+        somebody's sale. A quota wall or a timeout must degrade to the keyword
+        path we had before, not to an apology, and certainly not to a 500 that
+        Meta then redelivers.
+
+        CALLED ONLY ON THE MESSAGES THAT WOULD OTHERWISE HAVE BECOME A SHRUG.
+        Buttons carry unambiguous ids, exact commands cost nothing to match, and
+        a state expecting a number parses one. What is left is the set that made
+        the thread feel like a machine — which is exactly the set worth paying a
+        model to read.
+    """
+    if not settings.gemini_api_key:
+        return None
+
+    try:
+        reading = get_understander().read(
+            said,
+            context=describe(db, convo, owner=owner, shopping_at=shopping_at),
+        )
+    except UnderstandingError:
+        return None
+    except Exception:  # noqa: BLE001
+        # DELIBERATELY BROAD, and this is the one place it is right. The
+        # alternative to swallowing an unexpected provider error is a seller
+        # watching their shop stop answering because a Google SDK raised
+        # something nobody enumerated. The keyword path still works without it.
+        return None
+
+    return reading if reading.is_confident else None
+
+
+def _rename_shop(db: Session, seller: Seller, name: str) -> list[Reply]:
+    """
+    Change what a shop is called, and its link if nobody has that link yet.
+
+    Notes:
+        THE SLUG IS PERMANENT ONCE PUBLISHED. It is the address the seller has
+        already put in their status and their bio, and re-deriving it from a new
+        display name would silently break every link they had shared. Before
+        publishing, nobody has it, so it is regenerated to match — which is what
+        rescues a shop misnamed during signup.
+
+        THIS EXISTS BECAUSE SOMEBODY NEEDED IT AND COULD NOT HAVE IT. A seller
+        answered "what's your shop called?" with "My shop is called Biggie
+        Books", got a shop named after the whole sentence, said "Sorry I mean
+        Biggie Books is my brand name" — and there was no way to change it.
+    """
+    clean = " ".join(name.split())
+    if len(clean) < 2 or len(clean) > 60:
+        return [Reply("That name won't work — between 2 and 60 characters, please.")]
+
+    was = seller.display_name
+    seller.display_name = clean
+
+    if not seller.is_published:
+        seller.slug = reserve_slug(db, clean)
+    db.flush()
+
+    lines = [f"Changed. *{was}* is now *{clean}*."]
+    if seller.is_published:
+        # Said plainly, because a seller who expects their link to follow the
+        # name will hand out a dead one otherwise.
+        lines.append(f"_Your shop link still ends in /{seller.slug}, so it keeps working._")
+
+    return [Reply("\n".join(lines), buttons=[("share", "My shop link")])]
+
+
 def _tell_seller(seller: Seller, reply: Reply) -> list[tuple[str, Reply]]:
     """
     Address one message to a seller, if we have a number to send it to.
@@ -1762,15 +1849,36 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
     convo.state = ConversationState.NEW
     convo.context = {}
 
-    return [
+    # THE LINK, IMMEDIATELY. It was held back at first, on the reasoning that
+    # an empty shop has nothing worth looking at — which was wrong. The link
+    # is the thing that makes the shop feel real, it is what the seller came
+    # for, and every shop bot they have used hands it over the moment they
+    # give their brand name. It is also copyable text, not a button, because
+    # its whole job is to be pasted into a status.
+    replies = [
         Reply(
             f"*{seller.display_name}* is yours. 🎉\n\n"
-            "It's closed for now — nobody sees it until you say so.\n\n"
+            "It's closed for now — nobody sees it until you say so."
+        )
+    ]
+
+    link = _share_link(seller)
+    if link:
+        replies.append(
+            Reply(
+                f"This is your shop link — it is yours from now on:\n\n{link}\n\n"
+                "_It will not show anything until you put something in._"
+            )
+        )
+
+    replies.append(
+        Reply(
             "Now forward me a post from your catalogue. Photo and caption, "
             "exactly as you'd send a customer. I'll read it and set the item "
             "up, and if I can't see a price I'll ask you for one."
         )
-    ]
+    )
+    return replies
 
 
 def _seller_home(db: Session, seller: Seller) -> list[Reply]:
@@ -1879,6 +1987,391 @@ def _seller_home(db: Session, seller: Seller) -> list[Reply]:
     return [Reply("\n".join(lines), buttons=candidates[:3])]
 
 
+def _about_this_item(convo: WaConversation, db: Session, seller: Seller) -> list[Reply] | None:
+    """
+    Answer a question about the item on screen, from the item itself.
+
+    Returns:
+        The product's own facts, or None when there is nothing on screen to be
+        asking about — in which case the caller hands the question to the shop.
+
+    Notes:
+        EVERY WORD OF THIS COMES OUT OF THE ROW. The title, the price, the
+        description the seller wrote, the sizes they listed, whether it is in
+        stock. Nothing is generated, because a sentence about what an item is
+        made of has to be true, and only the seller knows.
+    """
+    product_id = convo.context.get("product")
+    product = db.get(Product, product_id) if isinstance(product_id, int) else None
+    if product is None or product.seller_id != seller.id:
+        return None
+
+    parts = [f"*{product.title}*"]
+    if product.price_display:
+        parts.append(product.price_display)
+    if product.description:
+        parts.append(product.description)
+    if product.sizes:
+        parts.append("Sizes: " + ", ".join(product.sizes))
+    parts.append("In stock." if product.stock > 0 else "_Sold out right now._")
+
+    return [
+        Reply(
+            "\n".join(parts),
+            buttons=[("add", "Add to basket"), ("ask", "Ask the shop"), ("menu", "Keep looking")],
+        )
+    ]
+
+
+def _hand_off(
+    db: Session, seller: Seller, phone: str, question: str, *, pending: str | None = None
+) -> Outcome:
+    """
+    Give a question to the shop, and tell the buyer it is on its way.
+
+    Args:
+        db: Session. The caller commits.
+        seller: The shop being asked.
+        phone: Who is waiting.
+        question: What they asked, verbatim.
+        pending: What the buyer was in the middle of, re-offered underneath so
+            asking a question does not cost them their place.
+
+    Notes:
+        THERE IS NO "I DON'T KNOW" HERE, and that is deliberate rather than
+        aspirational. Delivery to a town, what it costs, when it arrives,
+        whether something can be held back — none of it is in the system, and
+        answering anyway would put a promise on the buyer's screen that the
+        seller never made. So it goes to the person who can actually say.
+
+        THE BUYER IS TOLD IT WAS ASKED, not that it was answered. "I'll bring
+        their answer straight back" is a commitment the code keeps; anything
+        warmer would be a guess about how fast the seller reads their phone.
+    """
+    row = ask(db, seller, buyer_phone=phone, question=question)
+
+    told = f"Let me ask *{seller.display_name}* — I'll bring their answer straight back."
+    if pending:
+        told = f"{told}\n\n{pending}"
+
+    alert = Reply(
+        f"📩 A customer is asking:\n\n_{row.question}_\n\n"
+        f"Reply and I'll pass it straight on to them.",
+        buttons=[(f"answer:{row.id}", "Answer now"[:20])],
+    )
+
+    return Outcome([Reply(told)], notify=_tell_seller(seller, alert))
+
+
+def _seller_questions(db: Session, seller: Seller) -> list[Reply]:
+    """Every customer still waiting on this shop for an answer."""
+    waiting = open_questions(db, seller)
+    if not waiting:
+        return [
+            Reply(
+                "Nobody is waiting on you. 👍\n\n"
+                "When a customer asks something I can't answer — delivery, "
+                "timing, anything about your terms — it lands here.",
+                buttons=[("orders", "My orders")],
+            )
+        ]
+
+    lines = [f"*{_plural(len(waiting), 'question')} waiting on you*", ""]
+    rows: list[tuple[str, str, str]] = []
+    for row in waiting:
+        lines.append(f"• _{row.question}_")
+        rows.append(
+            (
+                f"answer:{row.id}",
+                f"Answer #{row.id}"[:24],
+                row.question[:72],
+            )
+        )
+
+    return [Reply("\n".join(lines), rows=rows, list_label="Answer one")]
+
+
+def _start_answer(db: Session, seller: Seller, convo: WaConversation, question_id: int) -> Outcome:
+    """Put the seller in front of one question, waiting for their words."""
+    row = get_for_seller(db, seller, question_id)
+    if row is None:
+        return Outcome([Reply("I can't find that question. Send *questions* to see what's open.")])
+    if not row.is_open:
+        return Outcome(
+            [
+                Reply(
+                    f"That one's already answered:\n\n_{row.answer}_",
+                    buttons=[("questions", "What else is waiting")],
+                )
+            ]
+        )
+
+    convo.state = ConversationState.ANSWERING
+    convo.context = {"question_id": row.id}
+    return Outcome(
+        [
+            Reply(
+                f"A customer asked:\n\n_{row.question}_\n\n"
+                f"Type your answer and I'll send it to them as it is."
+            )
+        ]
+    )
+
+
+def _relay_answer(db: Session, seller: Seller, convo: WaConversation, said: str) -> Outcome:
+    """
+    Send the seller's words to the customer who has been waiting.
+
+    Notes:
+        VERBATIM, AND ATTRIBUTED. The buyer reads "Vitabu Bora says: …" so they
+        know a person answered and which one. We do not tidy it, shorten it or
+        rephrase it — the moment we edit an answer about delivery, the promise
+        stops being entirely the seller's.
+    """
+    question_id = convo.context.get("question_id")
+    row = get_for_seller(db, seller, int(question_id)) if isinstance(question_id, int) else None
+    if row is None:
+        convo.state = ConversationState.NEW
+        convo.context = {}
+        return Outcome([Reply("I've lost track of that question. Send *questions* to see them.")])
+
+    try:
+        answer(db, row, said)
+    except ValueError as exc:
+        return Outcome([Reply(str(exc))])
+
+    convo.state = ConversationState.NEW
+    convo.context = {}
+
+    to_buyer = Reply(f"*{seller.display_name}* says:\n\n{row.answer}")
+
+    return Outcome(
+        [
+            Reply(
+                "Sent. ✅",
+                buttons=[("questions", "Anything else waiting")],
+            )
+        ],
+        notify=[(row.buyer_phone, to_buyer)],
+    )
+
+
+def _seller_said_something(db: Session, convo: WaConversation, said: str, owner: Seller) -> Outcome:
+    """
+    A seller wrote a sentence rather than tapping a button. Work out what it was.
+
+    Notes:
+        THE STATUS CARD USED TO BE THE ANSWER TO EVERYTHING. A seller who typed
+        "Sorry I mean Biggie Books is my brand name" got their shop status. So
+        did "A way to put my catalogue and my shop link". Twice each. Nothing
+        was wrong with the card — it was simply not an answer to either
+        question, and a system that replies to every sentence with the same
+        screen has stopped listening.
+
+        THE CARD IS STILL THE FALLBACK, because a seller with nothing
+        outstanding and an unreadable message is best served by seeing where
+        they are up to. It is the last resort now rather than the only one.
+    """
+    reading = _understand(db, convo, said, owner=owner, shopping_at=None)
+    if reading is None:
+        return Outcome(_seller_home(db, owner))
+
+    if reading.intent is Intent.SHOP_NAME and reading.name:
+        return Outcome(_rename_shop(db, owner, reading.name))
+
+    if reading.intent is Intent.SET_ABOUT and reading.about:
+        return Outcome(_save_about(db, owner, convo, reading.about))
+
+    if reading.intent is Intent.SELLER_ORDERS:
+        return Outcome(_seller_orders(db, owner))
+
+    if reading.intent is Intent.FOR_THE_SELLER:
+        # A SELLER asking us something. There is nobody to hand this to, so it
+        # is answered with what they can actually do — the honest version of
+        # "I don't know" is a way forward, not a shrug.
+        return Outcome(
+            [
+                Reply(
+                    "I can't answer that one, but here's what I can do for you.",
+                    buttons=[("orders", "My orders"), ("questions", "Customer questions")],
+                )
+            ]
+        )
+
+    if reading.intent is Intent.SELLER_PAYMENTS:
+        return Outcome(_ask_payment_kind(convo))
+
+    if reading.intent is Intent.SELLER_SHARE_LINK:
+        return Outcome([_share_card(owner)])
+
+    if reading.intent is Intent.SELLER_OPEN:
+        return Outcome(_open_shop(db, owner))
+
+    if reading.intent is Intent.SELLER_ADD_STOCK:
+        return Outcome(
+            [
+                Reply(
+                    "Forward me a post from your catalogue — the photo and the "
+                    "caption, exactly as you'd send a customer. I'll read it and "
+                    "set the item up, and ask you for a price if I can't see one.",
+                    buttons=[("share", "My shop link"), ("orders", "My orders")],
+                )
+            ]
+        )
+
+    # A greeting or a question with no action behind it. The model's own words,
+    # then their shop underneath — because "hello" deserves an answer AND a
+    # seller opening the thread still wants to know where things stand.
+    if reading.may_speak and reading.reply:
+        return Outcome([Reply(reading.reply), *_seller_home(db, owner)])
+
+    return Outcome(_seller_home(db, owner))
+
+
+def _buyer_said_something(
+    db: Session, seller: Seller, convo: WaConversation, said: str
+) -> Outcome | None:
+    """
+    A buyer wrote a sentence. Work out what it was, or hand back None.
+
+    Returns:
+        What to do, or None when the model has nothing useful — in which case
+        the caller runs the keyword search and the menu, exactly as before.
+
+    Notes:
+        IT RUNS AFTER THE FREE PATHS, NOT INSTEAD OF THEM. The literal search
+        already answers "tote" and the budget parser already answers "under
+        1000", both without spending anything. This is for the sentences those
+        two miss — "do you have anything for a nine year old", "is there
+        something cheaper", "asante" — which is where a shop either sounds like
+        a person or does not.
+    """
+    reading = _understand(db, convo, said, owner=None, shopping_at=seller)
+    if reading is None:
+        return None
+
+    if reading.intent is Intent.FIND_PRODUCT and reading.query:
+        found = get_public_products(db, seller, search=reading.query)[:PAGE_SIZE]
+        if found:
+            return Outcome(_found(db, seller, convo, found, heading=reading.query))
+        return Outcome(
+            [
+                Reply(
+                    f"I couldn't find anything matching *{reading.query}*.",
+                    buttons=[("menu", "See what we have")],
+                )
+            ]
+        )
+
+    if reading.intent is Intent.BUDGET and reading.max_price_kes:
+        found = get_public_products(db, seller, max_price_kes=reading.max_price_kes)[:PAGE_SIZE]
+        if found:
+            return Outcome(_found(db, seller, convo, found, ceiling=reading.max_price_kes))
+        return Outcome(
+            [
+                Reply(
+                    f"I don't have anything under *KES {reading.max_price_kes:,}* right now.",
+                    buttons=[("menu", "See everything")],
+                )
+            ]
+        )
+
+    if reading.intent is Intent.ABOUT_THIS_ITEM:
+        told = _about_this_item(convo, db, seller)
+        if told is not None:
+            return Outcome(told)
+        # Nothing on screen to be asking about, so it is a question for the
+        # shop like any other.
+        return _hand_off(db, seller, convo.phone, reading.question or said)
+
+    if reading.intent is Intent.FOR_THE_SELLER:
+        return _hand_off(db, seller, convo.phone, reading.question or said)
+
+    if reading.intent is Intent.VIEW_BASKET:
+        return Outcome(_show_cart(db, seller, convo))
+
+    if reading.intent is Intent.CHECKOUT:
+        return Outcome(_start_checkout(db, seller, convo))
+
+    if reading.intent is Intent.BROWSE:
+        return Outcome(_menu(db, seller, convo))
+
+    if reading.intent is Intent.GREET:
+        return Outcome(_menu(db, seller, convo, greet=True))
+
+    if reading.intent is Intent.ADD_TO_BASKET:
+        product_id = convo.context.get("product")
+        product = db.get(Product, product_id) if isinstance(product_id, int) else None
+        if product is not None and product.seller_id == seller.id and product.stock > 0:
+            if product.sizes:
+                return Outcome(_ask_variant(convo, product))
+            return Outcome(_add_to_basket(db, seller, convo, product))
+        return Outcome(_menu(db, seller, convo))
+
+    # Small talk, or a question with no action behind it. Answered in words,
+    # with a way onward attached so it is never a dead end.
+    if reading.may_speak and reading.reply:
+        return Outcome(
+            [
+                Reply(
+                    reading.reply,
+                    buttons=[("menu", "See what we have"), ("cart", "My basket")],
+                )
+            ]
+        )
+
+    return None
+
+
+def _found(
+    db: Session,
+    seller: Seller,
+    convo: WaConversation,
+    products: list[Product],
+    *,
+    heading: str | None = None,
+    ceiling: int | None = None,
+) -> list[Reply]:
+    """
+    Show what a search turned up — one product in full, or a pickable list.
+
+    Shared by the literal search, the budget parser and the model, so all three
+    produce the same screen. Three near-identical renderings of a product list
+    is how they drift into disagreeing about what a price looks like.
+    """
+    if len(products) == 1:
+        return _show_product(convo, products[0])
+
+    convo.state = ConversationState.LISTING
+    convo.context = {"products": [p.id for p in products], "category": None}
+
+    lines = [
+        f"{i}. {product.title} — {product.price_display or 'Ask for price'}"
+        for i, product in enumerate(products, start=1)
+    ]
+    if ceiling is not None:
+        title = f"Here is what we have under *KES {ceiling:,}*:"
+    elif heading:
+        title = f'Here is what we have for "{heading}":'
+    else:
+        title = "Here is what we have:"
+
+    return [
+        Reply(
+            title + "\n\n" + "\n".join(lines),
+            rows=[
+                (
+                    f"prod:{product.id}",
+                    product.title,
+                    product.price_display or "Ask for price",
+                )
+                for product in products
+            ],
+            list_label="See items",
+        )
+    ]
+
+
 def handle(
     db: Session,
     phone: str,
@@ -1938,8 +2431,11 @@ def handle(
     # The shareable link is wa.me/<bot>?text=shop%20<slug>, so the buyer's very
     # first message names the shop. That link opens WhatsApp itself — it is a
     # deep link, not a URL, so nothing can redirect it to a browser.
-    if lowered.startswith("shop "):
-        wanted = said[5:].strip()
+    if lowered.startswith("shop ") or lowered.startswith("shop:"):
+        # BOTH SEPARATORS. Links in circulation use a space; the colon form is
+        # the convention several Kenyan shop bots use, and a seller who copies
+        # that style must not hand out a link that lands in the fallback.
+        wanted = said[5:].strip().lstrip(":").strip()
         seller = _find_shop(db, wanted)
         if seller is None:
             return Outcome(
@@ -2018,6 +2514,21 @@ def handle(
                 return Outcome(_seller_home(db, owner))
             return Outcome(_save_payment(db, owner, convo, said))
 
+        if convo.state == ConversationState.ANSWERING:
+            if lowered in {"cancel", "stop", "later"}:
+                convo.state = ConversationState.NEW
+                convo.context = {}
+                return Outcome(_seller_home(db, owner))
+            return _relay_answer(db, owner, convo, said)
+
+        if lowered.startswith("answer:"):
+            tail = said.split(":", 1)[1].strip()
+            if tail.isdigit():
+                return _start_answer(db, owner, convo, int(tail))
+
+        if lowered in {"questions", "my questions", "customer questions"}:
+            return Outcome(_seller_questions(db, owner))
+
         if convo.state == ConversationState.ABOUT:
             if lowered in {"cancel", "stop", "later"}:
                 convo.state = ConversationState.NEW
@@ -2060,11 +2571,23 @@ def handle(
         # for as long as the conversation points at that shop.
         browsing_elsewhere = convo.seller_id is not None and convo.seller_id != owner.id
         if not browsing_elsewhere:
-            return Outcome(_seller_home(db, owner))
+            return _seller_said_something(db, convo, said, owner)
 
     # ── Somebody with no shop, who has not opened one either ────────────────
     if convo.state == ConversationState.NAMING:
-        return Outcome(_create_shop(db, convo, phone, said))
+        # THE BIGGIE BOOKS FIX. "My shop is called Biggie Books" used to become
+        # a shop named after the whole sentence, permanently, with no way back.
+        # The model pulls the name out; the raw text is the fallback when there
+        # is no model, which is what we had.
+        reading = _understand(db, convo, said, owner=None, shopping_at=None)
+        # Named apart from the numeric `chosen` further down this function —
+        # that one is a menu position and this one is a shop's name.
+        wanted_name = (
+            reading.name
+            if reading is not None and reading.intent is Intent.SHOP_NAME and reading.name
+            else said
+        )
+        return Outcome(_create_shop(db, convo, phone, wanted_name))
 
     seller = convo.seller
     if seller is None or not seller.is_published:
@@ -2117,6 +2640,22 @@ def handle(
     if lowered in {"store", "shop", "website", "open store", "see everything"}:
         # The only reply that can open a page inside WhatsApp — see _shop_card.
         return Outcome([_shop_card(seller)])
+
+    if lowered in {"ask", "ask the shop", "ask the seller"}:
+        convo.context = {**convo.context, "awaiting_question": True}
+        return Outcome(
+            [
+                Reply(
+                    f"What would you like to ask *{seller.display_name}*?\n\n"
+                    "_Delivery, timing, anything about the item — I'll pass it "
+                    "straight on._"
+                )
+            ]
+        )
+
+    if convo.context.get("awaiting_question") and len(said) >= 3:
+        convo.context = {k: v for k, v in convo.context.items() if k != "awaiting_question"}
+        return _hand_off(db, seller, phone, said)
 
     if lowered in {"cart", "my basket", "basket"}:
         return Outcome(_show_cart(db, seller, convo))
@@ -2249,66 +2788,38 @@ def handle(
 
     # ── Taking them at their word ───────────────────────────────────────────
     # A buyer who types "a revision book" or "anything under 1000" has said
-    # exactly what they want. Sending them to a category list to find it is
-    # the machine asking the person to do the machine's job — and the welcome
-    # explicitly invites both, so both have to work.
+    # exactly what they want. These two paths are FREE — a literal title match
+    # and a regex — so they run before anything is spent on a model.
     ceiling = _max_price(said)
-    if ceiling is not None or (len(said) >= 3 and _digits(said) is None):
-        # A budget is not a search term: "under 1000" must not also be matched
-        # against titles, or a product called "1000 Riddles" answers a
-        # question about money.
-        found = get_public_products(
-            db,
-            seller,
-            search=None if ceiling is not None else said,
-            max_price_kes=ceiling,
-        )[:PAGE_SIZE]
-
-        if len(found) == 1:
-            return Outcome(_show_product(convo, found[0]))
-
+    if ceiling is not None:
+        found = get_public_products(db, seller, max_price_kes=ceiling)[:PAGE_SIZE]
         if found:
-            convo.state = ConversationState.LISTING
-            convo.context = {"products": [p.id for p in found], "category": None}
-            lines = [
-                f"{i}. {product.title} — {product.price_display or 'Ask for price'}"
-                for i, product in enumerate(found, start=1)
+            return Outcome(_found(db, seller, convo, found, ceiling=ceiling))
+        return Outcome(
+            [
+                Reply(
+                    f"I don't have anything under *KES {ceiling:,}* right now.",
+                    buttons=[("menu", "See everything")],
+                )
             ]
-            heading = (
-                f"Here is what we have under *KES {ceiling:,}*:"
-                if ceiling is not None
-                else f'Here is what we have for "{said}":'
-            )
-            return Outcome(
-                [
-                    Reply(
-                        heading + "\n\n" + "\n".join(lines),
-                        rows=[
-                            (
-                                f"prod:{product.id}",
-                                product.title,
-                                product.price_display or "Ask for price",
-                            )
-                            for product in found
-                        ],
-                        list_label="See items",
-                    )
-                ]
-            )
+        )
 
-        if ceiling is not None:
-            # A budget that matches nothing deserves a real answer, not a menu
-            # that silently ignores the number they named.
-            return Outcome(
-                [
-                    Reply(
-                        f"I don't have anything under *KES {ceiling:,}* right now.",
-                        buttons=[("menu", "See everything")],
-                    )
-                ]
-            )
+    if len(said) >= 3 and _digits(said) is None:
+        found = get_public_products(db, seller, search=said)[:PAGE_SIZE]
+        if found:
+            return Outcome(_found(db, seller, convo, found, heading=said))
 
-    # ── Anything we could not read ──────────────────────────────────────────
+    # ── A sentence the free paths could not read ────────────────────────────
+    # Everything above is exact and costs nothing: ids, commands, numbers, a
+    # literal title search, a budget. What reaches here is a person talking —
+    # "do you have anything for a nine year old", "is there something cheaper",
+    # "asante sana" — and answering that with a menu is what made the thread
+    # feel like a machine.
+    spoken = _buyer_said_something(db, seller, convo, said)
+    if spoken is not None:
+        return spoken
+
+    # ── Anything we still could not read ────────────────────────────────────
     # Re-offering the menu beats "I didn't understand": the buyer's problem is
     # not that we failed to parse, it is that they cannot see their options.
     #
