@@ -109,13 +109,25 @@ def recent_transactions(db: Session, seller: Seller, limit: int = RECENT_LIMIT) 
     Includes unpaid and awaiting ones deliberately. A list of only successes
     reads as a bank statement and hides the thing the seller has to act on —
     which is precisely the order somebody is waiting to have confirmed.
+
+    Notes:
+        ORDERED BY id AS WELL AS created_at, and the tiebreak is not decoration.
+        Both timestamps come from ``now()``, which in Postgres is the start of
+        the TRANSACTION — so two orders placed in one request are identical to
+        the microsecond, and a sort on the timestamp alone leaves their order
+        to the planner. A seller refreshing the page watched two same-second
+        orders swap places.
+
+        It surfaced as a test that failed roughly one run in two and passed on
+        retry, which is the shape of a bug that gets dismissed as flakiness. The
+        id is monotonic, so this makes "newest first" mean something.
     """
     return list(
         db.scalars(
             select(Order)
             .where(Order.seller_id == seller.id)
             .options(selectinload(Order.items))
-            .order_by(Order.created_at.desc())
+            .order_by(Order.created_at.desc(), Order.id.desc())
             .limit(limit)
         ).all()
     )
