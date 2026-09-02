@@ -61,7 +61,7 @@ def model(monkeypatch: pytest.MonkeyPatch) -> list[Understanding | None]:
                 raise UnderstandingError("pretend the provider is down")
             return answer
 
-    monkeypatch.setattr(bot, "get_understander", lambda: Fake())
+    monkeypatch.setattr(bot.reading, "get_understander", lambda: Fake())
     return queue
 
 

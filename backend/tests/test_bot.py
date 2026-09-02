@@ -629,7 +629,7 @@ class TestPayingInTheChat:
                     customer_message="Success. Request accepted for processing",
                 )
 
-        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: FakeEngine())
+        monkeypatch.setattr(bot_module.buying, "get_stk_engine", lambda: FakeEngine())
         seller = make_seller(db, slug="till-shop", display_name="Till Shop")
         seller.is_published = True
         make_payment_method(
@@ -664,7 +664,7 @@ class TestPayingInTheChat:
             def push(*args: object, **kwargs: object) -> StkPushResult:
                 raise DarajaError("invalid credentials")
 
-        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: BrokenEngine())
+        monkeypatch.setattr(bot_module.buying, "get_stk_engine", lambda: BrokenEngine())
         seller = make_seller(db, slug="broken-till", display_name="Broken Till")
         seller.is_published = True
         make_payment_method(
@@ -702,7 +702,7 @@ class TestPayingInTheChat:
                     customer_message="Success. Request accepted for processing",
                 )
 
-        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: FakeEngine())
+        monkeypatch.setattr(bot_module.buying, "get_stk_engine", lambda: FakeEngine())
         seller = make_seller(db, slug="till-two", display_name="Till Two")
         seller.is_published = True
         make_payment_method(
@@ -741,7 +741,7 @@ class TestPayingInTheChat:
                     customer_message="Success. Request accepted for processing",
                 )
 
-        monkeypatch.setattr(bot_module, "get_stk_engine", lambda: FakeEngine())
+        monkeypatch.setattr(bot_module.buying, "get_stk_engine", lambda: FakeEngine())
         seller = make_seller(db, slug="till-three", display_name="Till Three")
         seller.is_published = True
         make_payment_method(

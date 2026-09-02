@@ -74,7 +74,7 @@ def model(monkeypatch: pytest.MonkeyPatch) -> list[Understanding | None]:
                 raise UnderstandingError("pretend the provider is down")
             return answer
 
-    monkeypatch.setattr(bot, "get_understander", lambda: Fake())
+    monkeypatch.setattr(bot.reading, "get_understander", lambda: Fake())
     return queue
 
 
@@ -308,7 +308,7 @@ class TestItDegrades:
         def explode() -> None:
             raise AssertionError("the model must not be constructed without a key")
 
-        monkeypatch.setattr(bot, "get_understander", explode)
+        monkeypatch.setattr(bot.reading, "get_understander", explode)
         a_shop(db)
         handle(db, BUYER_PHONE, "Shop Vitabu Bora")
 
