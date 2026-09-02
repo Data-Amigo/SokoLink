@@ -951,6 +951,22 @@ def find_seller_by_phone(db: Session, phone: str) -> Seller | None:
     return db.scalar(select(Seller).where(Seller.whatsapp_number.in_({phone, local, f"+{phone}"})))
 
 
+def _still_reading() -> list[Reply]:
+    """
+    A seller wrote something while their forwarded photos were still being read.
+
+    Consulting the model here produced the shrug in the screenshots — "I'm not
+    quite sure what you're referring to" — because the model had no idea a batch
+    was mid-flight. The honest answer is that it is, and the summary is coming.
+    """
+    return [
+        Reply(
+            "Still reading your photos — I'll list them all here in a moment and "
+            "ask you for any prices I couldn't see. \U0001f4f8"
+        )
+    ]
+
+
 def summarise_intake(db: Session, seller: Seller) -> list[Reply]:
     """
     One message for a whole burst of forwarded photos. Sent by the worker.
@@ -2737,6 +2753,13 @@ def handle(
         # for as long as the conversation points at that shop.
         browsing_elsewhere = convo.seller_id is not None and convo.seller_id != owner.id
         if not browsing_elsewhere:
+            # MID-FORWARD CHATTER. While a burst of photos is still being read,
+            # a sentence like "are you adding one by one?" is a question ABOUT
+            # that batch, and handing it to the model produced the shrug in the
+            # screenshots. Reassure them; the summary is on its way. Commands
+            # (orders, payments, share) matched above still work while reading.
+            if convo.context.get(_INTAKING):
+                return Outcome(_still_reading())
             return _seller_said_something(db, convo, said, owner)
 
     # ── Somebody with no shop, who has not opened one either ────────────────

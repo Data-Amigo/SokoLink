@@ -143,3 +143,18 @@ def test_a_burst_that_cannot_be_read_is_told_not_left_silent(
     assert db.scalars(select(Product)).all() == []
     assert len(sent) == 1
     assert "couldn't read" in sent[0][1].body.lower()
+
+
+def test_a_message_while_still_reading_is_reassured_not_shrugged(db: Session) -> None:
+    """
+    "Are you adding one by one?" mid-burst is a question about the batch. Before,
+    it fell to the model and came back a shrug; now it is met with reassurance.
+    """
+    make_seller(db, whatsapp_number=SELLER)
+
+    # Forward, but do NOT drain: the batch is still in flight (intaking set).
+    handle(db, SELLER, "New stock", media=[("m0", (lambda: b"jpeg"))])
+    reply = handle(db, SELLER, "are you adding one by one?")
+
+    body = " ".join(r.body for r in reply.replies).lower()
+    assert "reading" in body

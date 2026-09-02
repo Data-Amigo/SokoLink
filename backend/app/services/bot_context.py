@@ -29,7 +29,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import ConversationState, Product, ProductStatus, Seller, WaConversation
+from app.models import ConversationState, Product, ProductStatus, Seller, WaConversation, WaMessage
 
 #: How many category names to name. Past this the briefing is a catalogue dump
 #: and the useful signal — roughly what this shop sells — is already given.
@@ -112,7 +112,47 @@ def describe(
     else:
         lines.append("You are not waiting on any particular answer from them.")
 
+    # In-flight work the model would otherwise have no way to know about. A
+    # seller asking "are you adding one by one?" while a batch is still being
+    # read got a shrug precisely because the briefing never mentioned the batch.
+    if convo.context.get("intaking"):
+        lines.append(
+            "You are in the MIDDLE of reading a batch of photos they just "
+            "forwarded — more items are still being added. If they ask about "
+            "progress or where 'the rest' are, the items are still coming."
+        )
+
+    # The thread, not just this one message. A correction ("no, I mean...") or a
+    # follow-up ("what about the others") only makes sense against what came
+    # before, and the model cannot ask.
+    history = _recent_messages(db, convo.phone)
+    if history:
+        quoted = "; ".join(f'"{message}"' for message in history)
+        lines.append(f"Earlier messages from them, oldest first: {quoted}.")
+
     return "\n".join(lines)
+
+
+def _recent_messages(db: Session, phone: str, *, limit: int = 4) -> list[str]:
+    """
+    The last few things this number sent, oldest first, minus the current one.
+
+    The webhook records the inbound message before the conversation runs, so the
+    most recent row IS the message being read now; it is dropped, because the
+    model already has it as "their message". What is left is the short history
+    that makes a correction or a follow-up legible. Empty in tests that call the
+    conversation directly without a webhook, which is fine — no history, no line.
+    """
+    rows = list(
+        db.scalars(
+            select(WaMessage.body)
+            .where(WaMessage.from_number == phone, WaMessage.body.is_not(None))
+            .order_by(WaMessage.created_at.desc(), WaMessage.id.desc())
+            .limit(limit + 1)
+        ).all()
+    )
+    earlier = [body for body in rows[1:] if body and body.strip()]
+    return list(reversed(earlier))
 
 
 def _stock_line(db: Session, seller: Seller) -> str:
