@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     #: Public base URL, no trailing slash. Used to build storefront links.
     app_base_url: str = "http://localhost:8000"
 
+    #: Run the background job worker INSIDE the web process, as a daemon thread,
+    #: rather than as a separate ``python -m app.worker`` service. True keeps the
+    #: whole app one Railway service and one bill; the queue lives in Postgres
+    #: either way, so queued work survives a restart. Set False when a dedicated
+    #: worker service drains the queue, so the web process does not also.
+    worker_in_process: bool = True
+
     #: Where stored product images live. Empty means a directory inside the
     #: application, which is right for development and WRONG in production: a
     #: container's filesystem is rebuilt on every deploy, so every photo a

@@ -61,7 +61,8 @@ from app.services.bot_context import describe
 from app.services.cart import CartError, add_item, clear, get_or_create_cart
 from app.services.catalogue import PublishError, publish_product
 from app.services.daraja import get_stk_engine
-from app.services.intake import IntakeError, MediaFetch, ingest_forwarded_post
+from app.services.intake import PARSE_FORWARD, MediaFetch
+from app.services.jobs import enqueue
 from app.services.media import absolute_url
 from app.services.notifications import (
     buyer_receipt,
@@ -89,6 +90,11 @@ VARIANT_LIMIT = 10
 #: scrolling a wall of text on a phone and stops reading; categories exist
 #: precisely so a catalogue never has to be shown flat.
 PAGE_SIZE = 8
+
+#: Conversation-context flag: a burst of forwarded photos is being read in the
+#: background. It coalesces the acknowledgement to one per burst (not one per
+#: photo) and is cleared when the summary goes out.
+_INTAKING = "intaking"
 
 
 @dataclass(frozen=True)
@@ -945,33 +951,70 @@ def find_seller_by_phone(db: Session, phone: str) -> Seller | None:
     return db.scalar(select(Seller).where(Seller.whatsapp_number.in_({phone, local, f"+{phone}"})))
 
 
-def _handle_forward(
-    db: Session, seller: Seller, media_id: str, fetch: MediaFetch, caption: str
-) -> tuple[list[Reply], int | None]:
+def summarise_intake(db: Session, seller: Seller) -> list[Reply]:
     """
-    Turn one forwarded catalogue post into a draft product, and say what happened.
+    One message for a whole burst of forwarded photos. Sent by the worker.
 
-    THE REPLY NAMES THE ITEM AND ASKS FOR WHAT IS MISSING. "Product created" is
-    useless: a seller forwarding twenty posts needs to know which one this was
-    and whether it still needs them. Prices are usually absent — verified
-    against 24 real captions, zero mention KSh — so "needs a price" is the
-    common case, not an error.
+    The webhook enqueues a parse job per photo and answers instantly; the LAST
+    of those jobs calls this. It reads the drafts the burst produced, sets the
+    pricing state, and returns the one reply the seller sees — the price
+    question for the first unpriced item, carrying "(N left)" so they know the
+    whole batch landed. Replacing the per-photo "Added X" trickle with this is
+    the point of the change.
+
+    Args:
+        db: Session. The worker commits.
+        seller: Whose burst just finished parsing.
+
+    Returns:
+        The replies to send the seller — never more than a couple.
+
+    Notes:
+        A PHOTO THE MODEL COULD NOT READ LEAVES NO DRAFT, and its error is
+        already cached against the media id. A burst where every photo failed
+        produces no drafts, so the seller is told so rather than met with
+        silence.
+
+        THE PRICING QUEUE IS EVERY UNPRICED DRAFT, not only this burst's. A
+        seller who left items unpriced last time and forwards more should be
+        asked about all of them, not have the earlier ones stranded.
     """
-    try:
-        result = ingest_forwarded_post(db, seller, media_id=media_id, fetch=fetch, caption=caption)
-    except IntakeError as exc:
-        # The message is written to be shown to a seller verbatim.
-        return [Reply(str(exc))], None
+    phone = seller.whatsapp_number
+    if not phone:
+        # A seller with no number cannot be messaged or keyed to a conversation.
+        # In practice unreachable — a seller is recognised BY their number — but
+        # the type is nullable and silence beats a crash in the worker.
+        return []
+    convo = get_conversation(db, phone)
+    # Clear the ack flag whatever happens next, so the following burst is
+    # acknowledged again rather than met with silence.
+    convo.context = {k: v for k, v in convo.context.items() if k != _INTAKING}
 
-    product = result.product
-    if result.needs_price:
-        # The CALLER queues it and asks. Asking "reply with the price" here,
-        # once per photo, would put eight unanswerable questions in a row on a
-        # seller's screen — there would be no way to tell which one a number
-        # was answering.
-        return [Reply(f"Added *{product.title}* to your drafts.")], product.id
+    drafts = db.scalars(
+        select(Product).where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.DRAFT.value,
+        )
+    ).all()
+    if not drafts:
+        return [
+            Reply(
+                "I couldn't read those photos. Send clearer ones, or type the item and its price."
+            )
+        ]
 
-    return [Reply(f"Added *{product.title}* — {product.price_display}.")], None
+    unpriced = [p for p in drafts if p.price_kes is None]
+    if unpriced:
+        # The same state and the same prompt the synchronous path used — one
+        # item at a time, by name, with the count still to go.
+        convo.state = ConversationState.PRICING
+        convo.context = {**convo.context, "pricing_queue": [p.id for p in unpriced]}
+        return _pricing_prompt(db, seller, convo)
+
+    # Every draft already carries a price the model could see. Nothing to ask;
+    # say what is ready and offer the one action that follows.
+    convo.state = ConversationState.NEW
+    return _priced_summary(db, seller)
 
 
 def _pricing_prompt(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
@@ -2516,22 +2559,32 @@ def handle(
     if media:
         owner = find_seller_by_phone(db, phone)
         if owner is not None:
-            replies: list[Reply] = []
-            needs_price: list[int] = []
-            for media_id, fetch in media:
-                said_replies, product_id = _handle_forward(db, owner, media_id, fetch, said)
-                replies.extend(said_replies)
-                if product_id is not None:
-                    needs_price.append(product_id)
+            # THE PARSE DOES NOT RUN HERE. It is a paid vision call, and Meta
+            # redelivers any webhook that is slow — so parsing eight photos in
+            # the request path was eight serial calls that timed out and came
+            # back out of order, the exact trickle this change removes. Enqueue
+            # one job per photo instead; the worker downloads, reads and drafts,
+            # and the LAST job of the burst sends one summary. dedupe_key means
+            # a redelivered photo is neither parsed nor billed twice.
+            for media_id, _fetch in media:
+                enqueue(
+                    db,
+                    PARSE_FORWARD,
+                    payload={"seller_id": owner.id, "media_id": media_id, "caption": said},
+                    seller_id=owner.id,
+                    dedupe_key=f"parse:{media_id}",
+                )
 
-            if needs_price:
-                # Queue them and ask about the first BY NAME. Asking "what are
-                # the prices" after eight photos makes the seller reconstruct an
-                # order we never showed them.
-                convo.state = ConversationState.PRICING
-                convo.context = {"pricing_queue": needs_price}
-                replies.extend(_pricing_prompt(db, owner, convo))
-            return Outcome(replies)
+            # ONE acknowledgement per burst, not one per photo. Meta delivers a
+            # forwarded album as several separate messages, so acking each would
+            # rebuild the wall of noise. The flag is cleared when the summary
+            # goes out, so the next burst is acknowledged again.
+            if convo.context.get(_INTAKING):
+                return Outcome([])
+            convo.context = {**convo.context, _INTAKING: True}
+            return Outcome(
+                [Reply("📸 Got it — reading your items now. I'll list them here in a moment.")]
+            )
 
     # ── Routing: which shop is this? ────────────────────────────────────────
     # The shareable link is wa.me/<bot>?text=shop%20<slug>, so the buyer's very

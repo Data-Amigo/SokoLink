@@ -64,6 +64,11 @@ from app.services.media import store_image_bytes, stored_image_path
 #: business.
 MediaFetch = Callable[[], bytes]
 
+#: The job kind the worker runs to parse one forwarded photo. Defined here, next
+#: to the intake it drives, so the webhook that enqueues it and the handler that
+#: runs it name the same string and cannot drift.
+PARSE_FORWARD = "parse_forward"
+
 
 class IntakeError(RuntimeError):
     """

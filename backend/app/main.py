@@ -12,6 +12,10 @@ file grows past ~100 lines, something is in the wrong place.
 
 from __future__ import annotations
 
+import logging
+import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -43,6 +47,43 @@ from app.templating import templates
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+logger = logging.getLogger("biashara.app")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """
+    Run the job worker inside the web process, unless a separate one drains it.
+
+    WHY A THREAD AND NOT A SECOND SERVICE. Forwarded photos are parsed off the
+    request path (Meta redelivers anything slow), which needs *something* to
+    drain the queue. A daemon thread here keeps the whole app one deploy and one
+    bill; the queue lives in Postgres, so nothing is lost on a restart — the
+    thread just reclaims and carries on. Point ``worker_in_process`` at False
+    and run ``python -m app.worker`` when the web process must stay lean under
+    load; ``FOR UPDATE SKIP LOCKED`` means both draining at once is safe anyway.
+    """
+    worker = None
+    thread = None
+    if settings.worker_in_process:
+        # Imported here, not at module scope: importing the handlers registers
+        # them, and doing it lazily keeps a plain ``import app.main`` from
+        # dragging in the whole service layer.
+        from app import jobs_handlers  # noqa: F401  (registers handlers on import)
+        from app.worker import Worker
+
+        worker = Worker()
+        thread = threading.Thread(target=worker.run, name="intake-worker", daemon=True)
+        thread.start()
+        logger.info("In-process job worker started")
+
+    try:
+        yield
+    finally:
+        if worker is not None:
+            worker.running = False  # finishes the job in hand, then the daemon exits
+
+
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
@@ -51,6 +92,7 @@ app = FastAPI(
     # has to remember later.
     docs_url="/docs" if not settings.is_prod else None,
     redoc_url=None,  # one docs UI is enough
+    lifespan=lifespan,
 )
 
 

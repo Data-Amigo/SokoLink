@@ -21,6 +21,7 @@ Google's problem and unfalsifiable here. These prove the rules AROUND the model:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -95,8 +96,14 @@ def covers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture
 def agent(monkeypatch: pytest.MonkeyPatch) -> FakeAgent:
     """Swap the real agent out, and hand the fake to the test."""
+    from app.services import whatsapp_cloud
+
     fake = FakeAgent()
     monkeypatch.setattr(intake, "get_draft_agent", lambda: fake)
+    # The worker re-fetches forwarded media by id off the request path, so the
+    # integration tests that drive a forward through handle() need bytes without
+    # a network. The direct-ingest tests below pass their own fetch and ignore it.
+    monkeypatch.setattr(whatsapp_cloud, "download_media", lambda media_id: IMAGE)
     return fake
 
 
@@ -242,16 +249,23 @@ class TestWhoIsTalking:
 
         assert find_seller_by_phone(db, "254799999999") is None
 
-    def test_a_photo_from_a_seller_creates_a_draft(self, db: Session, agent: FakeAgent) -> None:
+    def test_a_photo_from_a_seller_creates_a_draft(
+        self,
+        db: Session,
+        agent: FakeAgent,
+        run_jobs: Callable[[], int],
+        sent: list[tuple[str, Any]],
+    ) -> None:
         seller: Seller = make_seller(db, whatsapp_number="254712345678")
 
-        outcome = handle(db, "254712345678", "Fresh stock", media=[(MEDIA_ID, fetch)])
+        # The webhook only acknowledges; the parse runs on the queue, and the
+        # last job of the burst sends the summary. So drive both halves.
+        handle(db, "254712345678", "Fresh stock", media=[(MEDIA_ID, fetch)])
+        run_jobs()
 
-        # The price question is a separate reply now: the forward confirms, then
-        # the pricing queue asks by name.
-        said = " ".join(r.body for r in outcome.replies)
-        assert "Ankara Print Shirt" in said
-        assert "price" in said.lower()
+        summary = " ".join(str(reply.body) for _, reply in sent)
+        assert "Ankara Print Shirt" in summary
+        assert "price" in summary.lower()
         product = db.scalars(select(Product).where(Product.seller_id == seller.id)).first()
         assert product is not None
         assert product.status == ProductStatus.DRAFT.value
@@ -267,10 +281,10 @@ class TestWhoIsTalking:
         assert db.scalars(select(Product)).all() == []
 
     def test_several_photos_in_one_message_each_become_a_product(
-        self, db: Session, agent: FakeAgent
+        self, db: Session, agent: FakeAgent, run_jobs: Callable[[], int], sent: list[Any]
     ) -> None:
         """A forwarded catalogue is often several images at once — which is why
-        the webhook passes a list."""
+        the webhook passes a list, and each becomes its own parse job."""
         seller = make_seller(db, whatsapp_number="254712345678")
 
         handle(
@@ -279,6 +293,7 @@ class TestWhoIsTalking:
             "New arrivals",
             media=[("SM9:0", fetch), ("SM9:1", fetch)],
         )
+        run_jobs()
 
         products = db.scalars(select(Product).where(Product.seller_id == seller.id)).all()
         assert len(products) == 2

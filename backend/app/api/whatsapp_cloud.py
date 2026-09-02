@@ -43,17 +43,11 @@ from app.db import get_db
 from app.models import WaMessage
 from app.services.bot import handle
 from app.services.intake import MediaFetch
+from app.services.outbound import send_reply
 from app.services.whatsapp_cloud import (
-    CloudApiError,
     download_media,
     extract_messages,
     read_message,
-    send_buttons,
-    send_cta_url,
-    send_image,
-    send_list,
-    send_template,
-    send_text,
 )
 
 router = APIRouter(tags=["webhooks"])
@@ -207,57 +201,11 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
 
     # Sending happens AFTER the commit, deliberately. If a send fails we have
     # still recorded the message, so a redelivery is correctly recognised as one
-    # rather than replaying the conversation.
+    # rather than replaying the conversation. send_reply owns the Reply->wire
+    # mapping and swallows a provider failure, so the worker and the webhook
+    # cannot drift on how a link, an image-with-buttons or a list is sent.
     for sender, replies in outgoing:
         for reply in replies:
-            try:
-                # An image cannot carry buttons in the same message, so a reply
-                # with both becomes two: the photo, then the choices. Meta has
-                # no combined form, and dropping either half would lose the
-                # product picture or the way to buy it.
-                if reply.link:
-                    # A URL as a BUTTON. Opens in WhatsApp's own browser rather
-                    # than the device's, needs no template, and is free inside
-                    # the 24-hour window.
-                    url, label = reply.link
-                    send_cta_url(sender, reply.body, url, label=label)
-                elif reply.template:
-                    # A template, not free-form: this is the ONLY shape whose
-                    # links open in Meta's in-app browser rather than being
-                    # handed to the device's default one.
-                    name, body_params, button_param = reply.template
-                    send_template(
-                        sender,
-                        name,
-                        body_params=body_params,
-                        button_param=button_param,
-                    )
-                elif reply.media_url:
-                    if reply.buttons:
-                        # THE PHOTO CARRIES NO CAPTION HERE, and the card that
-                        # follows carries the buttons. Meta cannot put buttons
-                        # on an image, so this used to send the details as a
-                        # caption and then a second message headed "What next?"
-                        # — a filler line, written by us, that appeared in every
-                        # product card a buyer ever saw.
-                        #
-                        # Sending the picture bare and the card whole reads the
-                        # way a shopkeeper hands something over: here it is,
-                        # then what it costs and what you can do.
-                        send_image(sender, reply.media_url)
-                        send_buttons(sender, reply.body, reply.buttons)
-                    else:
-                        send_image(sender, reply.media_url, caption=reply.body)
-                elif reply.buttons:
-                    send_buttons(sender, reply.body, reply.buttons)
-                elif reply.rows:
-                    send_list(sender, reply.body, reply.list_label, reply.rows)
-                else:
-                    send_text(sender, reply.body)
-            except CloudApiError:
-                # Swallowed ON PURPOSE, and only here. Raising would return a
-                # non-200, Meta would redeliver, and the buyer would have their
-                # basket added to twice to fix a problem that was ours.
-                continue
+            send_reply(sender, reply)
 
     return JSONResponse({"status": "ok"})

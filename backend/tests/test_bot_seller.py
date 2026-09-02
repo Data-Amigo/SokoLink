@@ -81,11 +81,64 @@ def seller_with_number(db: Session, **overrides: Any) -> Seller:
     return make_seller(db, whatsapp_number=SELLER_PHONE, **overrides)
 
 
+@pytest.fixture(autouse=True)
+def _media_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    The worker fetches forwarded media by id; give it bytes, never a network.
+
+    A forward is now parsed off the request path, so the worker re-fetches the
+    photo through ``whatsapp_cloud.download_media`` rather than being handed a
+    callable. Stub it so the drain in ``say`` never touches Meta.
+    """
+    from app.services import whatsapp_cloud
+
+    monkeypatch.setattr(whatsapp_cloud, "download_media", lambda media_id: b"\xff\xd8jpeg-bytes")
+
+
+def _drain_and_capture(db: Session) -> list[str]:
+    """
+    Run the queued parse jobs on the test session, as the worker would.
+
+    Returns what the worker WOULD have sent — the intake summary — by standing
+    in for ``outbound.send_reply`` while the jobs run. No commits: one session,
+    no second worker, so claim/run/complete stays inside the rolled-back
+    transaction.
+    """
+    from app import jobs_handlers  # noqa: F401  (registers handlers on import)
+    from app.services import outbound
+    from app.services.jobs import claim_next, complete
+    from app.worker import HANDLERS
+
+    captured: list[str] = []
+    original = outbound.send_reply
+    outbound.send_reply = lambda to, reply: captured.append(reply.body)
+    try:
+        while True:
+            job = claim_next(db)
+            if job is None:
+                break
+            HANDLERS[job.kind](db, job)
+            complete(db, job)
+    finally:
+        outbound.send_reply = original
+    return captured
+
+
 def say(db: Session, text: str, media: int = 0) -> str:
-    """One message from the seller; returns everything the bot said."""
+    """
+    One message from the seller; returns everything the bot said.
+
+    A forward parses in the background now, so when ``media`` is set this also
+    drains the queue and folds in the summary the worker sends — the caller
+    reads one blob either way, exactly as before the parse moved off the
+    request path.
+    """
     attachments = [(f"m{i}", (lambda: b"jpeg-bytes")) for i in range(media)]
     outcome = handle(db, SELLER_PHONE, text, media=attachments or None)
-    return "\n".join(r.body for r in outcome.replies)
+    lines = [r.body for r in outcome.replies]
+    if attachments:
+        lines.extend(_drain_and_capture(db))
+    return "\n".join(lines)
 
 
 class TestForwardingAsksForThePrice:

@@ -18,7 +18,7 @@ hit a paid API.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -208,9 +208,59 @@ def client(db: Session) -> Generator[TestClient, None, None]:
     def _override() -> Generator[Session, None, None]:
         yield db
 
+    # NO BACKGROUND WORKER IN TESTS. Entering the TestClient runs the app's
+    # lifespan, which would otherwise start the in-process worker on its own
+    # real connection — a thread racing the rolled-back test session. Tests
+    # drain the queue deterministically via the ``run_jobs`` fixture instead.
+    get_settings().worker_in_process = False
+
     app.dependency_overrides[get_db] = _override
     try:
         with TestClient(app) as c:
             yield c
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def run_jobs(db: Session) -> Generator[Callable[[], int], None, None]:
+    """
+    Drain the job queue synchronously, on the test's own session.
+
+    The real worker claims a job, commits to release the lock, runs the handler
+    and commits again. A test has one session and no second worker to race, so
+    this does the same work WITHOUT the commits — claim, run the handler,
+    complete — which keeps the whole thing inside the transaction the fixture
+    rolls back. Importing the handlers registers them.
+    """
+    from app import jobs_handlers  # noqa: F401  (registers handlers on import)
+    from app.services.jobs import claim_next, complete
+    from app.worker import HANDLERS
+
+    def _run() -> int:
+        ran = 0
+        while True:
+            job = claim_next(db)
+            if job is None:
+                return ran
+            HANDLERS[job.kind](db, job)
+            complete(db, job)
+            ran += 1
+
+    yield _run
+
+
+@pytest.fixture
+def sent(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, object]]:
+    """
+    Capture what the worker sends, instead of putting it on the wire.
+
+    The webhook returns its replies for the caller to send; the worker has no
+    caller, so it sends the intake summary itself through ``outbound.send_reply``.
+    This records ``(to, reply)`` for each such send so a test can assert on it.
+    """
+    from app.services import outbound
+
+    captured: list[tuple[str, object]] = []
+    monkeypatch.setattr(outbound, "send_reply", lambda to, reply: captured.append((to, reply)))
+    return captured

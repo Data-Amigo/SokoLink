@@ -59,7 +59,7 @@ def _configured(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _no_sending(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     """Capture replies instead of calling Meta. Tests never hit a paid API."""
-    import app.api.whatsapp_cloud as route_module
+    import app.services.whatsapp_cloud as service_module
 
     sent: list[tuple[str, str]] = []
 
@@ -92,17 +92,19 @@ def _no_sending(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
         sent.append((to, f"template:{name}"))
         return "wamid.out"
 
-    # Patched on the ROUTE module, not the service: the route imported these
-    # names at import time, so rebinding them in the service would not be seen.
+    # Patched on the SERVICE module, where the senders live. The webhook and the
+    # worker both reach them through ``outbound.send_reply``, which calls them
+    # module-qualified (``whatsapp_cloud.send_text``) precisely so a patch here
+    # is seen — there is no second binding to go stale.
     # EVERY sender, not just the two. A reply carrying buttons would otherwise
     # reach the real function, fail on missing credentials, and be swallowed by
-    # the route's deliberate catch — leaving a test that says "nothing was
+    # send_reply's deliberate catch — leaving a test that says "nothing was
     # sent" and means "you patched the wrong thing".
-    monkeypatch.setattr(route_module, "send_text", fake_text)
-    monkeypatch.setattr(route_module, "send_image", fake_image)
-    monkeypatch.setattr(route_module, "send_buttons", fake_buttons)
-    monkeypatch.setattr(route_module, "send_list", fake_list)
-    monkeypatch.setattr(route_module, "send_template", fake_template)
+    monkeypatch.setattr(service_module, "send_text", fake_text)
+    monkeypatch.setattr(service_module, "send_image", fake_image)
+    monkeypatch.setattr(service_module, "send_buttons", fake_buttons)
+    monkeypatch.setattr(service_module, "send_list", fake_list)
+    monkeypatch.setattr(service_module, "send_template", fake_template)
     return sent
 
 
@@ -382,12 +384,11 @@ class TestReplying:
         would have Meta redeliver and replay the whole conversation step — so a
         buyer would have their basket added to twice to fix a problem of ours.
         """
-        import app.api.whatsapp_cloud as route_module
 
         def boom(*_: object, **__: object) -> str:
             raise whatsapp_cloud.CloudApiError("token expired")
 
-        monkeypatch.setattr(route_module, "send_text", boom)
+        monkeypatch.setattr(whatsapp_cloud, "send_text", boom)
 
         response = post(client, text_payload())
 
