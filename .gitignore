@@ -48,3 +48,6 @@ dist/
 build/
 backend/spikes/out/
 docs/src/build/
+
+# Local Claude Code settings (per-machine, not shared)
+.claude/settings.local.json

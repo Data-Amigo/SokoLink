@@ -254,48 +254,48 @@ class TestPastedCredentials:
     """
     Whitespace on a secret is invisible in a dashboard and fatal at runtime.
 
-    We already lost a deploy to a ``DATABASE_URL`` of ``' \n'``. The Twilio auth
-    token is worse: it is a shared HMAC secret, so one extra byte makes every
-    genuine inbound message look forged, and the resulting 403 is
-    indistinguishable from having pasted the wrong token entirely.
+    We already lost a deploy to a ``DATABASE_URL`` of ``' \n'``. WHATSAPP_APP_SECRET
+    is worse: it is the HMAC key we verify every inbound webhook against, so one
+    extra byte makes every genuine message look forged, and the resulting 403 is
+    indistinguishable from having pasted the wrong secret entirely.
     """
 
     def test_a_token_pasted_with_a_newline_still_works(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "  abc123def456  \n")
+        monkeypatch.setenv("WHATSAPP_APP_SECRET", "  abc123def456  \n")
 
-        assert build().twilio_auth_token == "abc123def456"
+        assert build().whatsapp_app_secret == "abc123def456"
 
-    def test_the_account_sid_and_number_are_trimmed_too(
+    def test_the_access_and_verify_tokens_are_trimmed_too(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123\n")
-        monkeypatch.setenv("TWILIO_WHATSAPP_NUMBER", " +14155238886 ")
+        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "AC123\n")
+        monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", " my-verify ")
 
         settings = build()
 
-        assert settings.twilio_account_sid == "AC123"
-        assert settings.twilio_whatsapp_number == "+14155238886"
+        assert settings.whatsapp_access_token == "AC123"
+        assert settings.whatsapp_verify_token == "my-verify"
 
     def test_an_unset_token_stays_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         None must survive the validator.
 
-        The webhook returns 503 when the token is None — refusing beats
+        The webhook returns 503 when the app secret is None — refusing beats
         accepting unverifiable traffic. Coercing it to an empty string would
         make that check pass and every forged request reach the database.
         """
-        monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("WHATSAPP_APP_SECRET", raising=False)
 
-        assert build().twilio_auth_token is None
+        assert build().whatsapp_app_secret is None
 
     def test_a_base_url_with_a_trailing_newline_is_trimmed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """
-        Signed webhooks recompute Twilio's signature from ``app_base_url``, so a
-        stray character here rejects every real message with no visible cause.
+        Absolute URLs are built by joining ``app_base_url`` with a path, so a
+        stray character here yields ``//path`` and a quietly broken link.
         """
         monkeypatch.setenv("APP_BASE_URL", " https://example.up.railway.app/\n")
 
@@ -396,7 +396,7 @@ class TestAnEmptyEnvironmentSaysWhatToDo:
             "DATABASE_URL",
             "SECRET_KEY",
             "APP_BASE_URL",
-            "TWILIO_AUTH_TOKEN",
+            "WHATSAPP_ACCESS_TOKEN",
             "GEMINI_API_KEY",
         ):
             assert name in _MISSING_ENV_HELP
@@ -453,7 +453,7 @@ class TestTheEnvInventory:
         screenshots. Names only, always.
         """
         monkeypatch.setenv("DATABASE_URL", "postgresql://u:sup3rs3cret@host/db")
-        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "abcdef0123456789")
+        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "abcdef0123456789")
 
         report = config._env_inventory()
 

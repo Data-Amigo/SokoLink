@@ -21,7 +21,7 @@ workspace, which is the human gate the whole design rests on.
 
 PARSED ONCE EVER, KEYED BY MEDIA ID. Inference is the only thing here that costs
 money, and the traffic is the worst case for it — a seller onboarding forwards
-their whole catalogue at once, and Twilio redelivers anything slow. The cache is
+their whole catalogue at once, and Meta redelivers anything slow. The cache is
 a table rather than a memo so it survives restarts and redeploys.
 
 THE BYTES ARE KEPT, NOT JUST READ. The download happens to show the image to the
@@ -42,12 +42,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent.draft import DraftAgentError, get_draft_agent
-from app.config import settings
 from app.models import (
     IngestMethod,
     ParsedMedia,
@@ -60,21 +58,10 @@ from app.models import (
 from app.schemas.draft import ProductDraft
 from app.services.media import store_image_bytes, stored_image_path
 
-#: Twilio serves media from its own CDN behind account auth. Generous, because
-#: a seller on a Nairobi mobile network has already uploaded this once and a
-#: timeout here costs the whole forward.
-DOWNLOAD_TIMEOUT_SECONDS = 30.0
-
-#: Refuse anything larger. A catalogue photo is well under this; a bigger file
-#: is either a video we cannot read yet or something that will cost real money
-#: to send to a vision model for no gain.
-MAX_IMAGE_BYTES = 8 * 1024 * 1024
-
-
-#: How a caller hands over the bytes. Twilio media is a URL fetched with basic
-#: auth; Meta's is an id resolved through two authenticated Graph calls. Neither
-#: belongs in here — this module owns the CACHE and the RULES, and the provider
-#: is the caller's business.
+#: How a caller hands over the bytes. Meta's media is an id resolved through
+#: two authenticated Graph calls — that belongs to the caller, not here; this
+#: module owns the CACHE and the RULES, and the provider is the caller's
+#: business.
 MediaFetch = Callable[[], bytes]
 
 
@@ -102,51 +89,6 @@ class IntakeResult:
     def needs_price(self) -> bool:
         """Whether a seller must supply a price before this can be published."""
         return self.product.price_kes is None
-
-
-def download_media(url: str) -> bytes:
-    """
-    Fetch one media file from the provider.
-
-    Args:
-        url: The provider's media URL, from the webhook payload.
-
-    Returns:
-        The bytes.
-
-    Raises:
-        IntakeError: On any failure, carrying something a seller can act on.
-
-    Notes:
-        AUTHENTICATED. Twilio's media URLs are not public — an unauthenticated
-        fetch returns a 401 page, which as image bytes would reach the model as
-        garbage and produce a confident draft of nothing.
-    """
-    sid, token = settings.twilio_account_sid, settings.twilio_auth_token
-    if not (sid and token):
-        raise IntakeError("WhatsApp media is not configured.")
-
-    try:
-        response = httpx.get(
-            url, auth=(sid, token), timeout=DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=True
-        )
-    except httpx.HTTPError as exc:
-        raise IntakeError("I couldn't download that image. Try sending it again.") from exc
-
-    if response.status_code != 200:
-        raise IntakeError("I couldn't download that image. Try sending it again.")
-
-    content_type = response.headers.get("content-type", "")
-    if not content_type.startswith("image/"):
-        # Video arrives here too. It is a real tier in the cascade, but it is
-        # parked with the scrapers, and pretending otherwise would bill us for
-        # a call that cannot succeed.
-        raise IntakeError("I can only read photos right now — send a picture of the item.")
-
-    if len(response.content) > MAX_IMAGE_BYTES:
-        raise IntakeError("That image is too large. Try sending a smaller one.")
-
-    return response.content
 
 
 def parse_once(
@@ -191,7 +133,7 @@ def parse_once(
         # FLUSHED, not merely added. The session runs with autoflush=False, so
         # an un-flushed row is invisible to the SELECT at the top of this
         # function — and this cache exists precisely to be read again moments
-        # later, when Twilio redelivers the message that just timed out.
+        # later, when Meta redelivers the message that just timed out.
         db.flush()
         raise IntakeError(reason) from exc
 

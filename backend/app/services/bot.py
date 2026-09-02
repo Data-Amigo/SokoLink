@@ -1,7 +1,7 @@
 """
 The shop, as a conversation. No browser anywhere in it.
 
-    inbound text ──▶ handle() ──▶ [Reply, ...] ──▶ TwiML in the webhook response
+    inbound text ──▶ handle() ──▶ [Reply, ...] ──▶ Cloud API sends each reply
 
 WHY THE CHAT IS THE SHOP. A web link is the one thing we cannot control: tapping
 a URL hands an intent to the operating system, and some Android skins route it
@@ -12,11 +12,11 @@ being a page we link to and becomes the thread itself, which no OS can redirect.
 NATIVE COMPONENTS, WITH THE TEXT STILL UNDERNEATH. Replies carry buttons and
 list rows, which Meta's Cloud API draws as real tap targets — free-form, inside
 the 24-hour window a person opens by messaging first, with no template
-approval. That approval requirement is why the first version of this file
-shipped numbered text menus on Twilio.
+approval. That approval requirement is why an earlier version of this file
+shipped numbered text menus.
 
-The body ALWAYS names every option anyway. Twilio cannot render a component and
-gets the text; so does any client that draws neither. A reply whose body reads
+The body ALWAYS names every option anyway. A client that cannot render a
+component gets the text; some clients draw neither. A reply whose body reads
 only "Choose:" is a dead end everywhere the buttons do not appear.
 
 A TAP COMES BACK AS AN ID, a typed word as a word, and `handle` accepts both.
@@ -106,10 +106,10 @@ class Reply:
         list_label: The button that opens the list. Short; not a sentence.
 
     Notes:
-        THE BODY IS NEVER JUST A HEADER FOR THE COMPONENT. Two providers render
-        these differently — Meta draws real buttons, Twilio cannot and gets the
-        options flattened into numbered text — and one of them may be a client
-        that shows neither. A reply whose body is "Choose:" is a dead end
+        THE BODY IS NEVER JUST A HEADER FOR THE COMPONENT. Clients render
+        these differently — Meta draws real buttons; a client that cannot gets
+        the options flattened into numbered text — and one that shows neither
+        must still be able to act. A reply whose body is "Choose:" is a dead end
         wherever the component does not draw.
 
         WHICH IDS EXIST IS THE CONVERSATION'S BUSINESS, not the sender's. They
@@ -2491,10 +2491,9 @@ def handle(
         phone: Bare digits with country code.
         text: What they sent, which is the caption when media is attached.
         media: ``(media_id, fetch)`` per attachment. The fetch is a callable
-            rather than a URL because the two providers differ: Twilio serves a
-            URL behind basic auth, Meta an id resolved through two Graph calls.
-            Which one delivered this message is the webhook's business, not the
-            conversation's.
+            rather than a URL because Meta serves media as an id resolved
+            through two authenticated Graph calls, not a public URL — and doing
+            that is the webhook's business, not the conversation's.
 
     Returns:
         An :class:`Outcome` carrying the replies to send back, in order.

@@ -5,7 +5,7 @@ Every forwarded image we have paid to read, and what the model said.
 
 WHY A CACHE TABLE AND NOT A MEMO IN PROCESS. This is the only paid call in the
 forwarding path, and the traffic pattern is the worst possible one for it: a
-seller onboarding forwards their whole catalogue in a burst, Twilio redelivers
+seller onboarding forwards their whole catalogue in a burst, Meta redelivers
 anything slow, and a dyno restart empties any in-memory cache. Keyed by the
 provider's media id, an image is read once ever — across retries, restarts and
 redeploys.

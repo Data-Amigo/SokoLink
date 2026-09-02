@@ -4,19 +4,16 @@ Meta's WhatsApp Cloud API webhook.
     GET  /webhooks/meta   Meta's one-time verification handshake
     POST /webhooks/meta   inbound messages. PUBLIC.
 
-WHY THIS IS A SECOND WEBHOOK RATHER THAN A CHANGE TO THE FIRST. Twilio and Meta
-share nothing at this layer: form-encoded versus JSON, HMAC-SHA1 over sorted
-fields versus HMAC-SHA256 over the raw body, and a reply that rides the HTTP
-response versus a reply that is a separate authenticated call. Detecting the
-provider by content-type on one path would be a guess in the middle of a
-security check. Two paths, each obvious, and the Twilio one is deleted whole
-when it retires.
+THIS IS THE ONE INBOUND WEBHOOK. The body is JSON, signed with HMAC-SHA256 over
+the raw bytes, and a reply is NOT the HTTP response — it is a separate
+authenticated call. (An earlier Twilio webhook was form-encoded, signed with
+HMAC-SHA1 over sorted fields, and answered inline; it has been removed, and none
+of its shape survives here.)
 
-THE GET IS NOT OPTIONAL AND HAS NO TWILIO EQUIVALENT. Meta will not save a
-callback URL until it has GET it with a challenge and been echoed the value
-back verbatim. Building only the POST — which is what a Twilio-shaped webhook
-gives you — means the URL can never be registered at all, and the symptom is a
-404 or a 405 in the Meta dashboard with no explanation.
+THE GET IS NOT OPTIONAL. Meta will not save a callback URL until it has GET it
+with a challenge and been echoed the value back verbatim. Building only the POST
+means the URL can never be registered at all, and the symptom is a 404 or a 405
+in the Meta dashboard with no explanation.
 
 THE SIGNATURE IS OVER THE RAW BODY. It must be computed on the exact bytes
 received, before any JSON parsing: re-serialising the decoded payload changes
@@ -146,7 +143,7 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
             deliberate: this endpoint acts on what it is told.
 
     Notes:
-        REPLIES ARE SENT, NOT RETURNED. Meta has no TwiML equivalent, so the
+        REPLIES ARE SENT, NOT RETURNED. Meta has no reply-in-the-response, so the
         bot's replies go out as separate authenticated calls after the message
         is committed. A send that fails must NOT fail the webhook — the message
         is already recorded, and a non-200 would have Meta redeliver it and run

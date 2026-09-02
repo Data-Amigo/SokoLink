@@ -88,8 +88,6 @@ class IntegrationsOut(BaseModel):
     read_photos: bool
     #: Templates can be created and listed — needed once, not to send.
     manage_templates: bool
-    #: The older provider, kept during the switch.
-    twilio_fallback: bool
     #: Session cookies are signed with a real key rather than the placeholder.
     secret_key_set: bool
 
@@ -117,11 +115,6 @@ def integrations() -> IntegrationsOut:
         send_messages=bool(settings.whatsapp_access_token and settings.whatsapp_phone_number_id),
         read_photos=bool(settings.gemini_api_key),
         manage_templates=bool(settings.whatsapp_business_account_id),
-        twilio_fallback=bool(
-            settings.twilio_account_sid
-            and settings.twilio_auth_token
-            and settings.twilio_whatsapp_number
-        ),
         secret_key_set=settings.secret_key != DEV_SECRET_KEY,
     )
 

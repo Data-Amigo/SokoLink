@@ -31,7 +31,6 @@ from app.api import (
     payments,
     seller_auth,
     storefront,
-    webhooks,
     whatsapp_cloud,
 )
 from app.api import (
@@ -82,7 +81,7 @@ def _not_found(request: Request, exc: Exception) -> Response:
     appears to do nothing is indistinguishable from a broken app.
 
     ONLY FOR BROWSERS, AND ONLY FOR 404. Anything that did not ask for HTML —
-    Daraja's callback, Twilio, the health check, a fetch — keeps the JSON body
+    Daraja's callback, the WhatsApp webhook, the health check, a fetch — keeps the JSON body
     it expects, because a payment callback parsing an HTML error page is a worse
     failure than the one it was reporting. Every other status is left alone too:
     a 403 on the webhook must stay machine-readable.
@@ -107,7 +106,6 @@ app.include_router(catalogue.router)
 app.include_router(analytics.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
-app.include_router(webhooks.router)
 app.include_router(whatsapp_cloud.router)
 app.include_router(settings_routes.router)
 

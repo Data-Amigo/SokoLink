@@ -24,12 +24,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.models import ParsedMedia, Product, ProductStatus, Seller
 from app.schemas.draft import ProductDraft
 from app.services import intake, media
@@ -38,9 +36,6 @@ from tests.factories import make_seller
 
 MEDIA_ID = "SM123:0"
 
-#: Only the Twilio downloader still takes a URL; everything above it now takes
-#: a callable, because Meta media is fetched by id through two Graph calls.
-TWILIO_MEDIA_URL = "https://api.twilio.com/media/ME123"
 IMAGE = bytes([0xFF, 0xD8]) + b"fake-jpeg-bytes"
 
 
@@ -102,7 +97,6 @@ def agent(monkeypatch: pytest.MonkeyPatch) -> FakeAgent:
     """Swap the real agent out, and hand the fake to the test."""
     fake = FakeAgent()
     monkeypatch.setattr(intake, "get_draft_agent", lambda: fake)
-    monkeypatch.setattr(intake, "download_media", lambda url: b"\xff\xd8fake-jpeg-bytes")
     return fake
 
 
@@ -189,7 +183,7 @@ class TestPaidOnce:
     """
     Inference is the only thing here that costs money, and the traffic is the
     worst case for it: a seller onboarding forwards their whole catalogue at
-    once, and Twilio redelivers anything slow.
+    once, and Meta redelivers anything slow.
     """
 
     def test_the_same_image_is_read_once_ever(self, db: Session, agent: FakeAgent) -> None:
@@ -222,54 +216,6 @@ class TestPaidOnce:
         intake.parse_once(db, "SM2:0", "", fetch)
 
         assert len(agent.calls) == 2
-
-
-class TestDownloading:
-    def test_a_non_image_is_refused_before_the_model_is_called(
-        self, db: Session, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """
-        Video arrives here too. It is a real tier in the cascade, but it is
-        parked — pretending otherwise bills us for a call that cannot succeed.
-        """
-        fake = FakeAgent()
-        monkeypatch.setattr(intake, "get_draft_agent", lambda: fake)
-        monkeypatch.setattr(
-            httpx,
-            "get",
-            lambda *a, **k: httpx.Response(
-                200, headers={"content-type": "video/mp4"}, content=b"movie"
-            ),
-        )
-        monkeypatch.setattr(get_settings(), "twilio_account_sid", "AC1")
-        monkeypatch.setattr(get_settings(), "twilio_auth_token", "tok")
-
-        with pytest.raises(intake.IntakeError, match="only read photos"):
-            intake.download_media(TWILIO_MEDIA_URL)
-
-        assert fake.calls == []
-
-    def test_media_is_fetched_with_account_auth(
-        self, db: Session, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """
-        Twilio's media URLs are not public. An unauthenticated fetch returns a
-        401 page, which as image bytes would reach the model as garbage and
-        produce a confident draft of nothing.
-        """
-        seen: dict[str, Any] = {}
-
-        def spy(url: str, **kwargs: Any) -> httpx.Response:
-            seen.update(kwargs)
-            return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"jpg")
-
-        monkeypatch.setattr(httpx, "get", spy)
-        monkeypatch.setattr(get_settings(), "twilio_account_sid", "AC1")
-        monkeypatch.setattr(get_settings(), "twilio_auth_token", "tok")
-
-        intake.download_media(TWILIO_MEDIA_URL)
-
-        assert seen["auth"] == ("AC1", "tok")
 
 
 class TestWhoIsTalking:

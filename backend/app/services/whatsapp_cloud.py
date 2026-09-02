@@ -5,17 +5,15 @@ Meta's WhatsApp Cloud API — sending, and fetching media.
     reply image  ──▶ POST /{phone_number_id}/messages  (type=image, link)
     inbound media ──▶ GET /{media_id} ──▶ {"url": …} ──▶ GET url ──▶ bytes
 
-WHY THIS EXISTS ALONGSIDE messaging.py. Twilio was the provider we could use
-immediately: no Meta business verification, and the sandbox works in an hour.
-That was always a staging post — the sandbox requires every recipient to send
-``join <code>`` first, which no real buyer will ever do, so it cannot launch.
-This is the path that can.
+WHY THIS EXISTS ALONGSIDE messaging.py. messaging.py owns the one-method
+``Messenger`` seam callers depend on; this module owns the Graph surface behind
+it — sending text, images and interactive messages, and fetching inbound media.
+Keeping the wire details here means callers never import a provider.
 
-THE BIGGEST DIFFERENCE IS NOT THE PAYLOAD, IT IS THE REPLY. Twilio lets the
-webhook answer in its own HTTP response (TwiML), so a reply costs no extra call
-and needs no credentials on that path. Meta has no such thing: the webhook must
-return 200 immediately and every reply is a separate authenticated POST. Code
-written against TwiML does not port — it has to be reshaped around sending.
+THE REPLY IS A SEPARATE CALL, NOT THE RESPONSE. The webhook must return 200
+immediately, and every reply is its own authenticated POST — there is no
+answering inline. (An earlier Twilio path could answer in the HTTP response;
+that shape is gone, and everything here is built around sending instead.)
 
 MEDIA TAKES TWO ROUND TRIPS, and both need the bearer token. The first returns a
 short-lived signed URL, the second returns the bytes. Fetching that URL without
@@ -303,10 +301,10 @@ def payload_summary(payload: dict[str, Any]) -> str:
 # INTERACTIVE MESSAGES
 # ══════════════════════════════════════════════════════════════════════════
 #
-# The reason moving to Meta was worth it for the buyer. Twilio needed a
-# pre-approved content template per shape, which is why buyers got numbered
-# text menus. Here they can be sent free-form inside the 24-hour window a
-# person opens by messaging first — no approval, no template.
+# The reason native interactive messages are worth it for the buyer. They can
+# be sent free-form inside the 24-hour window a person opens by messaging first
+# — no approval and no per-shape content template, which is what an earlier
+# provider required and why buyers once got numbered text menus.
 #
 # EVERY LIMIT BELOW IS ENFORCED BY META, NOT SUGGESTED. Exceed one and the
 # whole message is rejected: the buyer sees nothing, and the failure arrives as

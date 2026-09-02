@@ -155,18 +155,6 @@ class Settings(BaseSettings):
     #: chat says so rather than handing a seller a broken one.
     whatsapp_display_number: str | None = None
 
-    # ── WhatsApp: Twilio (used today, for sending the login code) ────────────
-    # Twilio is the provider we can use NOW: sending needs no webhook and no
-    # Meta business verification. Meta's Cloud API is cheaper at volume and
-    # remains the likely destination — which is why both sets of keys live here
-    # and everything goes through services/messaging.py rather than either SDK.
-    twilio_account_sid: str | None = None
-    twilio_auth_token: str | None = None
-
-    #: The WhatsApp-enabled number messages are sent FROM. Stored bare
-    #: (254…) or with a +; the adapter normalises it either way.
-    twilio_whatsapp_number: str | None = None
-
     # ── W2: M-Pesa Daraja ────────────────────────────────────────────────────
     # THE FOUR CREDENTIAL FIELDS BELOW ARE READ BY NOTHING. Verified by grep,
     # not assumed. Only `daraja_environment` has a job: it picks the sandbox or
@@ -329,14 +317,14 @@ class Settings(BaseSettings):
         """
         A trailing slash produces `//path` when links are built by concatenation.
 
-        IT ALSO BREAKS EVERY INBOUND WEBHOOK. Twilio signs the exact URL it was
-        given; we recompute that signature from ``app_base_url + path``. One
-        stray slash makes every genuine message look forged, and the only
-        symptom is a silent 403 in somebody else's dashboard.
+        IT ALSO SHAPES EVERY ABSOLUTE URL WE BUILD. ``app_base_url`` is joined
+        to a path to form the webhook URL we register with Meta and the media
+        and shop links inside messages. One stray slash yields ``//path``, and
+        the symptom is a link that quietly fails in somebody else's client.
         """
         return v.strip().rstrip("/")
 
-    @field_validator("twilio_account_sid", "twilio_auth_token", "twilio_whatsapp_number")
+    @field_validator("whatsapp_access_token", "whatsapp_app_secret", "whatsapp_verify_token")
     @classmethod
     def _strip_credential(cls, v: str | None) -> str | None:
         """
@@ -344,7 +332,7 @@ class Settings(BaseSettings):
 
         A TOKEN WITH A TRAILING NEWLINE IS INVISIBLE AND FATAL. It is a shared
         HMAC secret: one extra byte and every signature we compute differs from
-        every signature Twilio sends, so every real message is rejected as a
+        every signature Meta sends, so every real message is rejected as a
         forgery. Dashboards show the value without revealing the whitespace, and
         the failure looks identical to having the wrong token entirely.
 
@@ -417,9 +405,10 @@ The variables this service needs:
     SECRET_KEY            signs sessions; must not be the .env.example default
     APP_BASE_URL          https://<your-domain>   (no trailing slash)
     APP_ENV               prod          (NOT "production" — see app_env)
-    TWILIO_ACCOUNT_SID    }
-    TWILIO_AUTH_TOKEN     }  needed to receive WhatsApp messages
-    TWILIO_WHATSAPP_NUMBER}
+    WHATSAPP_PHONE_NUMBER_ID }  send messages via the Cloud API
+    WHATSAPP_ACCESS_TOKEN    }
+    WHATSAPP_VERIFY_TOKEN    }  receive + verify inbound webhooks
+    WHATSAPP_APP_SECRET      }
     GEMINI_API_KEY        needed to read forwarded catalogue posts
 """
 
@@ -431,9 +420,10 @@ EXPECTED_ENV = (
     "SECRET_KEY",
     "APP_ENV",
     "APP_BASE_URL",
-    "TWILIO_ACCOUNT_SID",
-    "TWILIO_AUTH_TOKEN",
-    "TWILIO_WHATSAPP_NUMBER",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_VERIFY_TOKEN",
+    "WHATSAPP_APP_SECRET",
     "GEMINI_API_KEY",
 )
 

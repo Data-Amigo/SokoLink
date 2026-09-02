@@ -1,8 +1,9 @@
 """
 Meta's WhatsApp Cloud API webhook.
 
-This is the path that can actually launch. The Twilio sandbox requires every
-recipient to send ``join <code>`` first, which no real buyer will ever do.
+This is the only inbound path. An earlier Twilio sandbox required every
+recipient to send ``join <code>`` first, which no real buyer would do; it is
+now gone.
 
 THREE THINGS HERE ARE EASY TO GET WRONG AND SILENT WHEN WRONG:
 
@@ -39,8 +40,8 @@ from app.services import whatsapp_cloud
 VERIFY_TOKEN = "a-verify-token"
 APP_SECRET = "an-app-secret"
 #: A REAL-LENGTH wamid, taken from production. The earlier fixture was 34
-#: characters — short enough to fit a varchar(64) column sized for Twilio's SM…
-#: SIDs — so every test passed while every real Meta message failed its INSERT,
+#: characters — short enough to fit a varchar(64) column sized for a 34-char
+#: id — so every test passed while every real Meta message failed its INSERT,
 #: returned 500 and was redelivered forever.
 #:
 #: Fixture data that is shorter than production data tests nothing about length.
@@ -157,7 +158,7 @@ def post(client: TestClient, payload: dict[str, Any], *, signature: str | None =
 class TestTheVerificationHandshake:
     """
     Meta will not save a callback URL until it has GET it and been echoed the
-    challenge back. A Twilio-shaped webhook has no GET at all, so the URL can
+    challenge back. A POST-only webhook has no GET at all, so the URL can
     never be registered — which is exactly how this project first hit it.
     """
 
@@ -362,8 +363,9 @@ class TestReplying:
         self, client: TestClient, db: Session, _no_sending: list[tuple[str, str]]
     ) -> None:
         """
-        Meta has no TwiML. Every reply is a separate authenticated call, so a
-        webhook that only returns a body says nothing to anybody.
+        Meta sends no reply in the HTTP response. Every reply is a separate
+        authenticated call, so a webhook that only returns a body says nothing
+        to anybody.
         """
         post(client, text_payload(body="hi"))
 
@@ -450,7 +452,7 @@ class TestRealWorldSizes:
     Fixture data that is smaller than production data proves nothing about size.
 
     Every test here passed while every real message failed: the column was
-    varchar(64), sized for Twilio's 34-character SM… SIDs, and Meta's wamids are
+    varchar(64), sized for a 34-character id, and Meta's wamids are
     around 80. The INSERT raised, the webhook returned 500, Meta redelivered,
     and the bot never recorded or answered a single message.
     """

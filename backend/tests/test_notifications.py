@@ -215,10 +215,8 @@ class TestItNeverBreaksAPayment:
 class TestChoosingAProvider:
     def test_meta_is_preferred_when_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """
-        Both sets of credentials sit side by side during the switch. A
-        deployment that configured Meta did so deliberately; still sending
-        through Twilio would mean messages arriving from a number the seller
-        has stopped watching.
+        A deployment that has configured the Cloud API gets the CloudMessenger,
+        which is now the only provider.
         """
         from app.config import get_settings
         from app.services.messaging import CloudMessenger, get_messenger
@@ -226,26 +224,8 @@ class TestChoosingAProvider:
         settings = get_settings()
         monkeypatch.setattr(settings, "whatsapp_access_token", "tok")
         monkeypatch.setattr(settings, "whatsapp_phone_number_id", "123")
-        monkeypatch.setattr(settings, "twilio_account_sid", "AC1")
-        monkeypatch.setattr(settings, "twilio_auth_token", "secret")
-        monkeypatch.setattr(settings, "twilio_whatsapp_number", "14155238886")
 
         assert isinstance(get_messenger(), CloudMessenger)
-
-    def test_twilio_is_used_when_meta_is_not_configured(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from app.config import get_settings
-        from app.services.messaging import TwilioMessenger, get_messenger
-
-        settings = get_settings()
-        monkeypatch.setattr(settings, "whatsapp_access_token", None)
-        monkeypatch.setattr(settings, "whatsapp_phone_number_id", None)
-        monkeypatch.setattr(settings, "twilio_account_sid", "AC1")
-        monkeypatch.setattr(settings, "twilio_auth_token", "secret")
-        monkeypatch.setattr(settings, "twilio_whatsapp_number", "14155238886")
-
-        assert isinstance(get_messenger(), TwilioMessenger)
 
     def test_neither_configured_names_both_ways_to_fix_it(
         self, monkeypatch: pytest.MonkeyPatch
@@ -257,9 +237,6 @@ class TestChoosingAProvider:
         for name in (
             "whatsapp_access_token",
             "whatsapp_phone_number_id",
-            "twilio_account_sid",
-            "twilio_auth_token",
-            "twilio_whatsapp_number",
         ):
             monkeypatch.setattr(settings, name, None)
 
@@ -267,4 +244,4 @@ class TestChoosingAProvider:
             get_messenger()
 
         assert "WHATSAPP_ACCESS_TOKEN" in str(caught.value)
-        assert "TWILIO_" in str(caught.value)
+        assert "WHATSAPP_PHONE_NUMBER_ID" in str(caught.value)

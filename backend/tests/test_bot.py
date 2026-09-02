@@ -453,8 +453,8 @@ class TestNativeComponents:
     """
     Buttons and list rows, which Meta draws as real tap targets.
 
-    THE TEXT NEVER GOES AWAY. Twilio cannot render a component, and neither can
-    some clients, so every reply's body still names every option. A reply whose
+    THE TEXT NEVER GOES AWAY. Some clients cannot render a component, so every
+    reply's body still names every option. A reply whose
     body read only "Choose:" would be a dead end everywhere the buttons do not
     appear — which is most of the places this has to work.
     """

@@ -300,9 +300,9 @@ class TestADeadLinkIsReadable:
 
     def test_a_machine_still_gets_json(self, client: TestClient, db: Session) -> None:
         """
-        THE PAYMENT CALLBACK MUST NOT BE HANDED AN HTML ERROR PAGE. Daraja and
-        Twilio parse what we return; an HTML body is a worse failure than the
-        one being reported.
+        THE PAYMENT CALLBACK MUST NOT BE HANDED AN HTML ERROR PAGE. Daraja and the
+        WhatsApp webhook parse what we return; an HTML body is a worse failure
+        than the one being reported.
         """
         response = client.get("/shop/no-such-shop", headers={"Accept": "application/json"})
 
@@ -311,7 +311,7 @@ class TestADeadLinkIsReadable:
 
     def test_other_statuses_stay_machine_readable(self, client: TestClient, db: Session) -> None:
         """A 403 on the signed webhook must never become a friendly HTML page."""
-        response = client.post("/webhooks/whatsapp", headers={"Accept": "text/html"}, data={})
+        response = client.post("/webhooks/meta", headers={"Accept": "text/html"}, data={})
 
         assert response.status_code in (403, 503)
         assert "text/html" not in response.headers["content-type"]
