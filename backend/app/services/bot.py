@@ -1103,11 +1103,10 @@ def _find_shop(db: Session, wanted: str) -> Seller | None:
     The shop a buyer named, by slug or by the name on the sign.
 
     Notes:
-        BOTH, BECAUSE THE LINK CARRIES THE NAME. The share link prefills "Shop
-        Book Lounge" rather than "shop book-lounge" — the buyer's own first
-        message appears in their chat, and it should read like something a
-        person wrote, not like a command they mistyped. Matching the slug too
-        keeps every link already in circulation working.
+        BOTH, BECAUSE LINKS IN CIRCULATION CARRY EITHER. The share link now
+        prefills "shop:<slug>" — unambiguous, and it resolves to exactly one
+        shop. Older links prefilled the display name ("Shop Book Lounge"), so
+        the name is still matched too and none of those break.
 
         CLOSED SHOPS ARE NOT FOUND. A buyer must never reach a catalogue whose
         owner has not opened it; that is the publish gate, and a chat that
@@ -1331,7 +1330,11 @@ def _share_link(seller: Seller) -> str | None:
     number = (settings.whatsapp_display_number or "").strip().lstrip("+")
     if not number:
         return None
-    return f"https://wa.me/{number}?text={quote(f'Shop {seller.display_name}')}"
+    # shop:<slug>, not the display name. The slug is ours, permanent and
+    # unambiguous — "shop:book-lounge" resolves to exactly one shop, where
+    # "Shop Book Lounge" could collide with a product name a buyer types. The
+    # colon stays literal (safe=":") so the link a seller pastes reads clean.
+    return f"https://wa.me/{number}?text={quote(f'shop:{seller.slug}', safe=':')}"
 
 
 def _share_card(seller: Seller) -> Reply:

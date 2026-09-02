@@ -327,7 +327,11 @@ class TestTheShareLink:
         """
         monkeypatch.setattr(get_settings(), "whatsapp_display_number", "254118198343")
         seller = make_seller(
-            db, whatsapp_number=PHONE, is_published=True, display_name="Book Lounge"
+            db,
+            whatsapp_number=PHONE,
+            is_published=True,
+            display_name="Book Lounge",
+            slug="book-lounge",
         )
         make_payment_method(db, seller)
         stocked(db, seller)
@@ -335,7 +339,17 @@ class TestTheShareLink:
         body = said(handle(db, PHONE, "share").replies)
 
         assert "https://wa.me/254118198343?text=" in body
-        assert "Book%20Lounge" in body
+        assert "shop:book-lounge" in body
+
+    def test_the_link_text_opens_the_shop_for_a_buyer(self, db: Session) -> None:
+        """The other half of the link: sending its text finds exactly this shop."""
+        seller = make_seller(db, is_published=True, display_name="Book Lounge", slug="book-lounge")
+        make_payment_method(db, seller)
+        stocked(db, seller)
+
+        replies = handle(db, OTHER_PHONE, "shop:book-lounge").replies
+
+        assert "Book Lounge" in said(replies)
 
     def test_without_a_number_it_says_so_instead_of_inventing_one(
         self, db: Session, monkeypatch: pytest.MonkeyPatch

@@ -78,7 +78,7 @@ def say(db: Session, text: str, phone: str = PHONE) -> str:
 
 class TestFindingTheShop:
     """
-    The shareable link is wa.me/<bot>?text=shop <slug>, so the first message
+    The shareable link is wa.me/<bot>?text=shop:<slug>, so the first message
     names the shop. That link opens WhatsApp itself — a deep link, not a URL,
     which is the whole reason this surface exists.
     """
