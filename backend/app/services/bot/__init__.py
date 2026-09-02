@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     ConversationState,
     Product,
+    ProductStatus,
     Seller,
     WaConversation,
 )
@@ -51,6 +52,7 @@ from app.services.bot.presentation import (
     _ask_address,
     _ask_delivery,
     _ask_variant,
+    _catalogue,
     _found,
     _list_products,
     _menu,
@@ -98,19 +100,78 @@ from app.services.bot.selling import (
     _welcome,
     summarise_intake,
 )
-from app.services.cart import clear
+from app.services.cart import CartError, add_item, clear
+from app.services.catalog import product_id_from_retailer
 from app.services.intake import PARSE_FORWARD, MediaFetch
 from app.services.jobs import enqueue
 from app.services.storefront import get_public_products
 
 __all__ = [
     "handle",
+    "handle_order",
     "summarise_intake",
     "Reply",
     "Outcome",
     "get_conversation",
     "find_seller_by_phone",
 ]
+
+
+def handle_order(db: Session, phone: str, product_items: list[dict[str, object]]) -> Outcome:
+    """
+    A buyer sent their WhatsApp cart back — turn it into an order in progress.
+
+    A Multi-Product Message lets a buyer tap product cards into a native cart and
+    send it; Meta delivers that as an ``order`` message with the items. It
+    carries no name or address, so this rebuilds the cart server-side and hands
+    off to the SAME checkout the chat uses — name, delivery, pay — rather than a
+    second, parallel order path that could disagree with the first.
+
+    Args:
+        db: Session. The caller commits.
+        phone: The buyer's number.
+        product_items: Meta's ``order.product_items`` — each a dict with
+            ``product_retailer_id`` and ``quantity``.
+
+    Returns:
+        The checkout's opening question, or a gentle miss if nothing resolved.
+    """
+    convo = get_conversation(db, phone)
+
+    resolved: list[tuple[Product, int]] = []
+    for item in product_items or []:
+        product_id = product_id_from_retailer(str(item.get("product_retailer_id") or ""))
+        product = db.get(Product, product_id) if product_id else None
+        if product is not None and product.status == ProductStatus.PUBLISHED.value:
+            raw_quantity = item.get("quantity")
+            quantity = int(raw_quantity) if isinstance(raw_quantity, int | str) else 1
+            resolved.append((product, max(1, quantity)))
+
+    if not resolved:
+        return Outcome(
+            [
+                Reply(
+                    "I couldn't find those items just now — they may have sold out. "
+                    "Send *menu* to see what's in.",
+                )
+            ]
+        )
+
+    # One order is one shop's. A shared catalogue could in theory mix sellers;
+    # take the first item's shop and keep only its lines.
+    seller = resolved[0][0].seller
+    convo.seller_id = seller.id
+    cart = _basket(db, convo, seller)
+    clear(db, cart)
+    for product, quantity in resolved:
+        if product.seller_id != seller.id:
+            continue
+        try:
+            add_item(db, cart, product.id, quantity=quantity)
+        except CartError:
+            continue
+
+    return Outcome(_start_checkout(db, seller, convo))
 
 
 def _answer_to_what_we_asked(
@@ -435,6 +496,11 @@ def handle(
     # here is the repetition that made the thread feel like a machine.
     if lowered in {"menu", "keep shopping", "see what's in stock", "start again"}:
         return Outcome(_menu(db, seller, convo))
+
+    if lowered in {"catalogue", "catalog", "browse all", "full catalogue", "all items"}:
+        # Native product cards into a WhatsApp cart — falls back to the list menu
+        # when no catalogue is configured, so the option is never a dead end.
+        return Outcome(_catalogue(db, seller, convo))
 
     if lowered in {"store", "shop", "website", "open store", "see everything"}:
         # The only reply that can open a page inside WhatsApp — see _shop_card.

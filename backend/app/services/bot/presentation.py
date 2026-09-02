@@ -28,11 +28,13 @@ from app.services.bot.replies import (
     _plural,
 )
 from app.services.cart import CartError, add_item
+from app.services.catalog import retailer_id
 from app.services.media import absolute_url
 from app.services.orders import (
     get_payment_method,
 )
 from app.services.storefront import get_categories, get_public_products
+from app.services.whatsapp_cloud import MAX_MPM_PRODUCTS
 
 
 def _shop_card(seller: Seller) -> Reply:
@@ -268,6 +270,37 @@ def _greet_then(
     # Welcome first, then the whole catalogue — two messages, because the
     # welcome has its own job and a shop with no categories still deserves one.
     return [*_greeting(db, seller), *replies]
+
+
+def _catalogue(db: Session, seller: Seller, convo: WaConversation) -> list[Reply]:
+    """
+    The whole shop as tappable product cards — a Multi-Product Message.
+
+    The buyer adds cards to a native WhatsApp cart and sends it back, which
+    arrives as an ``order`` message and lands in the ordinary checkout. Falls
+    back to the list menu when no catalogue is configured or the shop is empty,
+    so the button never leads to nothing.
+    """
+    if not settings.whatsapp_catalog_id:
+        return _menu(db, seller, convo)
+
+    products = get_public_products(db, seller)[:MAX_MPM_PRODUCTS]
+    if not products:
+        return _menu(db, seller, convo)
+
+    convo.state = ConversationState.BROWSING
+    convo.context = {}
+    section_title = seller.display_name or "Everything"
+    return [
+        Reply(
+            f"Here's everything *{seller.display_name}* has in. Tap items into "
+            "your basket, then send it back to me and I'll take the order.",
+            product_list=(
+                "Shop the catalogue",
+                [(section_title, [retailer_id(p) for p in products])],
+            ),
+        )
+    ]
 
 
 def _list_products(

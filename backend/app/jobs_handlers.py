@@ -28,9 +28,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Job, JobStatus, Seller, SocialAccount
-from app.services import outbound, whatsapp_cloud
+from app.models import Job, JobStatus, Product, Seller, SocialAccount
+from app.services import catalog, outbound, whatsapp_cloud
 from app.services.bot import summarise_intake
+from app.services.catalog import CATALOG_SYNC
 from app.services.intake import PARSE_FORWARD, IntakeError, ingest_forwarded_post
 from app.services.scraper import get_scraper
 from app.services.sync import SYNC_POSTS, run_sync
@@ -156,6 +157,33 @@ def parse_forward_handler(db: Session, job: Job) -> dict[str, Any] | None:
         note["summarised"] = True
 
     return note
+
+
+@register(CATALOG_SYNC)
+def catalog_sync_handler(db: Session, job: Job) -> dict[str, Any] | None:
+    """
+    Bring one product's Meta catalogue entry in line with its current state.
+
+    Runs off the request path because it is a Graph call, and publishing must
+    not wait on Meta. Enqueued whenever a product's buyability changes — a
+    publish, a price, an unpublish — with a dedupe key per product so a burst of
+    edits collapses to one sync.
+
+    Args:
+        db: Session owned by the worker. **Do not commit.**
+        job: Carries ``{"product_id": int}``.
+    """
+    product_id = job.payload.get("product_id")
+    if product_id is None:
+        raise ValueError("catalog_sync requires product_id in the payload")
+
+    product = db.get(Product, product_id)
+    if product is None:
+        # Gone since the job was queued. Nothing to mirror; not a failure.
+        return {"skipped": "product no longer exists"}
+
+    synced = catalog.sync_product(product)
+    return {"retailer_id": catalog.retailer_id(product), "status": product.status, "synced": synced}
 
 
 def _forward_batch_still_running(db: Session, seller_id: int, current_job_id: int) -> bool:

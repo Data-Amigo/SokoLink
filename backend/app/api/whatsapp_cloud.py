@@ -41,7 +41,7 @@ from starlette.exceptions import HTTPException
 from app.config import get_settings
 from app.db import get_db
 from app.models import WaMessage
-from app.services.bot import handle
+from app.services.bot import handle, handle_order
 from app.services.intake import MediaFetch
 from app.services.outbound import send_reply
 from app.services.whatsapp_cloud import (
@@ -182,10 +182,17 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
             )
         )
 
-        fetches: list[tuple[str, MediaFetch]] = [
-            (media_id, _fetch_for(media_id)) for media_id, _ in media
-        ]
-        outcome = handle(db, sender, text, media=fetches)
+        if message.get("type") == "order":
+            # A Multi-Product Message came back as a WhatsApp cart. It carries
+            # the items but no name or address, so it opens the ordinary
+            # checkout rather than a second, parallel order path.
+            order = message.get("order") or {}
+            outcome = handle_order(db, sender, order.get("product_items") or [])
+        else:
+            fetches: list[tuple[str, MediaFetch]] = [
+                (media_id, _fetch_for(media_id)) for media_id, _ in media
+            ]
+            outcome = handle(db, sender, text, media=fetches)
         outgoing.append((sender, outcome.replies))
 
         # MESSAGES FOR OTHER PEOPLE, queued the same way and sent after the same

@@ -153,6 +153,12 @@ class Settings(BaseSettings):
     #: instead. The template is the only shape that opens in WhatsApp.
     whatsapp_shop_template: str = "biashara_shop_link"
 
+    #: The Meta Commerce catalogue this WABA is connected to. Multi-Product
+    #: Messages reference items in it by retailer_id, so a shop's published
+    #: products are mirrored there (see services/catalog.py). Empty means the
+    #: native catalogue surface is off and the chat falls back to list menus.
+    whatsapp_catalog_id: str | None = None
+
     #: The bot's own number in international digits, e.g. 254118198343 — no
     #: plus, no spaces. Builds the wa.me link a seller shares.
     #:

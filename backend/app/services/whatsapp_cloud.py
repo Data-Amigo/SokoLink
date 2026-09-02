@@ -444,6 +444,125 @@ def send_list(
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# THE CATALOGUE, AND MULTI-PRODUCT MESSAGES
+# ══════════════════════════════════════════════════════════════════════════
+#
+# A Multi-Product Message shows real product cards a buyer taps to add to a
+# native WhatsApp cart — but it references items by retailer_id in a catalogue
+# Meta holds, so the shop's products must be mirrored there first. The mapping
+# and the sync live in services/catalog.py; these are the raw Graph calls.
+
+#: Products a Multi-Product Message may carry, across all sections. Meta's cap.
+MAX_MPM_PRODUCTS = 30
+
+#: Sections in a Multi-Product Message.
+MAX_MPM_SECTIONS = 10
+
+#: A section title's character cap.
+SECTION_TITLE_CHARS = 24
+
+
+def catalog_upsert(catalog_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Create or update catalogue items by retailer_id, in one batch.
+
+    Args:
+        catalog_id: The Commerce catalogue's id.
+        items: Each a dict carrying ``retailer_id`` plus the item fields
+            (name, price, currency, availability, image_url, …).
+
+    Returns:
+        Meta's batch response.
+
+    Notes:
+        UPDATE, NOT CREATE. The batch ``UPDATE`` method upserts — a retailer_id
+        Meta has not seen is created, one it has is updated — so the same call
+        serves a first publish and every edit after, and the caller never has to
+        know which it is.
+    """
+    requests = [
+        {
+            "method": "UPDATE",
+            "retailer_id": item["retailer_id"],
+            "data": {k: v for k, v in item.items() if k != "retailer_id"},
+        }
+        for item in items
+    ]
+    return _post(f"{catalog_id}/items_batch", {"item_type": "PRODUCT_ITEM", "requests": requests})
+
+
+def catalog_delete(catalog_id: str, retailer_ids: list[str]) -> dict[str, Any]:
+    """Remove catalogue items by retailer_id — an unpublished or sold-through item."""
+    requests = [{"method": "DELETE", "retailer_id": rid} for rid in retailer_ids]
+    return _post(f"{catalog_id}/items_batch", {"item_type": "PRODUCT_ITEM", "requests": requests})
+
+
+def send_product_list(
+    to: str,
+    header: str,
+    body: str,
+    catalog_id: str,
+    sections: list[tuple[str, list[str]]],
+) -> str:
+    """
+    Send a Multi-Product Message — product cards from the catalogue.
+
+    Args:
+        to: Recipient, digits with country code.
+        header: A short bold line; required by Meta for this type.
+        body: The text under the header.
+        catalog_id: The catalogue the retailer_ids belong to.
+        sections: ``(title, [retailer_id, …])``. At most ten sections and
+            thirty products in total; both are trimmed rather than risking the
+            whole message being rejected.
+
+    Returns:
+        Meta's message id.
+
+    Raises:
+        CloudApiError: If the send fails.
+    """
+    phone_id = _require("WHATSAPP_PHONE_NUMBER_ID", settings.whatsapp_phone_number_id)
+
+    trimmed: list[tuple[str, list[str]]] = []
+    budget = MAX_MPM_PRODUCTS
+    for title, rids in sections[:MAX_MPM_SECTIONS]:
+        if budget <= 0:
+            break
+        take = rids[:budget]
+        if take:
+            trimmed.append((title, take))
+            budget -= len(take)
+
+    interactive: dict[str, Any] = {
+        "type": "product_list",
+        "header": {"type": "text", "text": _clip(header, 60)},
+        "body": {"text": _clip(body, BODY_CHARS)},
+        "action": {
+            "catalog_id": catalog_id,
+            "sections": [
+                {
+                    "title": _clip(title, SECTION_TITLE_CHARS),
+                    "product_items": [{"product_retailer_id": rid} for rid in rids],
+                }
+                for title, rids in trimmed
+            ],
+        },
+    }
+    result = _post(
+        f"{phone_id}/messages",
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": interactive,
+        },
+    )
+    return str(result.get("messages", [{}])[0].get("id", ""))
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # TEMPLATES, AND THE IN-APP BROWSER
 # ══════════════════════════════════════════════════════════════════════════
 #

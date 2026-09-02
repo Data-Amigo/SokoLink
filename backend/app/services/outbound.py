@@ -17,6 +17,7 @@ patch up, because there is no second binding to go stale.
 
 from __future__ import annotations
 
+from app.config import settings
 from app.services import whatsapp_cloud
 from app.services.bot import Reply
 
@@ -42,7 +43,16 @@ def send_reply(to: str, reply: Reply) -> None:
         image, so the photo goes bare and the card with the choices follows.
     """
     try:
-        if reply.link:
+        if reply.product_list:
+            # A Multi-Product Message, if this deployment has a catalogue; if
+            # not, the body still carries the shop and the buyer is not stranded.
+            header, sections = reply.product_list
+            catalog_id = settings.whatsapp_catalog_id
+            if catalog_id:
+                whatsapp_cloud.send_product_list(to, header, reply.body, catalog_id, sections)
+            else:
+                whatsapp_cloud.send_text(to, reply.body)
+        elif reply.link:
             url, label = reply.link
             whatsapp_cloud.send_cta_url(to, reply.body, url, label=label)
         elif reply.template:

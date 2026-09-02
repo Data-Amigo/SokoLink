@@ -62,6 +62,12 @@ class Reply:
     #: ONE BUTTON PER MESSAGE — Meta's limit, not ours.
     link: tuple[str, str] | None = None
 
+    #: A Multi-Product Message, as ``(header, [(section_title, [retailer_id, …])])``.
+    #: The buyer taps product cards into a native WhatsApp cart and sends it back
+    #: as an ``order`` message. The catalogue id is the deployment's, added at
+    #: send time — the conversation names the products, not the catalogue.
+    product_list: tuple[str, list[tuple[str, list[str]]]] | None = None
+
 
 @dataclass
 class Outcome:

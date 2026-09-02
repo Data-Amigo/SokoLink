@@ -43,10 +43,30 @@ from app.models import (
     ProductStatus,
     Seller,
 )
+from app.services.catalog import CATALOG_SYNC
+from app.services.jobs import enqueue
 
 
 class PublishError(Exception):
     """Publishing was refused, with a message safe to show the seller."""
+
+
+def _sync_catalogue(db: Session, product: Product) -> None:
+    """
+    Queue a Meta-catalogue sync for a product whose buyability just changed.
+
+    Off the request path — it is a Graph call, and publishing must not wait on
+    Meta. Deduped per product, so a flurry of edits collapses to one sync. Does
+    nothing costly when no catalogue is configured: the job runs, finds no
+    ``WHATSAPP_CATALOG_ID``, and returns.
+    """
+    enqueue(
+        db,
+        CATALOG_SYNC,
+        payload={"product_id": product.id},
+        seller_id=product.seller_id,
+        dedupe_key=f"catalog:{product.id}",
+    )
 
 
 def get_own_product(db: Session, seller: Seller, product_id: int) -> Product | None:
@@ -219,6 +239,7 @@ def publish_product(db: Session, seller: Seller, product_id: int) -> Product:
     if product.reviewed_at is None:
         product.reviewed_at = datetime.now(UTC)
     db.flush()
+    _sync_catalogue(db, product)
     return product
 
 
@@ -238,6 +259,7 @@ def unpublish_product(db: Session, seller: Seller, product_id: int) -> Product:
 
     product.status = ProductStatus.DRAFT.value
     db.flush()
+    _sync_catalogue(db, product)
     return product
 
 
