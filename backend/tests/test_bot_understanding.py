@@ -326,3 +326,54 @@ class TestItDegrades:
         replies = handle(db, BUYER_PHONE, "mm").replies
 
         assert "Who is this order for" not in screen(replies)
+
+
+class TestTheExactExchangeFromTheHandset:
+    """
+    Replayed message for message from a real thread, because every failure this
+    file exists for was found by a person typing, not by a test.
+
+        them  That is not my shop name please
+        bot   Sure — what should it be called instead?
+        them  My shop name should be Biggie Books
+        bot   Changed. … is now *My shop name should be Biggie Books*.   ← wrong
+
+    The second reply took the sentence whole. Knowing which question is
+    outstanding tells us what the reply is ABOUT; it does not make the reply
+    only the answer. That is the same bug the extraction was built for, and it
+    was reintroduced inside the fix for it.
+    """
+
+    def test_asking_then_answering_in_a_sentence(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        seller = make_seller(
+            db, whatsapp_number=SELLER_PHONE, display_name="My shop is called Biggie Books"
+        )
+
+        # "That is not my shop name please" — a rename with no new name in it.
+        model.append(reading(Intent.SHOP_NAME))
+        asked = handle(db, SELLER_PHONE, "That is not my shop name please").replies
+        assert "what should it be called instead" in screen(asked).lower()
+
+        # "My shop name should be Biggie Books" — the answer, wrapped.
+        model.append(reading(Intent.SHOP_NAME, name="Biggie Books"))
+        handle(db, SELLER_PHONE, "My shop name should be Biggie Books")
+
+        db.refresh(seller)
+        assert seller.display_name == "Biggie Books"
+
+    def test_the_answer_still_lands_without_a_model(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        """Renaming clumsily beats not being able to rename at all."""
+        seller = make_seller(db, whatsapp_number=SELLER_PHONE, display_name="Wrong Name")
+
+        model.append(reading(Intent.SHOP_NAME))
+        handle(db, SELLER_PHONE, "that is not my shop name")
+
+        model.append(None)  # the provider falls over on the follow-up
+        handle(db, SELLER_PHONE, "Biggie Books")
+
+        db.refresh(seller)
+        assert seller.display_name == "Biggie Books"

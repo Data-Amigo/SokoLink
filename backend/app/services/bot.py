@@ -2204,14 +2204,48 @@ def _answer_to_what_we_asked(
     convo.context = {k: v for k, v in convo.context.items() if k != _ASKING_FOR}
 
     if what == "shop_name" and owner is not None:
-        return Outcome(_rename_shop(db, owner, said))
+        # READ, NOT TAKEN WHOLE. Knowing which question is outstanding is not
+        # the same as the reply being only the answer — "My shop name should be
+        # Biggie Books" is a sentence with a name in it, and taking it verbatim
+        # is the very bug the extraction exists to fix. This path bypassed it
+        # once already, and named a shop "My shop name should be Biggie Books".
+        return Outcome(_rename_shop(db, owner, _extracted(db, convo, said, owner, "name")))
+
     if what == "about" and owner is not None:
-        return Outcome(_save_about(db, owner, convo, said))
+        # A description IS the sentence, so the raw text is the right answer
+        # here — but the model still gets a look, because "tell them we sell
+        # school books" should store the description, not the instruction.
+        return Outcome(_save_about(db, owner, convo, _extracted(db, convo, said, owner, "about")))
     if what in {"query", "budget"} and seller is not None:
         # Handed back to the ordinary buyer path, which already knows how to
         # search a catalogue and read a budget out of a sentence.
         return None
     return None
+
+
+def _extracted(db: Session, convo: WaConversation, said: str, owner: Seller, field: str) -> str:
+    """
+    The answer inside a sentence, or the sentence when there is no model.
+
+    Args:
+        field: Which field of the reading to take — "name" or "about".
+
+    Notes:
+        WHY THIS EXISTS SEPARATELY. Asking a question tells us what the reply
+        is ABOUT; it does not make the reply only the answer. People wrap it:
+        "My shop name should be Biggie Books", "call it Biggie Books", "it's
+        Biggie Books". Taking the raw text names the shop after the sentence,
+        which is exactly the failure the extraction was built for.
+
+        FALLS BACK TO THE RAW TEXT, because a shop that cannot be renamed
+        without a working model is worse than one renamed clumsily.
+    """
+    reading = _understand(db, convo, said, owner=owner, shopping_at=None)
+    if reading is not None:
+        value = getattr(reading, field, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return said
 
 
 def _seller_said_something(db: Session, convo: WaConversation, said: str, owner: Seller) -> Outcome:
