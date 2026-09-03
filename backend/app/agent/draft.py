@@ -88,6 +88,22 @@ Hashtags from the post (context only): {{hashtags}}
 """
 
 
+_FORWARDED_PROMPT = f"""You are drafting a product listing for a Kenyan seller's
+online shop, from a catalogue post they forwarded to us on WhatsApp.
+
+A FORWARDED CATALOGUE POST IS COMPOSED TO BE READ. Unlike a video cover frame
+grabbed mid-motion, the seller chose this image to sell from: the item is
+usually centred and lit, and any price is deliberately legible. Read what is
+actually printed — do not infer.
+
+The caption is the seller's own words, often in Sheng or Swahili, and it may
+carry sizes, colours or a bulk lot. It may also carry no price at all, which is
+normal and is not a failure.
+{_RULES}
+The seller's caption (may be empty): {{caption}}
+"""
+
+
 class DraftAgentError(RuntimeError):
     """
     The vision provider failed in a way the caller must handle.
@@ -127,6 +143,40 @@ class DraftAgent:
             parts=[types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")],
             prompt=_COVER_PROMPT.format(hashtags=self._hashtags(video)),
             context=f"cover of {video.video_id}",
+        )
+
+    # ── The forwarded post ───────────────────────────────────────────────────
+
+    def draft_from_forwarded(self, caption: str, image_bytes: bytes) -> ProductDraft:
+        """
+        Read a product and price from a catalogue post a seller forwarded.
+
+        Args:
+            caption: The seller's own words from the message, possibly empty.
+            image_bytes: The photo, already downloaded and type-checked.
+
+        Returns:
+            A validated draft. May legitimately carry no price — prices are
+            usually absent from captions, and the seller fills it in at review.
+
+        Raises:
+            DraftAgentError: If the provider fails or returns something that
+                cannot be validated.
+
+        Notes:
+            NO ``TikTokVideo`` ANYWHERE IN THIS SIGNATURE. The rest of this
+            agent was built for the scraper, which is parked; taking a caption
+            and bytes is what lets the same model, prompt rules and schema serve
+            the direction the product actually took.
+
+            CALLERS MUST PARSE EACH IMAGE ONCE EVER, keyed by the provider's
+            media id. This is the only paid call in the forwarding path, and a
+            seller who forwards fifty posts in a burst will trigger redeliveries.
+        """
+        return self._generate(
+            parts=[types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")],
+            prompt=_FORWARDED_PROMPT.format(caption=caption.strip() or "none"),
+            context="forwarded post",
         )
 
     # ── Tier 3: the video itself ─────────────────────────────────────────────

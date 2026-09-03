@@ -19,6 +19,7 @@ see.
 from app.db import Base
 from app.models.account import Account
 from app.models.account_claim import AccountClaim
+from app.models.buyer_question import BuyerQuestion
 from app.models.cart import Cart, CartItem
 from app.models.enums import (
     IngestMethod,
@@ -34,6 +35,7 @@ from app.models.enums import (
 from app.models.job import Job
 from app.models.login_code import LoginCode
 from app.models.order import Order, OrderItem, Payment
+from app.models.parsed_media import ParsedMedia
 from app.models.payment_method import PaymentMethod
 from app.models.post import Post
 from app.models.product import Product
@@ -41,6 +43,7 @@ from app.models.scrape_job import ScrapeJob
 from app.models.seller import Seller
 from app.models.snapshot import AccountMetricSnapshot, PostMetricSnapshot
 from app.models.social_account import SocialAccount
+from app.models.wa_conversation import ConversationState, WaConversation
 from app.models.wa_message import WaMessage
 
 __all__ = [
@@ -71,5 +74,9 @@ __all__ = [
     "Seller",
     "SocialAccount",
     "VerificationMethod",
+    "ConversationState",
+    "BuyerQuestion",
+    "ParsedMedia",
+    "WaConversation",
     "WaMessage",
 ]

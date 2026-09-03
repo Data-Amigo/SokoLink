@@ -21,11 +21,36 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from app.config import settings
 from app.services.scraper import ScraperEngine, ScraperError
 
-#: Where stored media lives. Gitignored — it is regenerable, and large.
-MEDIA_ROOT = Path(__file__).resolve().parents[2] / "media"
+#: Where stored media lives. Gitignored in development — it is regenerable, and
+#: large. CONFIGURABLE because a container's filesystem does not survive a
+#: deploy: left at the default, every photo a seller forwarded disappears the
+#: next time we push. Production points MEDIA_ROOT at a mounted volume, and
+#: nothing else changes, because a Product stores a RELATIVE path.
+MEDIA_ROOT = (
+    Path(settings.media_root)
+    if settings.media_root
+    else Path(__file__).resolve().parents[2] / "media"
+)
 COVERS_DIR = MEDIA_ROOT / "covers"
+
+#: Magic-number prefixes, longest first, mapped to the extension we store under.
+#: WE SNIFF RATHER THAN TRUST A HEADER. The extension is what StaticFiles turns
+#: into a Content-Type, and a PNG announced as JPEG renders fine in a browser —
+#: which is exactly why it survives review — then fails in the link-preview
+#: crawler that reads og:image and takes the header at its word.
+_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\xff\xd8\xff", "jpg"),
+    (b"GIF8", "gif"),
+)
+
+#: The fallback when nothing matches. JPEG, because every catalogue photo a
+#: phone camera produces is one, and a wrong extension costs a Content-Type
+#: rather than the image.
+_DEFAULT_EXT = "jpg"
 
 #: The URL prefix these are served under. Products store a path relative to
 #: MEDIA_ROOT, so moving to object storage changes this constant and nothing else.
@@ -52,6 +77,96 @@ def cover_filename(platform: str, post_id: str | None, source_url: str) -> str:
         digest = hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:16]
         stem = f"{platform}_{digest}"
     return f"{stem}.jpg"
+
+
+def image_extension(data: bytes) -> str:
+    """
+    Which extension to store these bytes under.
+
+    Args:
+        data: The start of the file is enough; the whole thing is fine too.
+
+    Returns:
+        An extension without the dot, e.g. ``"jpg"``.
+    """
+    for prefix, extension in _MAGIC:
+        if data.startswith(prefix):
+            return extension
+    return _DEFAULT_EXT
+
+
+def store_image_bytes(data: bytes, *, key: str) -> str | None:
+    """
+    Keep our own copy of image bytes we are already holding.
+
+    Args:
+        data: The image itself.
+        key: Whatever identifies it upstream — a WhatsApp media id. Hashed, so
+            a provider id containing a slash or a colon cannot escape the
+            directory or produce a filename the OS rejects.
+
+    Returns:
+        A path relative to MEDIA_ROOT, e.g. ``covers/wa_1f3c….jpg``, or None if
+        it could not be written.
+
+    Notes:
+        SEPARATE FROM ``store_cover`` BECAUSE THE BYTES ARE ALREADY IN HAND.
+        A forwarded post is downloaded once to be shown to the model; asking a
+        downloader to fetch it a second time would spend a Graph call to
+        re-acquire something already in memory — and Meta's media URLs are
+        signed and short-lived, so the second fetch is not even reliable.
+
+        NEVER RAISES, matching ``store_cover``. A product without a photo is a
+        worse card; a product that failed to exist is a lost sale. A full disk
+        must not cost the seller their draft.
+    """
+    if not data:
+        return None
+
+    COVERS_DIR.mkdir(parents=True, exist_ok=True)
+
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    filename = f"wa_{digest}.{image_extension(data)}"
+    destination = COVERS_DIR / filename
+    relative = f"covers/{filename}"
+
+    # Already stored. The media id is the parse cache key too, so a redelivered
+    # forward lands here with the same name and must not rewrite the file.
+    if destination.exists() and destination.stat().st_size > 0:
+        return relative
+
+    try:
+        destination.write_bytes(data)
+    except OSError:
+        return None
+
+    return relative
+
+
+def stored_image_path(key: str) -> str | None:
+    """
+    The copy we already keep for this key, if there is one.
+
+    Args:
+        key: The same upstream id given to :func:`store_image_bytes`.
+
+    Returns:
+        A path relative to MEDIA_ROOT, or None if nothing is stored.
+
+    Notes:
+        WHY THIS EXISTS. The parse cache means a redelivered forward is never
+        downloaded again — so the bytes are gone, and without this lookup a
+        second forward of a photo we already hold would produce a product with
+        no picture. The extension is globbed because only the bytes knew it.
+    """
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    try:
+        for candidate in sorted(COVERS_DIR.glob(f"wa_{digest}.*")):
+            if candidate.is_file() and candidate.stat().st_size > 0:
+                return f"covers/{candidate.name}"
+    except OSError:
+        return None
+    return None
 
 
 def store_cover(

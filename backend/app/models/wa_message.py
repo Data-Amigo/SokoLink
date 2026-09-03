@@ -1,11 +1,10 @@
 """
 One inbound WhatsApp message, recorded so it is never processed twice.
 
-    Twilio ──▶ WaMessage(provider_message_id UNIQUE) ──▶ (later) a product
+    Meta ──▶ WaMessage(provider_message_id UNIQUE) ──▶ (later) a product
 
-WHY THIS TABLE EXISTS BEFORE ANYTHING READS IT. Every WhatsApp provider
-redelivers: Twilio retries any webhook that is slow, errors or times out, and
-Meta does the same. When a forwarded photo becomes a product, a redelivery
+WHY THIS TABLE EXISTS BEFORE ANYTHING READS IT. Meta redelivers: any webhook
+that is slow, errors or times out is retried. When a forwarded photo becomes a product, a redelivery
 without this table becomes a SECOND product from one message — a seller's
 catalogue quietly doubling itself.
 
@@ -38,9 +37,19 @@ class WaMessage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    #: The provider's own id — Twilio's MessageSid. UNIQUE, and the entire
+    #: The provider's own id — Meta's wamid. UNIQUE, and the entire
     #: idempotency story.
-    provider_message_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    #: The provider's own id for this message, and the dedupe key.
+    #:
+    #: 255, NOT 64. This was sized for an older 34-character id. Meta's
+    #: wamids are base64 and run to about 80:
+    #:
+    #:     wamid.HBgMMjU0NzA1MDkzMzkyFQIAEhggQTUzQjEy…
+    #:
+    #: At 64 every inbound Meta message failed the INSERT, returned 500, and was
+    #: redelivered — so nothing was ever recorded and the bot never replied.
+    #: Meta does not document a maximum, so this is generous rather than exact.
+    provider_message_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
 
     #: Bare 2547XXXXXXXX, with the channel prefix stripped, so it matches
     #: Account.phone and Seller.whatsapp_number without every query remembering

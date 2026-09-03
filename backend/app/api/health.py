@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import DEV_SECRET_KEY, settings
 from app.db import get_db
 
 router = APIRouter(tags=["health"])
@@ -35,6 +35,8 @@ class HealthOut(BaseModel):
     status: Literal["ok"]
     app: str
     env: str
+    #: The commit actually running. See Settings.version for why it is here.
+    version: str
 
 
 class ReadyOut(BaseModel):
@@ -53,7 +55,68 @@ def health() -> HealthOut:
     Deliberately touches nothing external. If this fails, the process itself is
     broken and a restart is the correct response.
     """
-    return HealthOut(status="ok", app=settings.app_name, env=settings.app_env)
+    return HealthOut(
+        status="ok",
+        app=settings.app_name,
+        env=settings.app_env,
+        version=settings.version,
+    )
+
+
+class IntegrationsOut(BaseModel):
+    """
+    Which integrations this deployment can actually use.
+
+    BOOLEANS, NEVER VALUES. This endpoint exists to be curled, screenshotted and
+    pasted into chats while debugging a deploy — the moment it echoed a secret
+    it would become the fastest way to leak one.
+
+    IT REPORTS CONFIGURATION, NOT HEALTH. "receive_messages: true" means the
+    variables are present, not that Meta is reachable or the token is valid.
+    That distinction matters: a wrong token and a missing one look identical
+    from the outside, and only one of them is fixed by adding a variable.
+    """
+
+    version: str
+    env: str
+
+    #: The webhook can verify Meta's signature and answer the handshake.
+    receive_messages: bool
+    #: The bot can reply. Without this, messages arrive and nothing goes back.
+    send_messages: bool
+    #: Forwarded photos can be read into draft products.
+    read_photos: bool
+    #: Templates can be created and listed — needed once, not to send.
+    manage_templates: bool
+    #: Session cookies are signed with a real key rather than the placeholder.
+    secret_key_set: bool
+
+
+@router.get("/health/integrations", response_model=IntegrationsOut)
+def integrations() -> IntegrationsOut:
+    """
+    What this deployment is configured to do.
+
+    Returns:
+        One boolean per capability, and the running commit.
+
+    Notes:
+        WHY THIS IS WORTH AN ENDPOINT. "Which variables did that container
+        actually receive" has been the question behind two long debugging
+        sessions here, and both times it was answered by inference. A deploy
+        that can be asked directly ends the guessing — and unlike reading a
+        dashboard, it reports what the RUNNING PROCESS sees, which is the only
+        thing that decides behaviour.
+    """
+    return IntegrationsOut(
+        version=settings.version,
+        env=settings.app_env,
+        receive_messages=bool(settings.whatsapp_app_secret and settings.whatsapp_verify_token),
+        send_messages=bool(settings.whatsapp_access_token and settings.whatsapp_phone_number_id),
+        read_photos=bool(settings.gemini_api_key),
+        manage_templates=bool(settings.whatsapp_business_account_id),
+        secret_key_set=settings.secret_key != DEV_SECRET_KEY,
+    )
 
 
 @router.get("/health/ready", response_model=ReadyOut)

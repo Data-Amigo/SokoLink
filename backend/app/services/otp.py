@@ -12,7 +12,7 @@ reset — for an audience whose entire business runs in one app.
 
 WHY THIS WORKS BEFORE THE BOT EXISTS. Sending a WhatsApp message needs no
 webhook; only receiving does. We send, the seller types the code into a web
-page, and nothing has to reach us from Meta or Twilio.
+page, and nothing has to reach us from Meta.
 
 SIX DIGITS IS NOTHING WITHOUT THE RAILS. One in a million per guess is weak if
 guesses are unlimited. Three things make it safe, and removing any one of them

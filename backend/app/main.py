@@ -12,11 +12,16 @@ file grows past ~100 lines, something is in the wrong place.
 
 from __future__ import annotations
 
+import logging
+import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
     accounts,
@@ -30,7 +35,7 @@ from app.api import (
     payments,
     seller_auth,
     storefront,
-    webhooks,
+    whatsapp_cloud,
 )
 from app.api import (
     settings as settings_routes,
@@ -38,8 +43,46 @@ from app.api import (
 from app.config import settings
 from app.dependencies import LoginRequired, login_redirect
 from app.services.media import MEDIA_ROOT, MEDIA_URL_PREFIX
+from app.templating import templates
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+logger = logging.getLogger("biashara.app")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """
+    Run the job worker inside the web process, unless a separate one drains it.
+
+    WHY A THREAD AND NOT A SECOND SERVICE. Forwarded photos are parsed off the
+    request path (Meta redelivers anything slow), which needs *something* to
+    drain the queue. A daemon thread here keeps the whole app one deploy and one
+    bill; the queue lives in Postgres, so nothing is lost on a restart — the
+    thread just reclaims and carries on. Point ``worker_in_process`` at False
+    and run ``python -m app.worker`` when the web process must stay lean under
+    load; ``FOR UPDATE SKIP LOCKED`` means both draining at once is safe anyway.
+    """
+    worker = None
+    thread = None
+    if settings.worker_in_process:
+        # Imported here, not at module scope: importing the handlers registers
+        # them, and doing it lazily keeps a plain ``import app.main`` from
+        # dragging in the whole service layer.
+        from app import jobs_handlers  # noqa: F401  (registers handlers on import)
+        from app.worker import Worker
+
+        worker = Worker()
+        thread = threading.Thread(target=worker.run, name="intake-worker", daemon=True)
+        thread.start()
+        logger.info("In-process job worker started")
+
+    try:
+        yield
+    finally:
+        if worker is not None:
+            worker.running = False  # finishes the job in hand, then the daemon exits
+
 
 app = FastAPI(
     title=settings.app_name,
@@ -49,6 +92,7 @@ app = FastAPI(
     # has to remember later.
     docs_url="/docs" if not settings.is_prod else None,
     redoc_url=None,  # one docs UI is enough
+    lifespan=lifespan,
 )
 
 
@@ -66,6 +110,34 @@ def _login_required(request: Request, exc: Exception) -> RedirectResponse:
     return login_redirect(next_url)
 
 
+@app.exception_handler(StarletteHTTPException)
+def _not_found(request: Request, exc: Exception) -> Response:
+    """
+    Render a 404 a person can read, when a person is what asked.
+
+    A SHOP LINK IS THIS PRODUCT'S WHOLE DISTRIBUTION. It gets pasted into chats,
+    forwarded and put in bios, and it outlives the shop it points at — sellers
+    close shops and unpublish items. So a buyer meeting a 404 is normal traffic,
+    and until now they met ``{"detail":"Shop not found"}``, which in a phone's
+    in-app browser is a blank screen or a downloaded file. A tapped link that
+    appears to do nothing is indistinguishable from a broken app.
+
+    ONLY FOR BROWSERS, AND ONLY FOR 404. Anything that did not ask for HTML —
+    Daraja's callback, the WhatsApp webhook, the health check, a fetch — keeps the JSON body
+    it expects, because a payment callback parsing an HTML error page is a worse
+    failure than the one it was reporting. Every other status is left alone too:
+    a 403 on the webhook must stay machine-readable.
+    """
+    status = exc.status_code if isinstance(exc, StarletteHTTPException) else 500
+    detail = exc.detail if isinstance(exc, StarletteHTTPException) else "Error"
+
+    wants_html = "text/html" in request.headers.get("accept", "")
+    if status == 404 and wants_html:
+        return templates.TemplateResponse(request, "storefront/gone.html", {}, status_code=404)
+
+    return JSONResponse({"detail": detail}, status_code=status)
+
+
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(seller_auth.router)
@@ -76,7 +148,7 @@ app.include_router(catalogue.router)
 app.include_router(analytics.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
-app.include_router(webhooks.router)
+app.include_router(whatsapp_cloud.router)
 app.include_router(settings_routes.router)
 
 # The design system, and anything else the browser fetches by URL. Version-free

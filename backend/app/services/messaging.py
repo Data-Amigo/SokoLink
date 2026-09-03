@@ -1,39 +1,33 @@
 """
 Sending a WhatsApp message, behind our own interface.
 
-    text + number ──▶ Messenger.send() ──▶ TwilioMessenger today
+    text + number ──▶ Messenger.send() ──▶ CloudMessenger (Meta Cloud API)
                             │
                             └── a fake in tests; nothing leaves the process
 
-WHY AN ADAPTER, AND WHY IT MATTERS MORE HERE THAN USUAL. The WhatsApp provider
-is genuinely undecided: Twilio works today with no Meta business verification,
-and Meta's Cloud API is cheaper at volume once verification lands. Callers
-depend on ``Messenger``, so switching is one new class rather than a rewrite.
+WHY AN ADAPTER. Callers depend on ``Messenger`` rather than on a provider, so
+what actually sends is one class they never see. The project ran on Twilio
+first and moved to Meta's Cloud API without those callers changing — which is
+the whole point of the seam, and the reason it stays even now there is a single
+provider: a future switch is one new class, not a rewrite.
 
-WHY NO TWILIO SDK. Sending is a single form POST with basic auth. The SDK would
-add a dependency, a version to track and a layer between us and the wire, to
-save four lines. ``httpx`` is already here for Daraja.
+WHY NO SDK. Sending is a single authenticated POST. An SDK would add a
+dependency, a version to track and a layer between us and the wire to save a
+few lines. The Cloud call lives in ``services/whatsapp_cloud`` alongside the
+rest of the Graph surface, and this module just chooses it.
 
-SENDING NEEDS NO WEBHOOK. This is the fact that makes OTP login possible before
-the bot exists: a webhook is only required to RECEIVE. We send the code and the
-seller types it back into a web page, so nothing has to reach us from Meta.
+SENDING NEEDS NO WEBHOOK. This is the fact that makes OTP login possible: a
+webhook is only required to RECEIVE. We send the code and the seller types it
+back into a web page, so nothing has to reach us to log somebody in.
 
 WHAT THIS MODULE DOES NOT DO. It does not decide what to say, when to retry, or
-whether a number is allowed to be messaged. It formats one request and reports
-what happened.
+whether a number is allowed to be messaged. It hands one message to the Cloud
+API and reports what happened.
 """
 
 from __future__ import annotations
 
 from typing import Protocol
-
-import httpx
-
-#: Twilio is usually fast, but a seller is staring at a spinner waiting for a
-#: code. Long enough to absorb a slow hop, short enough to fail visibly.
-REQUEST_TIMEOUT_SECONDS = 15.0
-
-_TWILIO_API = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
 
 
 class MessagingError(RuntimeError):
@@ -41,8 +35,8 @@ class MessagingError(RuntimeError):
     A message could not be sent.
 
     Carries the provider's own text, because "could not send" alone cannot be
-    debugged — and the commonest causes are specific and fixable: an unverified
-    sandbox recipient, a malformed number, an expired token.
+    debugged — and the commonest causes are specific and fixable: a closed
+    24-hour window, a malformed number, an expired token.
     """
 
 
@@ -63,64 +57,33 @@ class Messenger(Protocol):
         ...
 
 
-class TwilioMessenger:
+class CloudMessenger:
     """
-    Twilio's WhatsApp API, called over plain HTTP.
+    Meta's WhatsApp Cloud API, behind the one-method seam.
 
-    THE SANDBOX HAS A TRAP WORTH KNOWING. On Twilio's WhatsApp sandbox every
-    recipient must first send ``join <code>`` to the sandbox number, or the
-    message is accepted by the API and silently never delivered. That is fine
-    for our own testing and impossible for real sellers — production needs an
-    approved sender.
+    THE 24-HOUR WINDOW APPLIES TO EVERYTHING SENT THROUGH HERE. Meta allows
+    free-form messages only while a conversation is open, which a person opens
+    by messaging us. Outside it, only an approved template is delivered. A
+    receipt to a buyer who just paid is comfortably inside; a "you have a sale"
+    to a seller who has been quiet for a week is not, and will fail. The caller
+    has to be able to survive that, which is why send() reports rather than
+    hides it.
     """
-
-    def __init__(self, account_sid: str, auth_token: str, from_number: str) -> None:
-        self.account_sid = account_sid
-        self.auth_token = auth_token
-        # Twilio wants the whatsapp: scheme and a leading +. Sellers and our own
-        # config store bare 254…, so normalise here rather than asking every
-        # caller and every .env to remember the format.
-        self.from_number = self._as_whatsapp(from_number)
-
-    @staticmethod
-    def _as_whatsapp(number: str) -> str:
-        """Put a number into Twilio's ``whatsapp:+254…`` form, however it arrived."""
-        cleaned = number.strip().replace("whatsapp:", "").replace(" ", "")
-        if not cleaned.startswith("+"):
-            cleaned = f"+{cleaned.lstrip('+')}"
-        return f"whatsapp:{cleaned}"
 
     def send(self, to: str, body: str) -> str:
         """
-        Send one WhatsApp message.
+        Deliver plain text through the Cloud API.
 
         Raises:
-            MessagingError: On any transport or provider failure. Twilio reports
-                refusals in the BODY with a ``message`` field, so the status code
-                alone is not enough — a 400 with "not a valid WhatsApp
-                recipient" has to reach the caller as that sentence.
+            MessagingError: On any provider failure, carrying Meta's own text.
+                A closed 24-hour window arrives this way.
         """
+        from app.services.whatsapp_cloud import CloudApiError, send_text
+
         try:
-            response = httpx.post(
-                _TWILIO_API.format(sid=self.account_sid),
-                auth=(self.account_sid, self.auth_token),
-                data={
-                    "From": self.from_number,
-                    "To": self._as_whatsapp(to),
-                    "Body": body,
-                },
-                timeout=REQUEST_TIMEOUT_SECONDS,
-            )
-            payload = response.json()
-        except httpx.HTTPError as exc:
-            raise MessagingError(f"Could not reach WhatsApp: {exc}") from exc
-        except ValueError as exc:
-            raise MessagingError("WhatsApp returned a response we could not read.") from exc
-
-        if response.status_code >= 400:
-            raise MessagingError(payload.get("message") or f"WhatsApp refused: {payload}")
-
-        return str(payload.get("sid", ""))
+            return send_text(to, body)
+        except CloudApiError as exc:
+            raise MessagingError(str(exc)) from exc
 
 
 def get_messenger() -> Messenger:
@@ -130,26 +93,21 @@ def get_messenger() -> Messenger:
     A function rather than a module-level instance so tests can override it as a
     FastAPI dependency, and so nothing is constructed at import time.
 
+    Returns:
+        The Cloud API messenger when it is configured.
+
     Raises:
-        MessagingError: If the Twilio credentials are not configured. Raised
-            here rather than at import so the rest of the app still boots — a
-            missing WhatsApp key must not take the storefront down.
+        MessagingError: If the Cloud API is not configured. Raised here rather
+            than at import so the rest of the app still boots — a missing
+            WhatsApp key must not take the storefront down.
     """
     from app.config import get_settings
 
     settings = get_settings()
-    if not (
-        settings.twilio_account_sid
-        and settings.twilio_auth_token
-        and settings.twilio_whatsapp_number
-    ):
-        raise MessagingError(
-            "WhatsApp is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN "
-            "and TWILIO_WHATSAPP_NUMBER."
-        )
 
-    return TwilioMessenger(
-        account_sid=settings.twilio_account_sid,
-        auth_token=settings.twilio_auth_token,
-        from_number=settings.twilio_whatsapp_number,
+    if settings.whatsapp_access_token and settings.whatsapp_phone_number_id:
+        return CloudMessenger()
+
+    raise MessagingError(
+        "WhatsApp is not configured. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID."
     )

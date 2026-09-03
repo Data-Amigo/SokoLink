@@ -174,13 +174,30 @@ class TestOpeningTheShop:
         assert storefront.status_code == 200
         assert "Cargo Pants" in storefront.text
 
-    def test_closing_hides_it_again(self, client: TestClient, db: Session) -> None:
+    def test_closing_hides_it_from_buyers(self, client: TestClient, db: Session) -> None:
+        """
+        Closing takes the shop away from BUYERS.
+
+        WHY THIS LOGS OUT BEFORE LOOKING. It used to assert a 404 while still
+        holding the owner's session, which was right until sellers were given a
+        preview of their own closed shop — "View store" is the only way to
+        answer "what will a buyer actually get?", and it is needed most before
+        opening, which is exactly when the public route 404s.
+
+        So the owner now correctly gets 200 here, and asserting otherwise was
+        testing the version of the rule that no longer exists. The viewer the
+        rule is actually about is a buyer, and a buyer has no session.
+        """
         account = signed_in(client, db)
         seller = contactable(db, account)
         client.post("/settings/shop/open")
 
         client.post("/settings/shop/close")
 
+        db.refresh(seller)
+        assert seller.is_published is False
+
+        client.cookies.clear()  # a buyer, not the owner
         assert client.get(f"/shop/{seller.slug}").status_code == 404
 
 

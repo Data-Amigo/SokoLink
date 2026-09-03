@@ -17,11 +17,19 @@ needs its own key asserts it via ``require()``.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, PostgresDsn, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    Field,
+    PostgresDsn,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core.core_schema import ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -83,6 +91,20 @@ class Settings(BaseSettings):
     #: Public base URL, no trailing slash. Used to build storefront links.
     app_base_url: str = "http://localhost:8000"
 
+    #: Run the background job worker INSIDE the web process, as a daemon thread,
+    #: rather than as a separate ``python -m app.worker`` service. True keeps the
+    #: whole app one Railway service and one bill; the queue lives in Postgres
+    #: either way, so queued work survives a restart. Set False when a dedicated
+    #: worker service drains the queue, so the web process does not also.
+    worker_in_process: bool = True
+
+    #: Where stored product images live. Empty means a directory inside the
+    #: application, which is right for development and WRONG in production: a
+    #: container's filesystem is rebuilt on every deploy, so every photo a
+    #: seller forwarded would vanish the next time we push. Point this at a
+    #: mounted volume — the storefront reads the same relative paths either way.
+    media_root: str = ""
+
     # ── P0: database ─────────────────────────────────────────────────────────
     #: Full Postgres URL. Required — the app cannot do anything without it.
     database_url: PostgresDsn
@@ -116,22 +138,52 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str | None = None
     whatsapp_app_secret: str | None = None
 
-    # ── WhatsApp: Twilio (used today, for sending the login code) ────────────
-    # Twilio is the provider we can use NOW: sending needs no webhook and no
-    # Meta business verification. Meta's Cloud API is cheaper at volume and
-    # remains the likely destination — which is why both sets of keys live here
-    # and everything goes through services/messaging.py rather than either SDK.
-    twilio_account_sid: str | None = None
-    twilio_auth_token: str | None = None
+    #: The WhatsApp Business Account id. Distinct from the phone number id:
+    #: templates belong to the ACCOUNT, messages are sent from the NUMBER, and
+    #: one account can own several numbers. Needed only to create or list
+    #: templates, never to send.
+    whatsapp_business_account_id: str | None = None
 
-    #: The WhatsApp-enabled number messages are sent FROM. Stored bare
-    #: (254…) or with a +; the adapter normalises it either way.
-    twilio_whatsapp_number: str | None = None
+    #: The approved template whose CTA button opens a shop INSIDE WhatsApp.
+    #:
+    #: WHY A TEMPLATE AT ALL, when the bot can already send a link. Meta's
+    #: in-app browser opens links from CTA buttons on approved templates and
+    #: from interactive messages. A link in a free-form reply — which is
+    #: everything the bot says — is handed to the device's default browser
+    #: instead. The template is the only shape that opens in WhatsApp.
+    whatsapp_shop_template: str = "biashara_shop_link"
+
+    #: The Meta Commerce catalogue this WABA is connected to. Multi-Product
+    #: Messages reference items in it by retailer_id, so a shop's published
+    #: products are mirrored there (see services/catalog.py). Empty means the
+    #: native catalogue surface is off and the chat falls back to list menus.
+    whatsapp_catalog_id: str | None = None
+
+    #: The bot's own number in international digits, e.g. 254118198343 — no
+    #: plus, no spaces. Builds the wa.me link a seller shares.
+    #:
+    #: WHY IT IS NOT DERIVED FROM whatsapp_phone_number_id. That id is a Meta
+    #: object id, not a phone number, and there is no offline way to turn one
+    #: into the other. Unset means we cannot build a share link at all, and the
+    #: chat says so rather than handing a seller a broken one.
+    whatsapp_display_number: str | None = None
 
     # ── W2: M-Pesa Daraja ────────────────────────────────────────────────────
-    # NOTE: in production the credentials used for an STK push are the SELLER's,
-    # stored encrypted on their PaymentMethod — not these. We are never in the
-    # money path. The keys below exist only for our own sandbox testing.
+    # THE FOUR CREDENTIAL FIELDS BELOW ARE READ BY NOTHING. Verified by grep,
+    # not assumed. Only `daraja_environment` has a job: it picks the sandbox or
+    # production host.
+    #
+    # That is not an oversight, it is the architecture. An STK push deposits
+    # into the shortcode that AUTHORISED it, so pushing with our credentials
+    # would land every buyer's money in our Safaricom account and leave us
+    # owing each seller theirs — a payment intermediary holding other people's
+    # funds, which is the one thing this product refuses to be. The credentials
+    # used for a real push are the SELLER's, encrypted on their PaymentMethod
+    # and entered through the workspace.
+    #
+    # They are kept because they are a convenient place to hold sandbox values
+    # while testing, and because deleting a documented name tends to produce a
+    # deploy that sets it again. Setting them configures nothing.
     #
     # EACH ACCEPTS TWO NAMES. Safaricom's API is called Daraja and its product is
     # called M-Pesa, so both prefixes are in circulation and a .env written from
@@ -162,6 +214,21 @@ class Settings(BaseSettings):
         default="sandbox",
         validation_alias=AliasChoices("DARAJA_ENVIRONMENT", "MPESA_ENVIRONMENT"),
     )
+
+    # ── Deployment identity ──────────────────────────────────────────────────
+    #: The commit this container was built from, injected by Railway.
+    #:
+    #: WHY THIS IS WORTH A SETTING. "Is my code actually live?" has been
+    #: answered wrongly more than once in this project — once because a stale
+    #: worker held the port, once because a push went to a branch nobody
+    #: deploys. Both times the only way to tell was to guess from behaviour.
+    #: Reading it back from /health turns that into a fact.
+    railway_git_commit_sha: str | None = None
+
+    @property
+    def version(self) -> str:
+        """The running commit, short, or "unknown" outside a Railway build."""
+        return (self.railway_git_commit_sha or "unknown")[:7]
 
     # ── Security ─────────────────────────────────────────────────────────────
     #: Signs sessions AND derives the key that encrypts sellers' Daraja
@@ -263,14 +330,14 @@ class Settings(BaseSettings):
         """
         A trailing slash produces `//path` when links are built by concatenation.
 
-        IT ALSO BREAKS EVERY INBOUND WEBHOOK. Twilio signs the exact URL it was
-        given; we recompute that signature from ``app_base_url + path``. One
-        stray slash makes every genuine message look forged, and the only
-        symptom is a silent 403 in somebody else's dashboard.
+        IT ALSO SHAPES EVERY ABSOLUTE URL WE BUILD. ``app_base_url`` is joined
+        to a path to form the webhook URL we register with Meta and the media
+        and shop links inside messages. One stray slash yields ``//path``, and
+        the symptom is a link that quietly fails in somebody else's client.
         """
         return v.strip().rstrip("/")
 
-    @field_validator("twilio_account_sid", "twilio_auth_token", "twilio_whatsapp_number")
+    @field_validator("whatsapp_access_token", "whatsapp_app_secret", "whatsapp_verify_token")
     @classmethod
     def _strip_credential(cls, v: str | None) -> str | None:
         """
@@ -278,7 +345,7 @@ class Settings(BaseSettings):
 
         A TOKEN WITH A TRAILING NEWLINE IS INVISIBLE AND FATAL. It is a shared
         HMAC secret: one extra byte and every signature we compute differs from
-        every signature Twilio sends, so every real message is rejected as a
+        every signature Meta sends, so every real message is rejected as a
         forgery. Dashboards show the value without revealing the whitespace, and
         the failure looks identical to having the wrong token entirely.
 
@@ -330,6 +397,95 @@ class Settings(BaseSettings):
         return str(value)
 
 
+#: What to print when the environment is empty. Named variables, in the order
+#: they must be set, because a list of pydantic field errors does not tell
+#: somebody staring at a dashboard which box to fill in.
+_MISSING_ENV_HELP = """
+DATABASE_URL is not set, so the application cannot start.
+
+This is a DEPLOYMENT CONFIGURATION problem, not a code problem. The container
+received no environment at all.
+
+On Railway, check the SERVICE and the ENVIRONMENT selected at the top of the
+page — variables belong to one service in one environment, and a second service
+(or a second environment) starts with none. The "Suggested Variables" panel is
+NOT your configuration: it is Railway reading .env.example and offering to
+create those variables, and it reappears on every deploy while that file exists.
+
+The variables this service needs:
+
+    DATABASE_URL          the Postgres connection string
+    SECRET_KEY            signs sessions; must not be the .env.example default
+    APP_BASE_URL          https://<your-domain>   (no trailing slash)
+    APP_ENV               prod          (NOT "production" — see app_env)
+    WHATSAPP_PHONE_NUMBER_ID }  send messages via the Cloud API
+    WHATSAPP_ACCESS_TOKEN    }
+    WHATSAPP_VERIFY_TOKEN    }  receive + verify inbound webhooks
+    WHATSAPP_APP_SECRET      }
+    GEMINI_API_KEY        needed to read forwarded catalogue posts
+"""
+
+
+#: The variables a deployed service is expected to carry. Names only — this
+#: list is printed on a failed boot, and a secret in a log is a secret leaked.
+EXPECTED_ENV = (
+    "DATABASE_URL",
+    "SECRET_KEY",
+    "APP_ENV",
+    "APP_BASE_URL",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_VERIFY_TOKEN",
+    "WHATSAPP_APP_SECRET",
+    "GEMINI_API_KEY",
+)
+
+
+def _env_inventory() -> str:
+    """
+    Which expected variables the container actually received, by name.
+
+    Returns:
+        A block to append to the startup failure message.
+
+    Notes:
+        THIS IS THE LINE THAT ANSWERS "WHY DOES THIS KEEP HAPPENING". There is a
+        large difference between one missing variable and an environment that is
+        entirely empty, and the two have completely different causes:
+
+            some present, one missing   somebody deleted or renamed a box
+            NONE present                the deploy is running against a
+                                        different SERVICE or ENVIRONMENT from
+                                        the one the variables were set on
+
+        Pydantic's ``input_value={}`` does say the second thing, but only to
+        somebody who already knows to read it that way. This says it outright.
+
+        NAMES ONLY, NEVER VALUES. This text goes into a deployment log that gets
+        pasted into chats and screenshots.
+    """
+    present = [name for name in EXPECTED_ENV if os.environ.get(name, "").strip()]
+    missing = [name for name in EXPECTED_ENV if name not in present]
+
+    lines = ["", "What this container actually received:", ""]
+    for name in EXPECTED_ENV:
+        lines.append(f"    {'set    ' if name in present else 'MISSING'}  {name}")
+
+    lines.append("")
+    if not present:
+        lines.append(
+            "NONE of them are set. An empty environment almost always means the\n"
+            "deploy is running against a different SERVICE or ENVIRONMENT from the\n"
+            "one the variables were saved on — not that the values were lost."
+        )
+    elif missing:
+        lines.append(
+            f"{len(present)} of {len(EXPECTED_ENV)} are set, so the service does have an\n"
+            "environment — the ones marked MISSING were never added, or were renamed."
+        )
+    return "\n".join(lines) + "\n"
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """
@@ -338,8 +494,35 @@ def get_settings() -> Settings:
     Cached rather than evaluated at import so that merely importing this module
     never reads the environment — which keeps tests and tooling able to import
     the app without a real .env present.
+
+    Raises:
+        RuntimeError: When required variables are missing, carrying a message
+            that names the fix.
+
+    Notes:
+        WHY THIS CATCHES AND RE-RAISES. A MISSING variable never reaches the
+        validators below — pydantic rejects the model first, and the container
+        log reads:
+
+            ValidationError: 1 validation error for Settings
+            database_url
+              Field required [type=missing, input_value={}, input_type=dict]
+
+        That is accurate and nearly useless: it does not say which variable in
+        which dashboard, and ``input_value={}`` — the fact that the WHOLE
+        environment was empty — is the single most diagnostic thing in it and
+        the easiest to miss. This has now cost two separate debugging sessions.
+
+        The blank-string case is handled by a validator instead, because a value
+        that is present but empty means something different: usually an
+        unresolved ``${{Service.VAR}}`` reference rather than a missing box.
     """
-    return Settings()  # type: ignore[call-arg]  # values come from env/.env
+    try:
+        return Settings()  # type: ignore[call-arg]  # values come from env/.env
+    except ValidationError as exc:
+        if any(error["type"] == "missing" for error in exc.errors()):
+            raise RuntimeError(_MISSING_ENV_HELP + _env_inventory()) from exc
+        raise
 
 
 settings = get_settings()

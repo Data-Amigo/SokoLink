@@ -18,16 +18,72 @@ hit a paid API.
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import settings
+from app import config
+from app.config import get_settings, settings
 from app.db import Base, get_db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def the_model_is_never_called(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    No test reaches Gemini, whatever the developer's .env happens to hold.
+
+    WHY THIS IS AUTOUSE AND NOT OPT-IN. The conversation now falls back to a
+    model when its keyword paths miss, and that fallback is reached from dozens
+    of tests that have nothing to do with the model. On a machine with a real
+    GEMINI_API_KEY every one of them made a live call: the bot suites went from
+    four minutes to over thirty, and each run quietly spent real quota.
+
+    Nobody wrote a test that hits a paid API. The default did it for them, which
+    is exactly why the default has to be off. A test that WANTS the model swaps
+    in its own fake and sets a key — see tests/test_bot_understanding.py.
+
+    Setting the key to None is enough: `_understand` checks it before
+    constructing a client, so no network stack is ever entered.
+    """
+    monkeypatch.setattr(get_settings(), "gemini_api_key", None)
+
+
+@pytest.fixture(autouse=True)
+def settings_singleton_survives() -> Generator[None, None, None]:
+    """
+    Whatever a test does to the settings cache, the singleton is intact after.
+
+    WHY THIS IS NOT PARANOIA. Every module in the application holds the object
+    bound by ``from app.config import settings`` at import time. ``get_settings``
+    is an lru_cache over that same object — until a test calls ``cache_clear()``,
+    after which ``get_settings()`` builds a NEW one and the two silently diverge.
+
+    Nothing raises when they do. Later tests write ``monkeypatch.setattr(
+    get_settings(), "gemini_api_key", "key")`` and patch an object the
+    application has never heard of; their assertions then fail naming the
+    endpoint rather than the pollution. That cost four failures which passed
+    individually, failed only together, and read as flakiness.
+
+    The cache cannot be primed directly, so the original instance is handed back
+    through the constructor the cache calls.
+    """
+    yield
+
+    cached = get_settings() if get_settings.cache_info().currsize else None
+    if cached is settings:
+        return
+
+    get_settings.cache_clear()
+    real = config.Settings
+    config.Settings = lambda **_: settings  # type: ignore[assignment,misc]
+    try:
+        get_settings()
+    finally:
+        config.Settings = real  # type: ignore[misc]
 
 
 def _test_database_url() -> str | None:
@@ -152,9 +208,59 @@ def client(db: Session) -> Generator[TestClient, None, None]:
     def _override() -> Generator[Session, None, None]:
         yield db
 
+    # NO BACKGROUND WORKER IN TESTS. Entering the TestClient runs the app's
+    # lifespan, which would otherwise start the in-process worker on its own
+    # real connection — a thread racing the rolled-back test session. Tests
+    # drain the queue deterministically via the ``run_jobs`` fixture instead.
+    get_settings().worker_in_process = False
+
     app.dependency_overrides[get_db] = _override
     try:
         with TestClient(app) as c:
             yield c
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def run_jobs(db: Session) -> Generator[Callable[[], int], None, None]:
+    """
+    Drain the job queue synchronously, on the test's own session.
+
+    The real worker claims a job, commits to release the lock, runs the handler
+    and commits again. A test has one session and no second worker to race, so
+    this does the same work WITHOUT the commits — claim, run the handler,
+    complete — which keeps the whole thing inside the transaction the fixture
+    rolls back. Importing the handlers registers them.
+    """
+    from app import jobs_handlers  # noqa: F401  (registers handlers on import)
+    from app.services.jobs import claim_next, complete
+    from app.worker import HANDLERS
+
+    def _run() -> int:
+        ran = 0
+        while True:
+            job = claim_next(db)
+            if job is None:
+                return ran
+            HANDLERS[job.kind](db, job)
+            complete(db, job)
+            ran += 1
+
+    yield _run
+
+
+@pytest.fixture
+def sent(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, object]]:
+    """
+    Capture what the worker sends, instead of putting it on the wire.
+
+    The webhook returns its replies for the caller to send; the worker has no
+    caller, so it sends the intake summary itself through ``outbound.send_reply``.
+    This records ``(to, reply)`` for each such send so a test can assert on it.
+    """
+    from app.services import outbound
+
+    captured: list[tuple[str, object]] = []
+    monkeypatch.setattr(outbound, "send_reply", lambda to, reply: captured.append((to, reply)))
+    return captured

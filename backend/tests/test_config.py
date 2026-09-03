@@ -16,7 +16,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings, settings
+from app import config
+from app.config import _MISSING_ENV_HELP, Settings, get_settings, settings
 
 DB_URL = "postgresql://user:pass@localhost:5432/biashara"
 
@@ -253,49 +254,230 @@ class TestPastedCredentials:
     """
     Whitespace on a secret is invisible in a dashboard and fatal at runtime.
 
-    We already lost a deploy to a ``DATABASE_URL`` of ``' \n'``. The Twilio auth
-    token is worse: it is a shared HMAC secret, so one extra byte makes every
-    genuine inbound message look forged, and the resulting 403 is
-    indistinguishable from having pasted the wrong token entirely.
+    We already lost a deploy to a ``DATABASE_URL`` of ``' \n'``. WHATSAPP_APP_SECRET
+    is worse: it is the HMAC key we verify every inbound webhook against, so one
+    extra byte makes every genuine message look forged, and the resulting 403 is
+    indistinguishable from having pasted the wrong secret entirely.
     """
 
     def test_a_token_pasted_with_a_newline_still_works(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "  abc123def456  \n")
+        monkeypatch.setenv("WHATSAPP_APP_SECRET", "  abc123def456  \n")
 
-        assert build().twilio_auth_token == "abc123def456"
+        assert build().whatsapp_app_secret == "abc123def456"
 
-    def test_the_account_sid_and_number_are_trimmed_too(
+    def test_the_access_and_verify_tokens_are_trimmed_too(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123\n")
-        monkeypatch.setenv("TWILIO_WHATSAPP_NUMBER", " +14155238886 ")
+        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "AC123\n")
+        monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", " my-verify ")
 
         settings = build()
 
-        assert settings.twilio_account_sid == "AC123"
-        assert settings.twilio_whatsapp_number == "+14155238886"
+        assert settings.whatsapp_access_token == "AC123"
+        assert settings.whatsapp_verify_token == "my-verify"
 
     def test_an_unset_token_stays_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         None must survive the validator.
 
-        The webhook returns 503 when the token is None — refusing beats
+        The webhook returns 503 when the app secret is None — refusing beats
         accepting unverifiable traffic. Coercing it to an empty string would
         make that check pass and every forged request reach the database.
         """
-        monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("WHATSAPP_APP_SECRET", raising=False)
 
-        assert build().twilio_auth_token is None
+        assert build().whatsapp_app_secret is None
 
     def test_a_base_url_with_a_trailing_newline_is_trimmed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """
-        Signed webhooks recompute Twilio's signature from ``app_base_url``, so a
-        stray character here rejects every real message with no visible cause.
+        Absolute URLs are built by joining ``app_base_url`` with a path, so a
+        stray character here yields ``//path`` and a quietly broken link.
         """
         monkeypatch.setenv("APP_BASE_URL", " https://example.up.railway.app/\n")
 
         assert build().app_base_url == "https://example.up.railway.app"
+
+
+class TestAnEmptyEnvironmentSaysWhatToDo:
+    """
+    The failure that has now cost two debugging sessions.
+
+    A MISSING variable never reaches the validators above — pydantic rejects the
+    model first, and the container log reads:
+
+        ValidationError: 1 validation error for Settings
+        database_url
+          Field required [type=missing, input_value={}, input_type=dict]
+
+    Accurate, and nearly useless. It does not say which variable in which
+    dashboard, and ``input_value={}`` — the fact that the WHOLE environment was
+    empty, which is the single most diagnostic thing in it — is the easiest part
+    to miss.
+    """
+
+    def test_a_missing_variable_becomes_a_message_that_names_the_fix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Settings is stubbed rather than the environment emptied: ``env_file`` is
+        an ABSOLUTE path to the repo's .env, so a developer machine always has a
+        DATABASE_URL and clearing os.environ would not reproduce the container.
+        """
+
+        def raises_missing(**_: object) -> Settings:
+            raise ValidationError.from_exception_data(
+                "Settings",
+                [{"type": "missing", "loc": ("database_url",), "input": {}}],
+            )
+
+        monkeypatch.setattr(config, "Settings", raises_missing)
+        get_settings.cache_clear()
+
+        with pytest.raises(RuntimeError) as caught:
+            get_settings()
+
+        message = str(caught.value)
+        assert "DATABASE_URL is not set" in message
+        assert "DEPLOYMENT CONFIGURATION problem" in message
+        get_settings.cache_clear()
+
+    def test_a_validation_error_that_is_not_missing_is_left_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        A malformed URL is a different problem with a different fix. Replacing
+        pydantic's message with ours would hide which field was actually wrong.
+        """
+
+        def raises_bad_url(**_: object) -> Settings:
+            raise ValidationError.from_exception_data(
+                "Settings",
+                [
+                    {
+                        "type": "url_parsing",
+                        "loc": ("database_url",),
+                        "input": "nope",
+                        "ctx": {"error": "relative URL without a base"},
+                    }
+                ],
+            )
+
+        monkeypatch.setattr(config, "Settings", raises_bad_url)
+        get_settings.cache_clear()
+
+        with pytest.raises(ValidationError):
+            get_settings()
+        get_settings.cache_clear()
+
+    def test_it_explains_the_suggested_variables_panel(self) -> None:
+        """
+        Railway shows a "Suggested Variables" panel built from .env.example and
+        redisplays it on every deploy. It looks exactly like configuration that
+        keeps resetting itself, and it is not — but nobody should have to work
+        that out from a stack trace.
+        """
+        assert "Suggested Variables" in _MISSING_ENV_HELP
+        assert "NOT your configuration" in _MISSING_ENV_HELP
+
+    def test_it_points_at_the_service_and_the_environment(self) -> None:
+        """The commonest real cause: variables set on a different service, or in
+        a different environment, from the one being deployed."""
+        assert "SERVICE" in _MISSING_ENV_HELP
+        assert "ENVIRONMENT" in _MISSING_ENV_HELP
+
+    def test_it_lists_every_variable_the_service_needs(self) -> None:
+        """Naming one missing variable invites fixing them one failed deploy at
+        a time."""
+        for name in (
+            "DATABASE_URL",
+            "SECRET_KEY",
+            "APP_BASE_URL",
+            "WHATSAPP_ACCESS_TOKEN",
+            "GEMINI_API_KEY",
+        ):
+            assert name in _MISSING_ENV_HELP
+
+
+class TestTheEnvInventory:
+    """
+    The line that answers "why does this keep happening on every deploy".
+
+    There is a large difference between one missing variable and an environment
+    that is entirely empty, and they have completely different causes. Pydantic's
+    ``input_value={}`` does say the second thing, but only to somebody who
+    already knows to read it that way.
+    """
+
+    def test_an_empty_environment_blames_the_service_not_the_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in config.EXPECTED_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+        report = config._env_inventory()
+
+        assert "NONE of them are set" in report
+        assert "different SERVICE or ENVIRONMENT" in report
+        assert "not that the values were lost" in report
+
+    def test_a_partly_set_environment_says_the_opposite(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Some present means the service DOES have an environment, so the
+        cause is a deleted or renamed box — not the wrong service."""
+        for name in config.EXPECTED_ENV:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("SECRET_KEY", "something")
+
+        report = config._env_inventory()
+
+        assert "NONE of them are set" not in report
+        assert "were never added, or were renamed" in report
+
+    def test_every_variable_is_listed_either_way(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in config.EXPECTED_ENV:
+            monkeypatch.delenv(name, raising=False)
+
+        report = config._env_inventory()
+
+        for name in config.EXPECTED_ENV:
+            assert name in report
+
+    def test_it_never_prints_a_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        THIS TEXT GOES INTO A DEPLOYMENT LOG that gets pasted into chats and
+        screenshots. Names only, always.
+        """
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:sup3rs3cret@host/db")
+        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "abcdef0123456789")
+
+        report = config._env_inventory()
+
+        assert "sup3rs3cret" not in report
+        assert "abcdef0123456789" not in report
+
+    def test_whitespace_only_counts_as_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An unresolved ${{Service.VAR}} expands to whitespace. It is set as
+        far as the shell is concerned and useless as far as we are."""
+        monkeypatch.setenv("DATABASE_URL", "  \n")
+
+        assert "MISSING  DATABASE_URL" in config._env_inventory()
+
+
+def test_app_env_rejects_the_word_production() -> None:
+    """
+    A guard against advice this project has already given wrongly, twice.
+
+    The literal is dev|test|prod. "production" is the obvious thing to type,
+    reads as correct in a dashboard, and crashes the container on boot — so the
+    help text must name the right value rather than the natural one.
+    """
+    assert "APP_ENV               prod" in config._MISSING_ENV_HELP
+    assert "production" in config._MISSING_ENV_HELP  # as the warning, not the value
+
+    with pytest.raises(ValidationError):
+        build(app_env="production")
