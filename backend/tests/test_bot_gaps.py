@@ -2,8 +2,8 @@
 Two gaps found in live testing, and the guards that keep them fixed.
 
 1. "open another shop" was read as SELLER_OPEN and opened the seller's EXISTING
-   shop. One WhatsApp number runs one shop today, so the request now gets an
-   honest answer instead of the model's misread.
+   shop. Multi-shop now supports several shops per number, so that phrase STARTS
+   a new shop instead — and never opens the one they already have.
 2. A buyer pasted a whole M-Pesa confirmation SMS and was told it "doesn't look
    like a code". The reference is now extracted from anywhere in the message.
 """
@@ -12,12 +12,20 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import ProductStatus
-from app.services.bot import handle
+from app.models import ConversationState, ProductStatus
+from app.services.bot import get_conversation, handle
 from app.services.bot.buying import _mpesa_code
+from app.services.bot.common import find_account_by_phone
 from tests.factories import make_payment_method, make_product, make_seller
 
 PHONE = "254712345678"
+
+
+def _onboard_owner(db: Session) -> None:
+    """Create a real account-backed owner via the chat, so multi-shop applies."""
+    handle(db, PHONE, "sell")
+    handle(db, PHONE, "Book Nook")
+    handle(db, PHONE, "skip")  # defer payment; account + first shop now exist
 
 
 def _openable_seller(db: Session):
@@ -41,22 +49,34 @@ def _say(db: Session, text: str) -> str:
 
 
 class TestAnotherShop:
-    def test_open_another_shop_does_not_open_the_existing_one(self, db: Session) -> None:
-        seller = _openable_seller(db)
+    def test_open_another_shop_starts_a_new_shop(self, db: Session) -> None:
+        _onboard_owner(db)
 
         said = _say(db, "What if I want to open another shop for computers")
 
-        assert "one shop" in said.lower()
+        # Starts creating a new shop — it does NOT open the existing one.
+        assert "another shop" in said.lower()
         assert "open for business" not in said.lower()
-        assert seller.is_published is False
+        assert get_conversation(db, PHONE).state == ConversationState.NAMING
 
-    def test_add_a_shop_is_understood(self, db: Session) -> None:
-        seller = _openable_seller(db)
+    def test_add_a_shop_starts_a_new_shop(self, db: Session) -> None:
+        _onboard_owner(db)
 
         said = _say(db, "I want to add a shop")
 
-        assert "one shop" in said.lower()
-        assert seller.is_published is False
+        assert "another shop" in said.lower()
+        assert get_conversation(db, PHONE).state == ConversationState.NAMING
+
+    def test_naming_it_creates_a_second_shop(self, db: Session) -> None:
+        _onboard_owner(db)
+        _say(db, "new shop")
+
+        _say(db, "Computer World")
+
+        account = find_account_by_phone(db, PHONE)
+        assert account is not None
+        names = {s.display_name for s in account.sellers}
+        assert names == {"Book Nook", "Computer World"}
 
     def test_plain_open_still_opens_the_shop(self, db: Session) -> None:
         # Regression: the guard must not swallow the real open command.

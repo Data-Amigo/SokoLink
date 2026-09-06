@@ -46,7 +46,13 @@ from app.models import (
 )
 from app.schemas.conversation import Intent
 from app.services.bot.buying import _buyer_said_something, _claim, _hand_off, _place
-from app.services.bot.common import _basket, _find_shop, find_seller_by_phone, get_conversation
+from app.services.bot.common import (
+    _basket,
+    _find_shop,
+    find_seller_by_phone,
+    get_conversation,
+    owner_context,
+)
 from app.services.bot.presentation import (
     _add_to_basket,
     _ask_address,
@@ -76,13 +82,16 @@ from app.services.bot.replies import (
     _price,
 )
 from app.services.bot.selling import (
-    _another_shop_reply,
     _ask_about,
+    _ask_delete,
     _ask_payment_kind,
     _ask_payment_number,
     _ask_shop_name,
+    _close_shop,
     _confirm_order,
     _create_shop,
+    _do_delete,
+    _list_my_shops,
     _onboarding_next_photo,
     _open_shop,
     _priced_summary,
@@ -99,7 +108,9 @@ from app.services.bot.selling import (
     _seller_said_something,
     _set_price,
     _start_answer,
+    _start_new_shop,
     _stock_summary,
+    _switch_shop,
     _welcome,
     summarise_intake,
     wants_another_shop,
@@ -248,7 +259,7 @@ def handle(
     # Checked before anything else: this is the one interaction the whole
     # product exists for, and a photo from a seller can mean nothing else.
     if media:
-        owner = find_seller_by_phone(db, phone)
+        _, owner = owner_context(db, convo, phone)
         if owner is not None:
             # THE PARSE DOES NOT RUN HERE. It is a paid vision call, and Meta
             # redelivers any webhook that is slow — so parsing eight photos in
@@ -303,7 +314,7 @@ def handle(
         # bot number is shared, and the same person runs a shop on Monday and
         # buys shoes on Tuesday. Announcing the switch — and naming the way
         # back — is what makes a shared number honest instead of confusing.
-        owner_here = find_seller_by_phone(db, phone)
+        _, owner_here = owner_context(db, convo, phone)
         switched = (
             [
                 Reply(
@@ -325,7 +336,11 @@ def handle(
     # ── The seller's own side of the thread ─────────────────────────────────
     # Checked before anything else a buyer could mean. A number typed by a
     # seller we just asked for a price is a price, not a menu choice.
-    owner = find_seller_by_phone(db, phone)
+    #
+    # MULTI-SHOP: a number maps to an ACCOUNT, which may own several shops; the
+    # one this thread is acting on is the active shop. None means every shop was
+    # deleted, so they are treated as someone with no shop yet.
+    owner_account, owner = owner_context(db, convo, phone)
     if owner is not None:
         # THE WAY BACK OUT OF SOMEBODY ELSE'S SHOP. Checked before the buyer
         # branch claims the message, because a seller stuck inside another
@@ -336,6 +351,52 @@ def handle(
             convo.state = ConversationState.NEW
             convo.context = {}
             return Outcome(_seller_home(db, owner))
+
+        # ── Multi-shop management (only when this number has a login account;
+        #    legacy shops with no account are single-shop and skip all of this) ─
+        if owner_account is not None:
+            # A delete confirmation is pending.
+            if convo.context.get("confirm_delete"):
+                target = next(
+                    (
+                        s
+                        for s in owner_account.sellers
+                        if s.id == convo.context.get("confirm_delete")
+                    ),
+                    None,
+                )
+                if target is None or lowered in {"cancel", "stop", "no", "keep it", "keep"}:
+                    convo.context = {
+                        k: v for k, v in convo.context.items() if k != "confirm_delete"
+                    }
+                    return Outcome([Reply("Kept it — nothing was deleted.")])
+                if lowered == f"delete {target.display_name.lower()}":
+                    return Outcome(_do_delete(db, convo, owner_account, target))
+                return Outcome(
+                    [
+                        Reply(
+                            f"To delete *{target.display_name}*, reply exactly "
+                            f"*delete {target.display_name}* — or send *cancel* to keep it."
+                        )
+                    ]
+                )
+
+            # Naming a NEW shop (they sent "new shop", now they're naming it).
+            if convo.state == ConversationState.NAMING:
+                return Outcome(_create_shop(db, convo, phone, said))
+
+            # Switching between shops.
+            if lowered in {"my shops", "shops", "switch shop", "switch shops"}:
+                return Outcome(_list_my_shops(owner_account, convo, owner))
+            if lowered.startswith("switch:") and said.split(":", 1)[1].strip().isdigit():
+                moved = _switch_shop(convo, owner_account, int(said.split(":", 1)[1].strip()))
+                if moved is not None:
+                    return Outcome(moved)
+            options = convo.context.get("shop_options")
+            if isinstance(options, list) and said.isdigit() and 1 <= int(said) <= len(options):
+                moved = _switch_shop(convo, owner_account, int(options[int(said) - 1]))
+                if moved is not None:
+                    return Outcome(moved)
 
         if convo.state == ConversationState.PRICING:
             if lowered in {"skip", "later"}:
@@ -412,12 +473,22 @@ def handle(
             return Outcome(_resume_pricing(db, owner, convo))
         if lowered in {"publish", "add to my shop"}:
             return Outcome(_publish_ready(db, owner))
-        # A seller asking for a SECOND shop must never reach the model's "open"
-        # misread ("open another shop" → SELLER_OPEN). One number, one shop today.
-        if wants_another_shop(lowered):
-            return Outcome(_another_shop_reply(owner))
+        # "new shop" / "another shop" → create an ADDITIONAL shop (multi-shop).
+        # Caught before the model can read "open another shop" as SELLER_OPEN.
+        if owner_account is not None and wants_another_shop(lowered):
+            return Outcome(_start_new_shop(convo))
         if lowered in {"open", "open shop", "go live", "open for business"}:
             return Outcome(_open_shop(db, owner))
+        if lowered in {"close", "close shop", "close my shop", "close for business"}:
+            return Outcome(_close_shop(db, owner))
+        if owner_account is not None and lowered in {
+            "delete",
+            "delete shop",
+            "delete my shop",
+            "remove shop",
+            "remove my shop",
+        }:
+            return Outcome(_ask_delete(convo, owner))
         # "drafts" is the pricing QUEUE — items priced and waiting to publish.
         if lowered in {"drafts", "ready", "to publish"}:
             return Outcome(_priced_summary(db, owner))

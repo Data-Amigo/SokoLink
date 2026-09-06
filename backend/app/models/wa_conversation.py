@@ -155,6 +155,16 @@ class WaConversation(Base):
         ForeignKey("sellers.id", ondelete="SET NULL"), index=True
     )
 
+    #: For a SELLER on this number: which of THEIR shops they are currently
+    #: managing. Multi-shop (2026-09) lets one number own several, so an owner's
+    #: "add this", "orders", "close" must resolve to one shop — this is it. NULL
+    #: means not chosen yet; resolution falls back to their primary shop.
+    #: Distinct from ``seller_id``, which is the shop a BUYER is browsing —
+    #: selling and buying are two different hats on one number.
+    managing_shop_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sellers.id", ondelete="SET NULL")
+    )
+
     state: Mapped[str] = mapped_column(String(20), nullable=False, default=ConversationState.NEW)
 
     #: What the last question needs in order to be answerable: the options we
@@ -179,7 +189,10 @@ class WaConversation(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    seller = relationship("Seller")
+    # Two FKs point at sellers now (the buyer's shop and the owner's active
+    # shop), so each relationship must name which column it joins on.
+    seller = relationship("Seller", foreign_keys=[seller_id])
+    managing_shop = relationship("Seller", foreign_keys=[managing_shop_id])
 
     __table_args__ = (
         CheckConstraint(

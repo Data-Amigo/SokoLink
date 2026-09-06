@@ -8,6 +8,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    Account,
     Cart,
     ConversationState,
     Seller,
@@ -81,6 +82,87 @@ def find_seller_by_phone(db: Session, phone: str) -> Seller | None:
     """
     local = "0" + phone[3:] if phone.startswith("254") and len(phone) == 12 else phone
     return db.scalar(select(Seller).where(Seller.whatsapp_number.in_({phone, local, f"+{phone}"})))
+
+
+def find_account_by_phone(db: Session, phone: str) -> Account | None:
+    """
+    The login this number belongs to, if any — the owner of one or more shops.
+
+    Multi-shop (2026-09) made the account, not the shop, the thing a number maps
+    to: one number can own several shops, so the resolver returns the ACCOUNT
+    and the caller picks the active shop with :func:`active_shop`.
+
+    Matched on the number as stored and without a country code, the same way
+    :func:`find_seller_by_phone` is, because a seller may have signed up with it
+    written either way.
+    """
+    local = "0" + phone[3:] if phone.startswith("254") and len(phone) == 12 else phone
+    return db.scalar(select(Account).where(Account.phone.in_({phone, local, f"+{phone}"})))
+
+
+def owner_context(
+    db: Session, convo: WaConversation, phone: str
+) -> tuple[Account | None, Seller | None]:
+    """
+    Resolve who this number is as a SELLER: their account and their active shop.
+
+    Resolution starts from the shop matched by number (:func:`find_seller_by_phone`)
+    rather than the account, so it works for every seller — including ones with
+    no login account (older rows, and test fixtures). When that shop belongs to
+    an account, multi-shop applies and the ACTIVE shop is chosen from the
+    account's shops; when it does not, the single shop is the owner and there is
+    no account to run multi-shop against.
+
+    Returns:
+        ``(account, active_shop)``. Both None for a number that owns no shop;
+        ``(None, shop)`` for a legacy shop with no account; ``(account, shop)``
+        for the normal multi-shop case.
+    """
+    base = find_seller_by_phone(db, phone)
+    if base is None:
+        return None, None
+    if base.account is not None:
+        return base.account, active_shop(db, convo, base.account)
+    return None, base
+
+
+def active_shop(db: Session, convo: WaConversation, account: Account) -> Seller | None:
+    """
+    The shop this owner is currently managing on this thread.
+
+    Which of an account's shops a message acts on is the conversation's
+    ``managing_shop_id``. When it is unset or points at a shop that is gone
+    (deleted, or reassigned), it falls back to the account's primary live shop
+    and records that choice so the rest of the turn is consistent.
+
+    Args:
+        db: Session.
+        convo: The conversation, whose ``managing_shop_id`` is read and, when it
+            needs defaulting, written.
+        account: The owner.
+
+    Returns:
+        The active :class:`Seller`, or None when the account has no live shop
+        (every shop archived) — in which case the caller treats them as someone
+        with no shop yet.
+
+    Notes:
+        ARCHIVED SHOPS ARE NEVER ACTIVE. A deleted shop is soft-deleted
+        (``archived_at`` set), so it must never be handed back as the thing an
+        owner is managing — it would let them keep adding stock to a shop they
+        told us to remove.
+    """
+    live = [s for s in account.sellers if s.archived_at is None]
+    if not live:
+        return None
+
+    chosen = next((s for s in live if s.id == convo.managing_shop_id), None)
+    if chosen is None:
+        # Default to the primary (earliest) shop — the same one Account.seller
+        # returns for the web — and remember it for the rest of the thread.
+        chosen = live[0]
+        convo.managing_shop_id = chosen.id
+    return chosen
 
 
 def _find_shop(db: Session, wanted: str) -> Seller | None:
