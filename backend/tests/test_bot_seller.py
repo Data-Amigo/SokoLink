@@ -512,14 +512,17 @@ class TestOnboardingAStranger:
 
     def test_it_says_what_to_do_next(self, db: Session) -> None:
         """Onboarding that ends in silence has produced an empty shop and a
-        person with no idea what it was for."""
+        person with no idea what it was for. Naming now leads into payment
+        setup — how they get paid — which is the next step, before the first
+        photo (a seller can send *skip* to defer it)."""
         phone = "254700111222"
         handle(db, phone, "hi")
         handle(db, phone, "sell")
 
         said = "\n".join(r.body for r in handle(db, phone, "Mama Njeri").replies)
 
-        assert "forward" in said.lower()
+        assert "m-pesa" in said.lower()
+        assert "skip" in said.lower()
 
     def test_an_unusable_name_asks_again(self, db: Session) -> None:
         phone = "254700111222"

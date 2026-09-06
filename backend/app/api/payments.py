@@ -31,7 +31,6 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException
 
-from app.config import get_settings
 from app.db import get_db
 from app.models import OrderStatus
 from app.services.daraja import StkEngine, get_stk_engine
@@ -41,6 +40,7 @@ from app.services.payments import (
     MPESA_CALLBACK_PATH,
     PaymentError,
     apply_callback,
+    resolve_callback_url,
     start_stk_payment,
 )
 from app.services.storefront import get_public_shop
@@ -128,7 +128,7 @@ def request_stk(
             status_code=303,
         )
 
-    callback_url = f"{get_settings().app_base_url}{CALLBACK_PATH}"
+    callback_url = resolve_callback_url()
 
     try:
         start_stk_payment(db, order, method, engine, callback_url)

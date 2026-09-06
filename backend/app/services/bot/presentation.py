@@ -439,6 +439,13 @@ def _add_to_basket(
             )
         ]
 
+    # add_item wrote a new row and flushed it, but it never touched this cart's
+    # already-loaded ``items`` collection — so rendering the basket now would show
+    # it one item behind: the just-added item missing, and the first add reading
+    # the contradiction "Added ✅ … your basket is empty". Expire the collection
+    # so the basket we show is read fresh, with what we just added in it.
+    db.expire(cart, ["items"])
+
     named = f"{product.title} ({variant})" if variant else product.title
     replies = _show_cart(db, seller, convo)
     replies[0] = Reply(

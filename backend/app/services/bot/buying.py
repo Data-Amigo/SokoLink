@@ -9,7 +9,6 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models import (
     ConversationState,
     Order,
@@ -41,9 +40,43 @@ from app.services.orders import (
     get_payment_method,
     place_order,
 )
-from app.services.payments import MPESA_CALLBACK_PATH, PaymentError, start_stk_payment
+from app.services.payments import PaymentError, resolve_callback_url, start_stk_payment
 from app.services.questions import ask
 from app.services.storefront import get_public_products
+
+
+def _mpesa_code(text: str) -> str | None:
+    """
+    Pull an M-Pesa reference out of whatever the buyer sent.
+
+    THEY PASTE THE WHOLE SMS. Asked for "the code", a buyer forwards the entire
+    M-Pesa confirmation — "UI2G24W3HA Confirmed. Ksh350 sent to ...". The code
+    is right there, but an earlier version required the message to BE the code
+    and rejected every real payment made this way, telling the buyer their
+    genuine confirmation "doesn't look like an M-Pesa code".
+
+    A Safaricom code is ten characters, letters and digits, and always carries
+    BOTH — which is also what tells it apart from the account numbers, amounts
+    and dates sitting in the same message. So the first ten-character token that
+    mixes letters and digits is the code; a bare code typed on its own is taken
+    as-is.
+
+    Returns:
+        The reference in upper case, or None when nothing code-shaped is present.
+    """
+    upper = text.upper()
+    for token in re.findall(r"\b[A-Z0-9]{10}\b", upper):
+        if re.search(r"[A-Z]", token) and re.search(r"\d", token):
+            return str(token)
+
+    stripped = upper.strip()
+    if (
+        re.fullmatch(r"[A-Z0-9]{6,15}", stripped)
+        and re.search(r"[A-Z]", stripped)
+        and re.search(r"\d", stripped)
+    ):
+        return stripped
+    return None
 
 
 def _place(
@@ -146,7 +179,7 @@ def _ask_for_payment(db: Session, seller: Seller, order: Order) -> list[Reply]:
             order,
             method,
             get_stk_engine(),
-            f"{settings.app_base_url}{MPESA_CALLBACK_PATH}",
+            resolve_callback_url(),
         )
     except PaymentError:
         # Say nothing about the failure: "our payment API is down" is our
@@ -174,13 +207,14 @@ def _claim(db: Session, convo: WaConversation, text: str) -> Outcome:
     messages. Saying "payment received" at this point would be a lie the buyer
     would believe.
     """
-    code = text.strip().upper()
-    if not re.fullmatch(r"[A-Z0-9]{6,15}", code):
+    code = _mpesa_code(text)
+    if code is None:
         return Outcome(
             [
                 Reply(
                     "That doesn't look like an M-Pesa code. It's the reference in "
-                    "the M-Pesa message, like _SLK7XA2B9C_.\n\n"
+                    "the M-Pesa message, like _SLK7XA2B9C_ — you can paste the "
+                    "whole message and I'll find it.\n\n"
                     "Send it here once you've paid."
                 )
             ]

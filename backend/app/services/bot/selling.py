@@ -175,6 +175,155 @@ def _priced_summary(db: Session, seller: Seller) -> list[Reply]:
     ]
 
 
+_ANOTHER_SHOP_PHRASES = (
+    "another shop",
+    "second shop",
+    "a new shop",
+    "new shop",
+    "different shop",
+    "one more shop",
+    "extra shop",
+    "add a shop",
+    "add another shop",
+    "open another shop",
+    "create a shop",
+    "create another shop",
+    "start a shop",
+    "start another shop",
+    "another store",
+    "second store",
+    "new store",
+    "add a store",
+    "open another store",
+    "create a store",
+)
+
+
+def wants_another_shop(lowered: str) -> bool:
+    """
+    Whether a seller is asking to run a SECOND shop on this number.
+
+    WHY A KEYWORD GUARD AND NOT THE MODEL. "What if I open another shop for
+    computers" was read by the understander as SELLER_OPEN — the word "open"
+    won — and the seller was told the shop they already have is now live. One
+    number runs one shop today, so this is a small, certain set of phrases that
+    must never reach that misread; the model is still free to read everything
+    else.
+    """
+    return any(phrase in lowered for phrase in _ANOTHER_SHOP_PHRASES)
+
+
+def _another_shop_reply(seller: Seller) -> list[Reply]:
+    """
+    The honest answer to "can I open another shop": one number, one shop — today.
+
+    Says what is true now and hands back the two things they can actually do,
+    rather than pretending the feature exists or, worse, opening the shop they
+    already have. Ends with something to tap, like every seller reply.
+    """
+    return [
+        Reply(
+            f"Right now one WhatsApp number runs one shop, and this number is "
+            f"*{seller.display_name}*.\n\n"
+            "To run a separate shop you'd start it on a different WhatsApp "
+            f"number. Or send more items to *{seller.display_name}* — just "
+            "forward a photo and I'll set it up.",
+            buttons=[("stock", "See my shop"), ("share", "My shop link")],
+        )
+    ]
+
+
+def _stock_summary(db: Session, seller: Seller) -> list[Reply]:
+    """
+    The catalogue as it stands: what is live, and what still needs a price.
+
+    WHY THIS IS NOT :func:`_priced_summary`. That answers "what have I just
+    priced that I could publish" — the pricing queue, which is only DRAFTS that
+    have a price. A seller asking for "my products" or "stock" is asking the
+    opposite question: what is actually in my shop right now. Routed to the
+    queue, a seller with a full shop and an empty queue got "All done ✅ — send
+    another photo", which reads as "you have nothing". This lists their real
+    stock instead, and still surfaces anything the queue would have.
+
+    ALWAYS ENDS WITH SOMETHING TO TAP, like every other seller reply: a chat has
+    no menu bar, so a message that states stock and stops is a dead end.
+    """
+    published = db.scalars(
+        select(Product)
+        .where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.PUBLISHED.value,
+        )
+        .order_by(Product.created_at.desc())
+    ).all()
+    unpriced = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.DRAFT.value,
+                Product.price_kes.is_(None),
+            )
+        )
+        or 0
+    )
+    ready = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.DRAFT.value,
+                Product.price_kes.is_not(None),
+            )
+        )
+        or 0
+    )
+
+    # Nothing anywhere — the true empty shop, where "forward a photo" is the
+    # only next step and the pricing queue's "all done" would be a lie.
+    if not published and not unpriced and not ready:
+        return [
+            Reply(
+                "You haven't added anything yet.\n\n"
+                "Forward me a photo from your catalogue — the photo and caption, "
+                "just as you'd send a customer — and I'll set it up."
+            )
+        ]
+
+    def _line(product: Product) -> str:
+        if product.stock <= 0:
+            tail = " — *sold out*"
+        elif product.stock <= 3:
+            tail = f" — only {product.stock} left"
+        else:
+            tail = ""
+        return f"• {product.title} — {product.price_display}{tail}"
+
+    if published:
+        shown = "\n".join(_line(p) for p in published[:PAGE_SIZE])
+        extra_count = len(published) - PAGE_SIZE
+        more = f"\n\n_…and {extra_count} more._" if extra_count > 0 else ""
+        state = "Open" if seller.is_published else "Closed"
+        head = f"*In your shop* — {state} · {_plural(len(published), 'item')}\n\n{shown}{more}"
+    else:
+        head = "Nothing is in your shop yet."
+
+    todo: list[str] = []
+    buttons: list[tuple[str, str]] = []
+    if unpriced:
+        needs = "needs" if unpriced == 1 else "need"
+        todo.append(f"🏷️ {_plural(unpriced, 'item')} still {needs} a price — send *prices*.")
+        buttons.append(("prices", "Add prices"))
+    if ready:
+        todo.append(f"📦 {_plural(ready, 'item')} ready to add — send *publish*.")
+        buttons.append(("publish", "Add to my shop"))
+    if published and not seller.is_published:
+        todo.append("Your shop is *closed* — send *open* when you're ready for buyers.")
+        buttons.append(("open", "Open for business"))
+    buttons.append(("share", "My shop link"))
+
+    body = head + ("\n\n" + "\n".join(todo) if todo else "")
+    return [Reply(body, buttons=buttons[:3])]
+
+
 def _set_price(db: Session, seller: Seller, convo: WaConversation, amount: int) -> list[Reply]:
     """
     Apply a price the seller typed to the draft we asked about.
@@ -505,7 +654,14 @@ def _save_payment(db: Session, seller: Seller, convo: WaConversation, said: str)
 
     replies = [Reply(f"Saved. Buyers will pay you on:\n\n*{shown}*")]
 
-    if not seller.is_published:
+    # WHAT COMES NEXT DEPENDS ON WHERE THEY ARE. Set during onboarding, before
+    # any stock, the next step is the first photo — not "open", which an empty
+    # shop cannot do anyway. With stock already in and the shop still closed,
+    # opening is the last step. An already-open shop needs nothing further.
+    has_any = db.scalar(select(func.count(Product.id)).where(Product.seller_id == seller.id)) or 0
+    if has_any == 0:
+        replies.extend(_onboarding_next_photo())
+    elif not seller.is_published:
         replies.append(
             Reply(
                 "That's the last thing you needed. Ready to open?",
@@ -798,14 +954,47 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
             )
         )
 
+    # ONBOARDING NOW ASKS HOW THEY GET PAID, before the first photo. A shop that
+    # cannot receive money is not a shop, and discovering that at the open gate —
+    # after a seller has built a whole catalogue — is the wrong moment to find
+    # out. It stays ONE question in ONE message, and *skip* defers it for a
+    # seller who would rather add stock first; the open gate still asks later.
+    convo.state = ConversationState.PAY_KIND
+    convo.context = {}
     replies.append(
         Reply(
-            "Now forward me a post from your catalogue. Photo and caption, "
-            "exactly as you'd send a customer. I'll read it and set the item "
-            "up, and if I can't see a price I'll ask you for one."
+            "One quick thing so buyers can actually pay you — how do you take "
+            "M-Pesa?\n\n"
+            "*Pochi la Biashara* — the number on your phone\n"
+            "*Till* — Buy Goods, usually 6 digits\n"
+            "*Paybill* — a business number plus an account\n\n"
+            "Tap one, or type the word. _(Send *skip* to set this up later.)_",
+            buttons=[
+                ("pay:pochi", "Pochi la Biashara"),
+                ("pay:till", "Till number"),
+                ("pay:paybill", "Paybill"),
+            ],
         )
     )
     return replies
+
+
+def _onboarding_next_photo() -> list[Reply]:
+    """
+    The "forward your first item" nudge, used once payment is set or skipped.
+
+    Its own function because two paths reach it — a seller who finished payment
+    setup with an empty shop, and one who skipped payment — and both should land
+    on the same single next step rather than two worded-differently versions.
+    """
+    return [
+        Reply(
+            "Now forward me a post from your catalogue — the photo and caption, "
+            "exactly as you'd send a customer. I'll read it and set the item up, "
+            "and ask you for a price if I can't see one.",
+            buttons=[("share", "My shop link")],
+        )
+    ]
 
 
 def _seller_home(db: Session, seller: Seller) -> list[Reply]:

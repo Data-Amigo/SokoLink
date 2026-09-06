@@ -76,12 +76,14 @@ from app.services.bot.replies import (
     _price,
 )
 from app.services.bot.selling import (
+    _another_shop_reply,
     _ask_about,
     _ask_payment_kind,
     _ask_payment_number,
     _ask_shop_name,
     _confirm_order,
     _create_shop,
+    _onboarding_next_photo,
     _open_shop,
     _priced_summary,
     _pricing_prompt,
@@ -97,8 +99,10 @@ from app.services.bot.selling import (
     _seller_said_something,
     _set_price,
     _start_answer,
+    _stock_summary,
     _welcome,
     summarise_intake,
+    wants_another_shop,
 )
 from app.services.cart import CartError, add_item, clear
 from app.services.catalog import product_id_from_retailer
@@ -348,6 +352,11 @@ def handle(
             return Outcome([Reply("I need just the number — like *1800*. Or send *skip*.")])
 
         if convo.state == ConversationState.PAY_KIND:
+            # Onboarding offers *skip*; defer payment and point at the first item.
+            if lowered in {"skip", "later", "not now"}:
+                convo.state = ConversationState.NEW
+                convo.context = {}
+                return Outcome(_onboarding_next_photo())
             kind = _PAY_ALIASES.get(lowered.removeprefix("pay:").strip())
             if kind is not None:
                 return Outcome(_ask_payment_number(convo, kind))
@@ -403,10 +412,28 @@ def handle(
             return Outcome(_resume_pricing(db, owner, convo))
         if lowered in {"publish", "add to my shop"}:
             return Outcome(_publish_ready(db, owner))
+        # A seller asking for a SECOND shop must never reach the model's "open"
+        # misread ("open another shop" → SELLER_OPEN). One number, one shop today.
+        if wants_another_shop(lowered):
+            return Outcome(_another_shop_reply(owner))
         if lowered in {"open", "open shop", "go live", "open for business"}:
             return Outcome(_open_shop(db, owner))
-        if lowered in {"drafts", "stock", "my products", "items"}:
+        # "drafts" is the pricing QUEUE — items priced and waiting to publish.
+        if lowered in {"drafts", "ready", "to publish"}:
             return Outcome(_priced_summary(db, owner))
+        # "stock"/"my products" is the CATALOGUE — what is actually in the shop.
+        # Kept apart from the queue above: a seller with a full shop and nothing
+        # waiting to publish must not be told "all done, send another photo".
+        if lowered in {
+            "stock",
+            "my stock",
+            "my products",
+            "products",
+            "items",
+            "my items",
+            "inventory",
+        }:
+            return Outcome(_stock_summary(db, owner))
         if lowered in {"store", "shop", "my shop", "website"}:
             # Reachable for a SELLER too. The buyer branch below only fires
             # once somebody has opened a shop LINK, so without this a seller

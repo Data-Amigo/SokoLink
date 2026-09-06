@@ -215,6 +215,22 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DARAJA_ENVIRONMENT", "MPESA_ENVIRONMENT"),
     )
 
+    #: The public URL Safaricom POSTs an STK result to. Optional.
+    #:
+    #: WHY IT IS A SETTING OF ITS OWN, and not just derived from
+    #: ``app_base_url``. The callback must be publicly reachable, and a deploy
+    #: routinely knows its public callback (a Railway domain, a tunnel) before
+    #: ``APP_BASE_URL`` has been wired for everything else. A callback silently
+    #: built from a default ``localhost`` ``app_base_url`` is unreachable, and
+    #: the symptom is the worst kind: the push is accepted, the buyer pays, and
+    #: the order never settles because the result had nowhere to land. When set,
+    #: this wins; when blank, we fall back to ``app_base_url`` + the path. See
+    #: ``services/payments.resolve_callback_url``.
+    mpesa_callback_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MPESA_CALLBACK_URL", "DARAJA_CALLBACK_URL"),
+    )
+
     # ── Deployment identity ──────────────────────────────────────────────────
     #: The commit this container was built from, injected by Railway.
     #:
