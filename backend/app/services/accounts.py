@@ -221,10 +221,12 @@ def create_account(
         phone=clean_phone,
         full_name=full_name.strip() if full_name else None,
     )
-    account.seller = Seller(
-        slug=slug,
-        display_name=clean_shop,
-        whatsapp_number=clean_phone,
+    account.sellers.append(
+        Seller(
+            slug=slug,
+            display_name=clean_shop,
+            whatsapp_number=clean_phone,
+        )
     )
 
     db.add(account)
@@ -352,8 +354,41 @@ def create_account_for_phone(db: Session, *, phone: str, shop_name: str) -> Acco
         phone=phone,
         is_active=True,
     )
-    account.seller = Seller(slug=slug, display_name=clean_shop, whatsapp_number=phone)
+    account.sellers.append(Seller(slug=slug, display_name=clean_shop, whatsapp_number=phone))
 
     db.add(account)
     db.flush()
     return account
+
+
+def add_shop_to_account(db: Session, account: Account, shop_name: str) -> Seller:
+    """
+    Create ANOTHER shop under an account that already exists.
+
+    Multi-shop (2026-09): one WhatsApp number owns one account, and an account
+    can own several shops. Signup creates the account and its first shop; this
+    adds each shop after that. No new login is made — the number is already
+    proven — so this is the create path a seller reaches from the chat's
+    "new shop", not from signup.
+
+    Args:
+        db: Session. The caller commits.
+        account: The existing owner.
+        shop_name: Becomes the display name and the basis for the slug.
+
+    Returns:
+        The new :class:`Seller`, already attached to the account.
+
+    Raises:
+        SignupError: On an unusable shop name (too short, reserved, or clashing
+            in a way ``reserve_slug`` cannot resolve).
+    """
+    clean_shop = shop_name.strip()
+    if not clean_shop:
+        raise SignupError("Please enter a shop name.")
+
+    slug = reserve_slug(db, clean_shop)
+    seller = Seller(slug=slug, display_name=clean_shop, whatsapp_number=account.phone)
+    account.sellers.append(seller)
+    db.flush()
+    return seller

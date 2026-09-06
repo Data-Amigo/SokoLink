@@ -4,10 +4,13 @@ The seller's side of the thread: forward, price, publish, open, orders.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    Account,
     ConversationState,
     Order,
     OrderStatus,
@@ -18,7 +21,13 @@ from app.models import (
     WaConversation,
 )
 from app.schemas.conversation import Intent
-from app.services.accounts import SignupError, create_account_for_phone, reserve_slug
+from app.services.accounts import (
+    SignupError,
+    add_shop_to_account,
+    create_account_for_phone,
+    find_by_phone,
+    reserve_slug,
+)
 from app.services.bot.common import get_conversation
 from app.services.bot.presentation import _ask_for, _share_card, _share_link, _shop_card
 from app.services.bot.reading import _understand
@@ -201,34 +210,136 @@ _ANOTHER_SHOP_PHRASES = (
 
 def wants_another_shop(lowered: str) -> bool:
     """
-    Whether a seller is asking to run a SECOND shop on this number.
+    Whether a seller is asking to open ANOTHER shop on this number.
 
-    WHY A KEYWORD GUARD AND NOT THE MODEL. "What if I open another shop for
-    computers" was read by the understander as SELLER_OPEN — the word "open"
-    won — and the seller was told the shop they already have is now live. One
-    number runs one shop today, so this is a small, certain set of phrases that
-    must never reach that misread; the model is still free to read everything
-    else.
+    Multi-shop (2026-09) supports this, so the phrase now STARTS a new shop
+    rather than being refused. It stays a keyword guard because the model read
+    "open another shop for computers" as SELLER_OPEN — the word "open" won — and
+    opened the shop they already had; this catches the intent before that misread.
     """
     return any(phrase in lowered for phrase in _ANOTHER_SHOP_PHRASES)
 
 
-def _another_shop_reply(seller: Seller) -> list[Reply]:
-    """
-    The honest answer to "can I open another shop": one number, one shop — today.
+def _live_shops(account: Account) -> list[Seller]:
+    """The account's shops that have not been deleted, oldest first."""
+    return [s for s in sorted(account.sellers, key=lambda x: x.id) if s.archived_at is None]
 
-    Says what is true now and hands back the two things they can actually do,
-    rather than pretending the feature exists or, worse, opening the shop they
-    already have. Ends with something to tap, like every seller reply.
-    """
+
+def _start_new_shop(convo: WaConversation) -> list[Reply]:
+    """Begin creating an ADDITIONAL shop: ask its name and enter NAMING."""
+    convo.state = ConversationState.NAMING
+    convo.context = {}
     return [
         Reply(
-            f"Right now one WhatsApp number runs one shop, and this number is "
-            f"*{seller.display_name}*.\n\n"
-            "To run a separate shop you'd start it on a different WhatsApp "
-            f"number. Or send more items to *{seller.display_name}* — just "
-            "forward a photo and I'll set it up.",
-            buttons=[("stock", "See my shop"), ("share", "My shop link")],
+            "Let's set up another shop. What's it called?\n\n"
+            "_You can switch between your shops any time by sending *my shops*._"
+        )
+    ]
+
+
+def _list_my_shops(account: Account, convo: WaConversation, active: Seller) -> list[Reply]:
+    """List the shops on this number, mark the active one, and offer a switch."""
+    shops = _live_shops(account)
+    lines = []
+    for shop in shops:
+        here = " ← you're here" if shop.id == active.id else ""
+        state = "open" if shop.is_published else "closed"
+        lines.append(f"*{shop.display_name}* · {state}{here}")
+
+    convo.context = {**convo.context, "shop_options": [s.id for s in shops]}
+    # "switch:" not "shop:" — the buyer routing at the top of handle() already
+    # claims "shop:<slug>", so a switch id must not collide with it.
+    rows = [
+        (f"switch:{s.id}", s.display_name[:24], "open" if s.is_published else "closed")
+        for s in shops
+    ]
+    body = (
+        "*Your shops*\n\n"
+        + "\n".join(lines)
+        + "\n\nTap one to switch to it, or send *new shop* to start another."
+    )
+    return [Reply(body, rows=rows, list_label="Switch shop")]
+
+
+def _switch_shop(convo: WaConversation, account: Account, shop_id: int) -> list[Reply] | None:
+    """
+    Make ``shop_id`` the active shop, if it belongs to this account and is live.
+
+    Returns None when the id is not one of theirs, so the caller can treat the
+    message as something else rather than switching to a stranger's shop.
+    """
+    target = next((s for s in _live_shops(account) if s.id == shop_id), None)
+    if target is None:
+        return None
+    convo.managing_shop_id = target.id
+    convo.context = {}
+    return [
+        Reply(
+            f"Now managing *{target.display_name}*.\n\n"
+            "Everything you send next — items, orders, prices — is for this shop.",
+            buttons=[("orders", "Orders"), ("stock", "See this shop"), ("share", "Its link")],
+        )
+    ]
+
+
+def _close_shop(db: Session, seller: Seller) -> list[Reply]:
+    """Hide a shop from buyers, reversibly — the opposite of ``open``."""
+    if not seller.is_published:
+        return [
+            Reply(
+                f"*{seller.display_name}* is already closed — buyers can't see it.\n\n"
+                "Send *open* when you want it back, or *delete my shop* to remove it.",
+                buttons=[("open", "Open it")],
+            )
+        ]
+    seller.is_published = False
+    db.flush()
+    return [
+        Reply(
+            f"*{seller.display_name}* is closed. Buyers can't see it now and its link "
+            "shows nothing — but everything in it is kept.\n\n"
+            "Send *open* whenever you're ready to sell again.",
+            buttons=[("open", "Open it again")],
+        )
+    ]
+
+
+def _ask_delete(convo: WaConversation, seller: Seller) -> list[Reply]:
+    """Ask for a typed confirmation before deleting a shop — no accidental taps."""
+    convo.context = {**convo.context, "confirm_delete": seller.id}
+    return [
+        Reply(
+            f"This permanently removes *{seller.display_name}* and its items. "
+            "Your past orders stay on record.\n\n"
+            f"To confirm, reply *delete {seller.display_name}*.\n"
+            "_Or send *cancel* to keep it._"
+        )
+    ]
+
+
+def _do_delete(db: Session, convo: WaConversation, account: Account, target: Seller) -> list[Reply]:
+    """Soft-delete a shop: hide it, keep its orders, move to another if any."""
+    target.archived_at = datetime.now(UTC)
+    target.is_published = False
+    convo.context = {k: v for k, v in convo.context.items() if k != "confirm_delete"}
+    db.flush()
+
+    remaining = _live_shops(account)
+    if remaining:
+        nxt = remaining[0]
+        convo.managing_shop_id = nxt.id
+        return [
+            Reply(
+                f"*{target.display_name}* is deleted. You're now managing *{nxt.display_name}*.",
+                buttons=[("my shops", "My shops"), ("stock", "See this shop")],
+            )
+        ]
+    convo.managing_shop_id = None
+    convo.state = ConversationState.NEW
+    return [
+        Reply(
+            f"*{target.display_name}* is deleted. You have no shops now — send "
+            "*sell* to start a new one whenever you like."
         )
     ]
 
@@ -919,17 +1030,25 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
             )
         ]
 
+    # First shop or another one? A brand-new number gets an account and its
+    # first shop; a seller who already has an account is adding a further shop
+    # (multi-shop, 2026-09) — same naming flow, different create path.
+    existing = find_by_phone(db, phone)
     try:
-        account = create_account_for_phone(db, phone=phone, shop_name=clean)
+        if existing is None:
+            account = create_account_for_phone(db, phone=phone, shop_name=clean)
+            seller = account.seller
+        else:
+            seller = add_shop_to_account(db, existing, clean)
     except SignupError as exc:
         # Names the actual problem: taken, or unusable as a web address.
         return [Reply(f"{exc}\n\nTry another name.")]
 
     db.flush()
-    seller = account.seller
     assert seller is not None
 
-    convo.state = ConversationState.NEW
+    # The shop just created becomes the one this thread is managing.
+    convo.managing_shop_id = seller.id
     convo.context = {}
 
     # THE LINK, IMMEDIATELY. It was held back at first, on the reasoning that
