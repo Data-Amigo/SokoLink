@@ -120,10 +120,12 @@ from app.services.catalog import product_id_from_retailer
 from app.services.intake import PARSE_FORWARD, MediaFetch
 from app.services.jobs import enqueue
 from app.services.storefront import get_public_products
+from app.services.whatsapp_flows import seller_from_flow_token
 
 __all__ = [
     "handle",
     "handle_order",
+    "handle_flow_order",
     "summarise_intake",
     "Reply",
     "Outcome",
@@ -187,6 +189,82 @@ def handle_order(db: Session, phone: str, product_items: list[dict[str, object]]
             continue
 
     return Outcome(_start_checkout(db, seller, convo))
+
+
+def handle_flow_order(db: Session, phone: str, completion: dict[str, object]) -> Outcome:
+    """
+    A buyer finished the browse-and-order Flow — turn the completion into an order.
+
+    Meta delivers the Flow's final ``complete`` action to this webhook as an
+    ``nfm_reply``; :func:`app.services.whatsapp_flows.parse_completion` has
+    already decoded it. The payload carries the ``flow_token`` (which shop), the
+    ``cart`` the buyer built, their ``name``, and whether they want ``delivery``.
+
+    THE FLOW IS UNTRUSTED, EXACTLY LIKE THE CHAT. The cart is rebuilt server-side
+    line by line through :func:`add_item`, which re-checks each item is published
+    and belongs to this shop, and :func:`place_order` re-reads every price. A
+    tampered payload can change quantities and choices — the buyer's own basket —
+    but never what something costs or whether it exists. From the rebuilt basket
+    it hands off to the SAME checkout the chat uses, so the two surfaces cannot
+    place two different kinds of order.
+
+    Args:
+        db: Session. The caller commits.
+        phone: The buyer's number — the M-Pesa line the order is placed against.
+        completion: The decoded Flow completion payload.
+
+    Returns:
+        The payment prompt for the placed order, or a gentle miss if the shop is
+        gone or nothing in the cart resolved.
+    """
+    flow_token = str(completion.get("flow_token") or "")
+    seller = seller_from_flow_token(db, flow_token)
+    if seller is None:
+        return Outcome(
+            [Reply("That shop isn't open right now. Send *menu* to see what's available.")]
+        )
+
+    convo = get_conversation(db, phone)
+    convo.seller_id = seller.id
+    cart = _basket(db, convo, seller)
+    clear(db, cart)
+
+    raw_lines = completion.get("cart")
+    lines = raw_lines if isinstance(raw_lines, list) else []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        raw_id = str(line.get("product_id") or "")
+        if not raw_id.isdigit():
+            continue
+        raw_qty = line.get("qty") or line.get("quantity") or 1
+        try:
+            quantity = max(1, int(raw_qty))
+        except (TypeError, ValueError):
+            quantity = 1
+        variant = str(line.get("variant") or line.get("size") or "").strip()
+        try:
+            add_item(db, cart, int(raw_id), quantity=quantity, selected_variant=variant)
+        except CartError:
+            # Sold out or unpublished since the buyer added it — skip the line
+            # rather than fail the whole order; place_order re-checks the rest.
+            continue
+
+    if not cart.items:
+        return Outcome(
+            [
+                Reply(
+                    "Those items just sold out — nothing was charged. "
+                    "Send *menu* to see what's still in.",
+                )
+            ]
+        )
+
+    name = str(completion.get("name") or "").strip()
+    wants_delivery = str(completion.get("delivery") or "").lower() in {"deliver", "delivery", "yes"}
+    address = str(completion.get("address") or "").strip() if wants_delivery else None
+
+    return _place(db, seller, convo, phone, name=name, address=address or None)
 
 
 def _answer_to_what_we_asked(

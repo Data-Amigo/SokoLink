@@ -1,0 +1,23 @@
+=== LOCAL .env payment config (NOTE: Railway's deployed values are what actually run) ===
+  APP_BASE_URL = (not set)
+  NEXT_PUBLIC_APP_URL = http://localhost:3000
+  MPESA_ENVIRONMENT = sandbox
+  DARAJA_ENVIRONMENT = (not set)
+  MPESA_CALLBACK_URL = https://sokolink-production.up.railway.app/payments/mpesa/callback
+  -> STK callback is built as <APP_BASE_URL>/payments/mpesa/callback and MUST be public (your Railway https URL), not localhost.
+
+=== payment_methods (can_stk = has real Daraja creds) ===
+  'Her District' /her-district-6: kind=pochi number=254712345678 | shortcode=False key=False secret=False passkey=False => CAN_STK=False
+  'Her District' /her-district-7: kind=pochi number=254712345678 | shortcode=False key=False secret=False passkey=False => CAN_STK=False
+  'Her District' /her-district-8: kind=pochi number=254712345678 | shortcode=False key=False secret=False passkey=False => CAN_STK=False
+  'Vitabu Bora' /vitabu-bora: kind=pochi number=14155238886 | shortcode=False key=False secret=False passkey=False => CAN_STK=False
+  'BOOK LOUNGE' /book-lounge-2: kind=pochi number=14155238886 | shortcode=False key=False secret=False passkey=False => CAN_STK=False
+  'Biggie Books' /biggie-books: kind=till number=456578 | shortcode=False key=False secret=False passkey=False => CAN_STK=False
+  -> If CAN_STK is False for your test shop, checkout ALWAYS shows the manual 'send code' path; STK is never attempted.
+  -> Daraja API creds are entered in the WEB workspace payment settings, not in the chat.
+
+=== recent Payment attempts (STK) ===
+  #1 order=BM-ZQ365SF3 pushed=False result_code=None confirmed=False @ 08-25 04:42
+
+=== orders by status (last 3 days) ===
+  pending                1
