@@ -30,6 +30,7 @@ from app.api import (
     catalogue,
     customers,
     dashboard,
+    flows,
     health,
     orders,
     payments,
@@ -149,6 +150,7 @@ app.include_router(analytics.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
 app.include_router(whatsapp_cloud.router)
+app.include_router(flows.router)
 app.include_router(settings_routes.router)
 
 # The design system, and anything else the browser fetches by URL. Version-free

@@ -43,7 +43,24 @@ def send_reply(to: str, reply: Reply) -> None:
         image, so the photo goes bare and the card with the choices follows.
     """
     try:
-        if reply.product_list:
+        if reply.flow:
+            # A WhatsApp Flow, if this deployment has one published; if not, the
+            # body still names the shop and the buyer can browse in the chat.
+            flow_id, flow_token, first_screen_data = reply.flow
+            configured = settings.whatsapp_flow_id
+            if configured:
+                whatsapp_cloud.send_flow(
+                    to,
+                    reply.body,
+                    configured,
+                    flow_token,
+                    "CATEGORY",
+                    first_screen_data,
+                    cta="Shop now",
+                )
+            else:
+                whatsapp_cloud.send_text(to, reply.body)
+        elif reply.product_list:
             # A Multi-Product Message, if this deployment has a catalogue; if
             # not, the body still carries the shop and the buyer is not stranded.
             header, sections = reply.product_list

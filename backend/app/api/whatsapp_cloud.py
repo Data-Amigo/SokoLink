@@ -41,7 +41,7 @@ from starlette.exceptions import HTTPException
 from app.config import get_settings
 from app.db import get_db
 from app.models import WaMessage
-from app.services.bot import handle, handle_order
+from app.services.bot import handle, handle_flow_order, handle_order
 from app.services.intake import MediaFetch
 from app.services.outbound import send_reply
 from app.services.whatsapp_cloud import (
@@ -49,6 +49,7 @@ from app.services.whatsapp_cloud import (
     extract_messages,
     read_message,
 )
+from app.services.whatsapp_flows import parse_completion
 
 router = APIRouter(tags=["webhooks"])
 
@@ -182,12 +183,21 @@ async def receive(request: Request, db: Session = Depends(get_db)) -> Response:
             )
         )
 
+        interactive = message.get("interactive") or {}
         if message.get("type") == "order":
             # A Multi-Product Message came back as a WhatsApp cart. It carries
             # the items but no name or address, so it opens the ordinary
             # checkout rather than a second, parallel order path.
             order = message.get("order") or {}
             outcome = handle_order(db, sender, order.get("product_items") or [])
+        elif interactive.get("type") == "nfm_reply":
+            # A completed WhatsApp Flow. Meta delivers the buyer's final submit
+            # as an nfm_reply whose response_json is a JSON string; the shop,
+            # cart, name and delivery choice are all inside it. read_message
+            # returns no text for this shape, so it is handled from the raw
+            # message here rather than through the text dispatcher.
+            completion = parse_completion((interactive.get("nfm_reply") or {}).get("response_json"))
+            outcome = handle_flow_order(db, sender, completion)
         else:
             fetches: list[tuple[str, MediaFetch]] = [
                 (media_id, _fetch_for(media_id)) for media_id, _ in media
