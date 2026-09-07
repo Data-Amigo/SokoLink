@@ -364,7 +364,8 @@ def _screen_cart(cart: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     # A Flow cannot iterate a text array on screen, so the lines are also folded
     # into one summary string the CART screen shows in a single text block.
-    summary = "\n".join(f"• {line['title']} — {line['detail']}" for line in lines) or "Your cart is empty."
+    lines_text = "\n".join(f"• {line['title']} — {line['detail']}" for line in lines)
+    summary = lines_text or "Your cart is empty."
     return {
         "screen": SCREEN_CART,
         "data": {
