@@ -32,6 +32,7 @@ from app.api import (
     dashboard,
     flows,
     health,
+    legal,
     orders,
     payments,
     seller_auth,
@@ -140,6 +141,7 @@ def _not_found(request: Request, exc: Exception) -> Response:
 
 
 app.include_router(health.router)
+app.include_router(legal.router)
 app.include_router(auth.router)
 app.include_router(seller_auth.router)
 app.include_router(dashboard.router)
