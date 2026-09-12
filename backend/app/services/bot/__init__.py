@@ -110,6 +110,7 @@ from app.services.bot.selling import (
     _start_answer,
     _start_new_shop,
     _stock_summary,
+    _stranger_said_something,
     _switch_shop,
     _welcome,
     summarise_intake,
@@ -632,6 +633,10 @@ def handle(
 
     seller = convo.seller
     if seller is None or not seller.is_published:
+        # Greetings stay FREE — no model call for "hi". A stranger is met with
+        # the honest sell-or-buy fork; the model is only spent on a real sentence.
+        if lowered in {"hi", "hello", "hey", "start", "habari", "niaje", "mambo", "sasa"}:
+            return Outcome(_welcome(convo))
         if lowered in {"sell", "i want to sell", "sella"}:
             return Outcome(_ask_shop_name(convo))
         if lowered in {"buy", "i'm shopping", "im shopping", "shopping"}:
@@ -644,11 +649,11 @@ def handle(
                     )
                 ]
             )
-        # The bot number serves both sides, and a stranger's first message
-        # cannot tell us which they are. Guessing wrong is expensive both ways:
-        # a buyer walked through shop setup abandons, and a seller told to
-        # "open a shop's link" has been handed a riddle.
-        return Outcome(_welcome(convo))
+        # The bot number serves both sides. Rather than guess, READ the sentence:
+        # "I'd love to open a shop" onboards, "do you have books" points them at a
+        # seller's link, and only a truly unreadable message gets the sell-or-buy
+        # fork. Understanding runs here too, not just on the buyer/seller paths.
+        return _stranger_said_something(db, convo, said)
 
     # ── A tap on a button or a list row ─────────────────────────────────────
     # These arrive as the ID we set when sending, so they are unambiguous in a
@@ -876,9 +881,15 @@ def handle(
         return spoken
 
     # ── Anything we still could not read ────────────────────────────────────
-    # Re-offering the menu beats "I didn't understand": the buyer's problem is
-    # not that we failed to parse, it is that they cannot see their options.
-    #
-    # NOT GREETED AGAIN, THOUGH. Landing here mid-purchase must not read as
-    # being met at the door by somebody who has forgotten the last ten minutes.
-    return Outcome(_menu(db, seller, convo))
+    # NOT THE CATALOGUE THROWN AGAIN. A miss used to re-dump the whole menu,
+    # which reads as "understood nothing". One focused question instead, naming
+    # the two things a buyer here most likely wants.
+    return Outcome(
+        [
+            Reply(
+                "I didn't quite catch that. Do you want to search for something, "
+                f"or see everything at *{seller.display_name}*?",
+                buttons=[("menu", "See everything"), ("ask", "Ask the seller")],
+            )
+        ]
+    )

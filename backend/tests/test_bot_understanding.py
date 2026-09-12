@@ -36,10 +36,10 @@ from sqlalchemy.orm import Session
 
 from app.agent.understand import UnderstandingError
 from app.config import get_settings
-from app.models import Account, ProductStatus, Seller
+from app.models import Account, ConversationState, ProductStatus, Seller
 from app.schemas.conversation import Intent, Understanding
 from app.services import bot
-from app.services.bot import handle
+from app.services.bot import get_conversation, handle
 from tests.factories import make_payment_method, make_product, make_seller
 
 SELLER_PHONE = "254712345678"
@@ -377,3 +377,140 @@ class TestTheExactExchangeFromTheHandset:
 
         db.refresh(seller)
         assert seller.display_name == "Biggie Books"
+
+
+class TestBuyerToSellerBridge:
+    """
+    A seller intent expressed while browsing is acted on, not dumped.
+
+    The model reads "I would love to open a shop", a rename, or "how do I get
+    paid" correctly even when the person is in buyer mode (they opened a shop
+    link). These used to fall through to the catalogue; now they bridge to the
+    seller side — the exact "it doesn't understand context" failure from testing.
+    """
+
+    def test_a_buyer_wanting_to_open_a_shop_starts_onboarding(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        seller = a_shop(db)
+        buyer = "254700333444"  # no shop of their own
+        handle(db, buyer, f"shop:{seller.slug}")  # now browsing as a customer
+
+        model.append(reading(Intent.SELLER_OPEN))
+        out = handle(db, buyer, "I would love to open a shop")
+
+        assert "what's your shop called" in screen(out.replies).lower()
+        assert get_conversation(db, buyer).state == ConversationState.NAMING
+
+    def test_an_owner_can_rename_from_buyer_mode(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        seller = a_shop(db)  # owned by SELLER_PHONE
+        handle(db, SELLER_PHONE, f"shop:{seller.slug}")  # owner opens own link → browsing
+
+        # Buyer-path read, then the seller handler re-reads with owner context.
+        model.append(reading(Intent.SHOP_NAME, name="Bossman"))
+        model.append(reading(Intent.SHOP_NAME, name="Bossman"))
+        handle(db, SELLER_PHONE, "I meant my shop is called Bossman")
+
+        db.refresh(seller)
+        assert seller.display_name == "Bossman"
+
+    def test_a_buyer_with_no_shop_asking_about_payments_is_offered_one(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        seller = a_shop(db)
+        buyer = "254700555666"
+        handle(db, buyer, f"shop:{seller.slug}")
+
+        model.append(reading(Intent.SELLER_PAYMENTS))
+        out = handle(db, buyer, "how do I get paid")
+
+        assert "shop first" in screen(out.replies).lower()
+
+    def test_a_buyer_asking_for_the_link_gets_this_shops_page(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        seller = a_shop(db)
+        buyer = "254700777888"
+        handle(db, buyer, f"shop:{seller.slug}")
+
+        model.append(reading(Intent.SELLER_SHARE_LINK))
+        out = handle(db, buyer, "where can I see the whole thing")
+
+        assert any(r.link and f"/shop/{seller.slug}" in r.link[0] for r in out.replies)
+
+    def test_a_real_product_search_is_untouched(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        """The bridge must not swallow ordinary buyer intents."""
+        seller = a_shop(db)
+        buyer = "254700999000"
+        handle(db, buyer, f"shop:{seller.slug}")
+
+        model.append(reading(Intent.FIND_PRODUCT, query="revision"))
+        out = handle(db, buyer, "do you have a revision book")
+
+        assert "Revision Book" in screen(out.replies)
+
+
+class TestStrangerIsReadNotForked:
+    """A brand-new contact's sentence is understood, not always met with a fork."""
+
+    def test_wanting_to_open_a_shop_starts_onboarding(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        model.append(reading(Intent.SELLER_OPEN))
+        phone = "254700123123"
+        out = handle(db, phone, "I would love to open a shop")
+
+        assert "what's your shop called" in screen(out.replies).lower()
+        assert get_conversation(db, phone).state == ConversationState.NAMING
+
+    def test_trying_to_buy_is_pointed_to_a_link(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        model.append(reading(Intent.FIND_PRODUCT, query="books"))
+        out = handle(db, "254700124124", "do you have any books")
+
+        assert "open the seller's link" in screen(out.replies).lower()
+
+    def test_a_greeting_never_reaches_the_model(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        # A sentinel the greeting must NOT consume — greetings are free.
+        model.append(reading(Intent.GREET))
+        out = handle(db, "254700125125", "hi")
+
+        assert len(model) == 1, "a greeting should not spend a model call"
+        assert "sell" in screen(out.replies).lower()
+
+
+class TestSellerAsBuyer:
+    """A seller talking like a buyer means their OWN stock, not a shrug."""
+
+    def test_asking_about_own_stock_shows_it(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        seller = make_seller(db, whatsapp_number=SELLER_PHONE, is_published=True)
+        make_product(
+            db,
+            seller,
+            title="Ankara Shirt",
+            status=ProductStatus.PUBLISHED.value,
+            price_kes=1800,
+            stock=3,
+        )
+        model.append(reading(Intent.FIND_PRODUCT, query="ankara"))
+        out = handle(db, SELLER_PHONE, "do I still have the ankara shirt")
+
+        assert "Ankara Shirt" in screen(out.replies)
+
+    def test_an_unreadable_message_gets_a_focused_question(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        make_seller(db, whatsapp_number=SELLER_PHONE)
+        model.append(reading(Intent.UNKNOWN))  # speakable but carries no reply
+        out = handle(db, SELLER_PHONE, "hmmmm what now")
+
+        assert "didn't quite catch that" in screen(out.replies).lower()

@@ -1441,10 +1441,87 @@ def _seller_said_something(db: Session, convo: WaConversation, said: str, owner:
             ]
         )
 
+    # A SELLER TALKING LIKE A BUYER — "do I still have the sandals", "what's
+    # under 500 in my shop". They mean their OWN stock, so show it rather than
+    # a menu or a shrug.
+    if reading.intent in {Intent.FIND_PRODUCT, Intent.BUDGET, Intent.BROWSE}:
+        return Outcome(_stock_summary(db, owner))
+
     # A greeting or a question with no action behind it. The model's own words,
     # then their shop underneath — because "hello" deserves an answer AND a
     # seller opening the thread still wants to know where things stand.
     if reading.may_speak and reading.reply:
         return Outcome([Reply(reading.reply), *_seller_home(db, owner)])
 
-    return Outcome(_seller_home(db, owner))
+    # Recognised nothing actionable. NOT the home card thrown again — one
+    # focused question naming the two things a seller most often wants.
+    return _clarify_seller()
+
+
+def _clarify_seller() -> Outcome:
+    """
+    What to say to a seller when the message could not be read as an action.
+
+    NOT A MENU. The old fallback re-showed the whole home card on every
+    unreadable sentence, which is the "throwing menus around" a seller feels as
+    not being listened to. This names the two most likely next steps and tells
+    them the one thing that has no button — adding stock is a forwarded photo.
+    """
+    return Outcome(
+        [
+            Reply(
+                "I didn't quite catch that. Did you want your *orders*, or to "
+                "*add an item*? To add one, just forward me its photo.",
+                buttons=[("orders", "My orders"), ("share", "My shop link")],
+            )
+        ]
+    )
+
+
+def _stranger_said_something(db: Session, convo: WaConversation, said: str) -> Outcome:
+    """
+    A brand-new contact wrote a sentence — read whether they mean to sell or buy.
+
+    The bot number serves both sides and a first message cannot be assumed, but
+    it can be READ. "I'd love to open a shop" is someone to onboard; "do you
+    have any books" is someone who needs to open a seller's link first. Only when
+    the model has nothing does it fall back to the honest sell-or-buy fork —
+    which is a focused question, not a menu.
+    """
+    reading = _understand(db, convo, said, owner=None, shopping_at=None)
+    if reading is None:
+        return Outcome(_welcome(convo))
+
+    if reading.intent in {
+        Intent.SELLER_OPEN,
+        Intent.SHOP_NAME,
+        Intent.SET_ABOUT,
+        Intent.SELLER_ORDERS,
+        Intent.SELLER_PAYMENTS,
+        Intent.SELLER_ADD_STOCK,
+        Intent.SELLER_SHARE_LINK,
+    }:
+        return Outcome(_ask_shop_name(convo))
+
+    if reading.intent in {
+        Intent.FIND_PRODUCT,
+        Intent.BUDGET,
+        Intent.BROWSE,
+        Intent.ADD_TO_BASKET,
+        Intent.VIEW_BASKET,
+        Intent.CHECKOUT,
+        Intent.ABOUT_THIS_ITEM,
+        Intent.FOR_THE_SELLER,
+    }:
+        return Outcome(
+            [
+                Reply(
+                    "To buy, open the seller's link and I'll show you their shop "
+                    "right here.\n\n_It looks like wa.me/…?text=shop theirshop — "
+                    "ask them for it._"
+                )
+            ]
+        )
+
+    # GREET, HELP, SMALL_TALK, UNKNOWN, ANSWER — the honest fork.
+    return Outcome(_welcome(convo))

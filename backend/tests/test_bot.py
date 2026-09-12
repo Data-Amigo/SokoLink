@@ -146,17 +146,19 @@ class TestBrowsing:
 
         assert replies[0].media_url == "https://example.test/shirt.jpg"
 
-    def test_gibberish_re_offers_the_menu(self, db: Session) -> None:
+    def test_gibberish_asks_a_focused_question_not_the_menu(self, db: Session) -> None:
         """
-        A buyer who sends something unreadable has not failed to parse — they
-        cannot see their options. "I didn't understand" leaves them exactly
-        where they were stuck.
+        An unreadable buyer message gets ONE focused question that still leaves a
+        way forward — not the whole catalogue thrown again, which reads as
+        "understood nothing".
         """
         seller = open_shop(db)
         stock(db, seller, "Ankara Shirt", "Fashion")
         say(db, f"shop {seller.slug}")
 
-        assert "What are you looking for?" in say(db, "asdfghjkl")
+        answer = say(db, "asdfghjkl").lower()
+        assert "didn't quite catch that" in answer
+        assert "see everything" in answer
 
     def test_a_shop_with_no_categories_lists_products_directly(self, db: Session) -> None:
         """A seller who never typed a category must not cost their buyer a
