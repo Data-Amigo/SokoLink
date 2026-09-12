@@ -304,6 +304,22 @@ def _answer_to_what_we_asked(
     return None
 
 
+def _named_shop(db: Session, convo: WaConversation, said: str) -> str:
+    """
+    The shop's name out of a naming reply.
+
+    THE BIGGIE BOOKS FIX, shared by both naming paths. "My shop name is Walter"
+    must become *Walter*, not the whole sentence (which then becomes a permanent
+    slug). The model pulls the name out; the raw text is the fallback when there
+    is no model — a clumsily named shop beats no shop. First-shop signup and
+    add-another-shop both go through here so neither can drift back to raw text.
+    """
+    reading = _understand(db, convo, said, owner=None, shopping_at=None)
+    if reading is not None and reading.intent is Intent.SHOP_NAME and reading.name:
+        return reading.name
+    return said
+
+
 def handle(
     db: Session,
     phone: str,
@@ -463,7 +479,7 @@ def handle(
 
             # Naming a NEW shop (they sent "new shop", now they're naming it).
             if convo.state == ConversationState.NAMING:
-                return Outcome(_create_shop(db, convo, phone, said))
+                return Outcome(_create_shop(db, convo, phone, _named_shop(db, convo, said)))
 
             # Switching between shops.
             if lowered in {"my shops", "shops", "switch shop", "switch shops"}:
@@ -617,19 +633,7 @@ def handle(
 
     # ── Somebody with no shop, who has not opened one either ────────────────
     if convo.state == ConversationState.NAMING:
-        # THE BIGGIE BOOKS FIX. "My shop is called Biggie Books" used to become
-        # a shop named after the whole sentence, permanently, with no way back.
-        # The model pulls the name out; the raw text is the fallback when there
-        # is no model, which is what we had.
-        reading = _understand(db, convo, said, owner=None, shopping_at=None)
-        # Named apart from the numeric `chosen` further down this function —
-        # that one is a menu position and this one is a shop's name.
-        wanted_name = (
-            reading.name
-            if reading is not None and reading.intent is Intent.SHOP_NAME and reading.name
-            else said
-        )
-        return Outcome(_create_shop(db, convo, phone, wanted_name))
+        return Outcome(_create_shop(db, convo, phone, _named_shop(db, convo, said)))
 
     seller = convo.seller
     if seller is None or not seller.is_published:

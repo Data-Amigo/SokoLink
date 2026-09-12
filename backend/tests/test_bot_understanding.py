@@ -514,3 +514,29 @@ class TestSellerAsBuyer:
         out = handle(db, SELLER_PHONE, "hmmmm what now")
 
         assert "didn't quite catch that" in screen(out.replies).lower()
+
+
+class TestAddingAnotherShopReadsTheName:
+    """The add-another-shop path must extract the name too, not take the sentence."""
+
+    def test_a_sentence_names_the_second_shop_correctly(
+        self, db: Session, model: list[Understanding | None]
+    ) -> None:
+        phone = "254700888777"
+        # First shop.
+        handle(db, phone, "hi")  # greeting is free — no model call
+        handle(db, phone, "sell")
+        model.append(reading(Intent.SHOP_NAME, name="Book Nook"))
+        handle(db, phone, "My shop is called Book Nook")
+        handle(db, phone, "skip")
+
+        # Add another, named in a sentence.
+        handle(db, phone, "new shop")
+        model.append(reading(Intent.SHOP_NAME, name="Walter"))
+        handle(db, phone, "My shop name is Walter")
+
+        account = db.scalar(select(Account).where(Account.phone == phone))
+        assert account is not None
+        names = {s.display_name for s in account.sellers}
+        assert "Walter" in names
+        assert "My shop name is Walter" not in names
