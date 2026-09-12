@@ -114,6 +114,7 @@ from app.services.bot.selling import (
     _welcome,
     summarise_intake,
     wants_another_shop,
+    wants_web_link,
 )
 from app.services.cart import CartError, add_item, clear
 from app.services.catalog import product_id_from_retailer
@@ -583,10 +584,14 @@ def handle(
             "inventory",
         }:
             return Outcome(_stock_summary(db, owner))
-        if lowered in {"store", "shop", "my shop", "website"}:
+        if lowered in {"store", "shop", "my shop", "website"} or wants_web_link(lowered):
             # Reachable for a SELLER too. The buyer branch below only fires
             # once somebody has opened a shop LINK, so without this a seller
             # asking for their own store fell through to the signup question.
+            #
+            # wants_web_link() catches the SENTENCE forms — "my shop app web
+            # link", "can I see the web link" — which used to fall through to the
+            # model, get read as a product search, and dump the whole catalogue.
             return Outcome([_shop_card(owner)])
 
         # ANYTHING ELSE FROM A SELLER IS ANSWERED WITH THEIR OWN HOME, and that
@@ -678,8 +683,13 @@ def handle(
         # when no catalogue is configured, so the option is never a dead end.
         return Outcome(_catalogue(db, seller, convo))
 
-    if lowered in {"store", "shop", "website", "open store", "see everything"}:
+    if lowered in {"store", "shop", "website", "open store", "see everything"} or wants_web_link(
+        lowered
+    ):
         # The only reply that can open a page inside WhatsApp — see _shop_card.
+        # wants_web_link() adds the sentence forms ("can I see the web link",
+        # "view the shop online") so a buyer asking in their own words gets the
+        # page, not a product search.
         return Outcome([_shop_card(seller)])
 
     # A buyer answering "what are you looking for?" is answering, not issuing

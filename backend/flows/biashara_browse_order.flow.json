@@ -5,7 +5,7 @@
     "CATEGORY": ["PRODUCTS"],
     "PRODUCTS": ["DETAIL"],
     "DETAIL": ["CART"],
-    "CART": ["CATEGORY", "CHECKOUT"],
+    "CART": ["CHECKOUT"],
     "CHECKOUT": []
   },
   "screens": [
@@ -241,16 +241,6 @@
           { "type": "TextHeading", "text": "Your cart" },
           { "type": "TextBody", "text": "${data.summary}" },
           { "type": "TextSubheading", "text": "Total: ${data.total}" },
-          {
-            "type": "EmbeddedLink",
-            "text": "Keep shopping",
-            "on-click-action": {
-              "name": "data_exchange",
-              "payload": {
-                "cart": "${data.cart}"
-              }
-            }
-          },
           {
             "type": "Footer",
             "label": "Checkout",
