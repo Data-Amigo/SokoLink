@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.models import Seller
 from app.services.bot import get_conversation, handle
 from app.services.bot.common import find_account_by_phone
 
@@ -28,7 +29,7 @@ def _two_shops(db: Session) -> None:
     handle(db, PHONE, "skip")
 
 
-def _shop(db: Session, name: str):
+def _shop(db: Session, name: str) -> Seller:
     account = find_account_by_phone(db, PHONE)
     assert account is not None
     return next(s for s in account.sellers if s.display_name == name)
@@ -75,6 +76,9 @@ class TestMultiShop:
 
         _say(db, "delete Computer World")
 
+        # Re-read after the delete: the assert on line above narrowed
+        # archived_at to None, and mypy can't see the delete mutated it.
+        computer_world = _shop(db, "Computer World")
         assert computer_world.archived_at is not None
         # active falls back to the remaining shop
         assert get_conversation(db, PHONE).managing_shop_id == _shop(db, "Book Nook").id
