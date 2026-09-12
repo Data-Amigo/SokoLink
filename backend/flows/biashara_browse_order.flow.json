@@ -1,0 +1,328 @@
+{
+  "version": "7.0",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "CATEGORY": ["PRODUCTS"],
+    "PRODUCTS": ["DETAIL"],
+    "DETAIL": ["CART"],
+    "CART": ["CHECKOUT"],
+    "CHECKOUT": []
+  },
+  "screens": [
+    {
+      "id": "CATEGORY",
+      "title": "Shop",
+      "data": {
+        "shop_name": {
+          "type": "string",
+          "__example__": "Kicks"
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "Shoes", "title": "Shoes" },
+            { "id": "Beauty", "title": "Beauty" }
+          ]
+        },
+        "cart": {
+          "type": "array",
+          "items": { "type": "object" },
+          "__example__": []
+        },
+        "cart_count": {
+          "type": "number",
+          "__example__": 0
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "${data.shop_name}" },
+          { "type": "TextBody", "text": "What are you looking for?" },
+          {
+            "type": "Form",
+            "name": "category_form",
+            "children": [
+              {
+                "type": "RadioButtonsGroup",
+                "name": "category",
+                "label": "Categories",
+                "required": true,
+                "data-source": "${data.categories}"
+              },
+              {
+                "type": "Footer",
+                "label": "See items",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "category": "${form.category}",
+                    "cart": "${data.cart}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "PRODUCTS",
+      "title": "Items",
+      "data": {
+        "category": {
+          "type": "string",
+          "__example__": "Shoes"
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "1", "title": "Leather Sandals", "description": "KES 1,200" },
+            { "id": "2", "title": "Canvas Sneakers", "description": "KES 1,800" }
+          ]
+        },
+        "cart": {
+          "type": "array",
+          "items": { "type": "object" },
+          "__example__": []
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "${data.category}" },
+          {
+            "type": "Form",
+            "name": "product_form",
+            "children": [
+              {
+                "type": "RadioButtonsGroup",
+                "name": "product_id",
+                "label": "Choose an item",
+                "required": true,
+                "data-source": "${data.products}"
+              },
+              {
+                "type": "Footer",
+                "label": "View",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "product_id": "${form.product_id}",
+                    "category": "${data.category}",
+                    "cart": "${data.cart}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "DETAIL",
+      "title": "Item",
+      "data": {
+        "product_id": { "type": "string", "__example__": "2" },
+        "title": { "type": "string", "__example__": "Canvas Sneakers" },
+        "price": { "type": "string", "__example__": "KES 1,800" },
+        "has_sizes": { "type": "boolean", "__example__": true },
+        "sizes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "40", "title": "40" },
+            { "id": "41", "title": "41" }
+          ]
+        },
+        "cart": {
+          "type": "array",
+          "items": { "type": "object" },
+          "__example__": []
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "${data.title}" },
+          { "type": "TextSubheading", "text": "${data.price}" },
+          {
+            "type": "Form",
+            "name": "detail_form",
+            "children": [
+              {
+                "type": "RadioButtonsGroup",
+                "name": "variant",
+                "label": "Size",
+                "required": "${data.has_sizes}",
+                "visible": "${data.has_sizes}",
+                "data-source": "${data.sizes}"
+              },
+              {
+                "type": "Dropdown",
+                "name": "quantity",
+                "label": "Quantity",
+                "required": true,
+                "data-source": [
+                  { "id": "1", "title": "1" },
+                  { "id": "2", "title": "2" },
+                  { "id": "3", "title": "3" },
+                  { "id": "4", "title": "4" },
+                  { "id": "5", "title": "5" },
+                  { "id": "6", "title": "6" },
+                  { "id": "7", "title": "7" },
+                  { "id": "8", "title": "8" },
+                  { "id": "9", "title": "9" },
+                  { "id": "10", "title": "10" }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "Add to cart",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "product_id": "${data.product_id}",
+                    "variant": "${form.variant}",
+                    "quantity": "${form.quantity}",
+                    "cart": "${data.cart}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "CART",
+      "title": "Cart",
+      "data": {
+        "summary": {
+          "type": "string",
+          "__example__": "• Canvas Sneakers (41) — 2 × KES 1,800"
+        },
+        "total": {
+          "type": "string",
+          "__example__": "KES 3,600"
+        },
+        "cart": {
+          "type": "array",
+          "items": { "type": "object" },
+          "__example__": [
+            { "product_id": "2", "title": "Canvas Sneakers", "variant": "41", "qty": 2, "price_kes": 1800 }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Your cart" },
+          { "type": "TextBody", "text": "${data.summary}" },
+          { "type": "TextSubheading", "text": "Total: ${data.total}" },
+          {
+            "type": "Footer",
+            "label": "Checkout",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "next": "checkout",
+                "cart": "${data.cart}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "CHECKOUT",
+      "title": "Checkout",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "total": {
+          "type": "string",
+          "__example__": "KES 3,600"
+        },
+        "cart": {
+          "type": "array",
+          "items": { "type": "object" },
+          "__example__": [
+            { "product_id": "2", "title": "Canvas Sneakers", "variant": "41", "qty": 2, "price_kes": 1800 }
+          ]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Almost done" },
+          { "type": "TextSubheading", "text": "Total: ${data.total}" },
+          {
+            "type": "Form",
+            "name": "checkout_form",
+            "children": [
+              {
+                "type": "TextInput",
+                "name": "name",
+                "label": "Your name",
+                "input-type": "text",
+                "required": true
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "delivery",
+                "label": "How do you want it?",
+                "required": true,
+                "data-source": [
+                  { "id": "collect", "title": "I'll collect" },
+                  { "id": "deliver", "title": "Deliver to me" }
+                ]
+              },
+              {
+                "type": "TextInput",
+                "name": "address",
+                "label": "Delivery address (leave blank if collecting)",
+                "input-type": "text",
+                "required": false
+              },
+              {
+                "type": "Footer",
+                "label": "Place order",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "cart": "${data.cart}",
+                    "name": "${form.name}",
+                    "delivery": "${form.delivery}",
+                    "address": "${form.address}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

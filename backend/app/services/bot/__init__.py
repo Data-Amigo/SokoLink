@@ -46,7 +46,13 @@ from app.models import (
 )
 from app.schemas.conversation import Intent
 from app.services.bot.buying import _buyer_said_something, _claim, _hand_off, _place
-from app.services.bot.common import _basket, _find_shop, find_seller_by_phone, get_conversation
+from app.services.bot.common import (
+    _basket,
+    _find_shop,
+    find_seller_by_phone,
+    get_conversation,
+    owner_context,
+)
 from app.services.bot.presentation import (
     _add_to_basket,
     _ask_address,
@@ -77,11 +83,16 @@ from app.services.bot.replies import (
 )
 from app.services.bot.selling import (
     _ask_about,
+    _ask_delete,
     _ask_payment_kind,
     _ask_payment_number,
     _ask_shop_name,
+    _close_shop,
     _confirm_order,
     _create_shop,
+    _do_delete,
+    _list_my_shops,
+    _onboarding_next_photo,
     _open_shop,
     _priced_summary,
     _pricing_prompt,
@@ -97,18 +108,26 @@ from app.services.bot.selling import (
     _seller_said_something,
     _set_price,
     _start_answer,
+    _start_new_shop,
+    _stock_summary,
+    _stranger_said_something,
+    _switch_shop,
     _welcome,
     summarise_intake,
+    wants_another_shop,
+    wants_web_link,
 )
 from app.services.cart import CartError, add_item, clear
 from app.services.catalog import product_id_from_retailer
 from app.services.intake import PARSE_FORWARD, MediaFetch
 from app.services.jobs import enqueue
 from app.services.storefront import get_public_products
+from app.services.whatsapp_flows import seller_from_flow_token
 
 __all__ = [
     "handle",
     "handle_order",
+    "handle_flow_order",
     "summarise_intake",
     "Reply",
     "Outcome",
@@ -172,6 +191,82 @@ def handle_order(db: Session, phone: str, product_items: list[dict[str, object]]
             continue
 
     return Outcome(_start_checkout(db, seller, convo))
+
+
+def handle_flow_order(db: Session, phone: str, completion: dict[str, object]) -> Outcome:
+    """
+    A buyer finished the browse-and-order Flow — turn the completion into an order.
+
+    Meta delivers the Flow's final ``complete`` action to this webhook as an
+    ``nfm_reply``; :func:`app.services.whatsapp_flows.parse_completion` has
+    already decoded it. The payload carries the ``flow_token`` (which shop), the
+    ``cart`` the buyer built, their ``name``, and whether they want ``delivery``.
+
+    THE FLOW IS UNTRUSTED, EXACTLY LIKE THE CHAT. The cart is rebuilt server-side
+    line by line through :func:`add_item`, which re-checks each item is published
+    and belongs to this shop, and :func:`place_order` re-reads every price. A
+    tampered payload can change quantities and choices — the buyer's own basket —
+    but never what something costs or whether it exists. From the rebuilt basket
+    it hands off to the SAME checkout the chat uses, so the two surfaces cannot
+    place two different kinds of order.
+
+    Args:
+        db: Session. The caller commits.
+        phone: The buyer's number — the M-Pesa line the order is placed against.
+        completion: The decoded Flow completion payload.
+
+    Returns:
+        The payment prompt for the placed order, or a gentle miss if the shop is
+        gone or nothing in the cart resolved.
+    """
+    flow_token = str(completion.get("flow_token") or "")
+    seller = seller_from_flow_token(db, flow_token)
+    if seller is None:
+        return Outcome(
+            [Reply("That shop isn't open right now. Send *menu* to see what's available.")]
+        )
+
+    convo = get_conversation(db, phone)
+    convo.seller_id = seller.id
+    cart = _basket(db, convo, seller)
+    clear(db, cart)
+
+    raw_lines = completion.get("cart")
+    lines = raw_lines if isinstance(raw_lines, list) else []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        raw_id = str(line.get("product_id") or "")
+        if not raw_id.isdigit():
+            continue
+        raw_qty = line.get("qty") or line.get("quantity") or 1
+        try:
+            quantity = max(1, int(raw_qty))
+        except (TypeError, ValueError):
+            quantity = 1
+        variant = str(line.get("variant") or line.get("size") or "").strip()
+        try:
+            add_item(db, cart, int(raw_id), quantity=quantity, selected_variant=variant)
+        except CartError:
+            # Sold out or unpublished since the buyer added it — skip the line
+            # rather than fail the whole order; place_order re-checks the rest.
+            continue
+
+    if not cart.items:
+        return Outcome(
+            [
+                Reply(
+                    "Those items just sold out — nothing was charged. "
+                    "Send *menu* to see what's still in.",
+                )
+            ]
+        )
+
+    name = str(completion.get("name") or "").strip()
+    wants_delivery = str(completion.get("delivery") or "").lower() in {"deliver", "delivery", "yes"}
+    address = str(completion.get("address") or "").strip() if wants_delivery else None
+
+    return _place(db, seller, convo, phone, name=name, address=address or None)
 
 
 def _answer_to_what_we_asked(
@@ -244,7 +339,7 @@ def handle(
     # Checked before anything else: this is the one interaction the whole
     # product exists for, and a photo from a seller can mean nothing else.
     if media:
-        owner = find_seller_by_phone(db, phone)
+        _, owner = owner_context(db, convo, phone)
         if owner is not None:
             # THE PARSE DOES NOT RUN HERE. It is a paid vision call, and Meta
             # redelivers any webhook that is slow — so parsing eight photos in
@@ -299,7 +394,7 @@ def handle(
         # bot number is shared, and the same person runs a shop on Monday and
         # buys shoes on Tuesday. Announcing the switch — and naming the way
         # back — is what makes a shared number honest instead of confusing.
-        owner_here = find_seller_by_phone(db, phone)
+        _, owner_here = owner_context(db, convo, phone)
         switched = (
             [
                 Reply(
@@ -321,7 +416,11 @@ def handle(
     # ── The seller's own side of the thread ─────────────────────────────────
     # Checked before anything else a buyer could mean. A number typed by a
     # seller we just asked for a price is a price, not a menu choice.
-    owner = find_seller_by_phone(db, phone)
+    #
+    # MULTI-SHOP: a number maps to an ACCOUNT, which may own several shops; the
+    # one this thread is acting on is the active shop. None means every shop was
+    # deleted, so they are treated as someone with no shop yet.
+    owner_account, owner = owner_context(db, convo, phone)
     if owner is not None:
         # THE WAY BACK OUT OF SOMEBODY ELSE'S SHOP. Checked before the buyer
         # branch claims the message, because a seller stuck inside another
@@ -332,6 +431,52 @@ def handle(
             convo.state = ConversationState.NEW
             convo.context = {}
             return Outcome(_seller_home(db, owner))
+
+        # ── Multi-shop management (only when this number has a login account;
+        #    legacy shops with no account are single-shop and skip all of this) ─
+        if owner_account is not None:
+            # A delete confirmation is pending.
+            if convo.context.get("confirm_delete"):
+                target = next(
+                    (
+                        s
+                        for s in owner_account.sellers
+                        if s.id == convo.context.get("confirm_delete")
+                    ),
+                    None,
+                )
+                if target is None or lowered in {"cancel", "stop", "no", "keep it", "keep"}:
+                    convo.context = {
+                        k: v for k, v in convo.context.items() if k != "confirm_delete"
+                    }
+                    return Outcome([Reply("Kept it — nothing was deleted.")])
+                if lowered == f"delete {target.display_name.lower()}":
+                    return Outcome(_do_delete(db, convo, owner_account, target))
+                return Outcome(
+                    [
+                        Reply(
+                            f"To delete *{target.display_name}*, reply exactly "
+                            f"*delete {target.display_name}* — or send *cancel* to keep it."
+                        )
+                    ]
+                )
+
+            # Naming a NEW shop (they sent "new shop", now they're naming it).
+            if convo.state == ConversationState.NAMING:
+                return Outcome(_create_shop(db, convo, phone, said))
+
+            # Switching between shops.
+            if lowered in {"my shops", "shops", "switch shop", "switch shops"}:
+                return Outcome(_list_my_shops(owner_account, convo, owner))
+            if lowered.startswith("switch:") and said.split(":", 1)[1].strip().isdigit():
+                moved = _switch_shop(convo, owner_account, int(said.split(":", 1)[1].strip()))
+                if moved is not None:
+                    return Outcome(moved)
+            options = convo.context.get("shop_options")
+            if isinstance(options, list) and said.isdigit() and 1 <= int(said) <= len(options):
+                moved = _switch_shop(convo, owner_account, int(options[int(said) - 1]))
+                if moved is not None:
+                    return Outcome(moved)
 
         if convo.state == ConversationState.PRICING:
             if lowered in {"skip", "later"}:
@@ -348,6 +493,11 @@ def handle(
             return Outcome([Reply("I need just the number — like *1800*. Or send *skip*.")])
 
         if convo.state == ConversationState.PAY_KIND:
+            # Onboarding offers *skip*; defer payment and point at the first item.
+            if lowered in {"skip", "later", "not now"}:
+                convo.state = ConversationState.NEW
+                convo.context = {}
+                return Outcome(_onboarding_next_photo())
             kind = _PAY_ALIASES.get(lowered.removeprefix("pay:").strip())
             if kind is not None:
                 return Outcome(_ask_payment_number(convo, kind))
@@ -403,14 +553,46 @@ def handle(
             return Outcome(_resume_pricing(db, owner, convo))
         if lowered in {"publish", "add to my shop"}:
             return Outcome(_publish_ready(db, owner))
+        # "new shop" / "another shop" → create an ADDITIONAL shop (multi-shop).
+        # Caught before the model can read "open another shop" as SELLER_OPEN.
+        if owner_account is not None and wants_another_shop(lowered):
+            return Outcome(_start_new_shop(convo))
         if lowered in {"open", "open shop", "go live", "open for business"}:
             return Outcome(_open_shop(db, owner))
-        if lowered in {"drafts", "stock", "my products", "items"}:
+        if lowered in {"close", "close shop", "close my shop", "close for business"}:
+            return Outcome(_close_shop(db, owner))
+        if owner_account is not None and lowered in {
+            "delete",
+            "delete shop",
+            "delete my shop",
+            "remove shop",
+            "remove my shop",
+        }:
+            return Outcome(_ask_delete(convo, owner))
+        # "drafts" is the pricing QUEUE — items priced and waiting to publish.
+        if lowered in {"drafts", "ready", "to publish"}:
             return Outcome(_priced_summary(db, owner))
-        if lowered in {"store", "shop", "my shop", "website"}:
+        # "stock"/"my products" is the CATALOGUE — what is actually in the shop.
+        # Kept apart from the queue above: a seller with a full shop and nothing
+        # waiting to publish must not be told "all done, send another photo".
+        if lowered in {
+            "stock",
+            "my stock",
+            "my products",
+            "products",
+            "items",
+            "my items",
+            "inventory",
+        }:
+            return Outcome(_stock_summary(db, owner))
+        if lowered in {"store", "shop", "my shop", "website"} or wants_web_link(lowered):
             # Reachable for a SELLER too. The buyer branch below only fires
             # once somebody has opened a shop LINK, so without this a seller
             # asking for their own store fell through to the signup question.
+            #
+            # wants_web_link() catches the SENTENCE forms — "my shop app web
+            # link", "can I see the web link" — which used to fall through to the
+            # model, get read as a product search, and dump the whole catalogue.
             return Outcome([_shop_card(owner)])
 
         # ANYTHING ELSE FROM A SELLER IS ANSWERED WITH THEIR OWN HOME, and that
@@ -451,6 +633,10 @@ def handle(
 
     seller = convo.seller
     if seller is None or not seller.is_published:
+        # Greetings stay FREE — no model call for "hi". A stranger is met with
+        # the honest sell-or-buy fork; the model is only spent on a real sentence.
+        if lowered in {"hi", "hello", "hey", "start", "habari", "niaje", "mambo", "sasa"}:
+            return Outcome(_welcome(convo))
         if lowered in {"sell", "i want to sell", "sella"}:
             return Outcome(_ask_shop_name(convo))
         if lowered in {"buy", "i'm shopping", "im shopping", "shopping"}:
@@ -463,11 +649,11 @@ def handle(
                     )
                 ]
             )
-        # The bot number serves both sides, and a stranger's first message
-        # cannot tell us which they are. Guessing wrong is expensive both ways:
-        # a buyer walked through shop setup abandons, and a seller told to
-        # "open a shop's link" has been handed a riddle.
-        return Outcome(_welcome(convo))
+        # The bot number serves both sides. Rather than guess, READ the sentence:
+        # "I'd love to open a shop" onboards, "do you have books" points them at a
+        # seller's link, and only a truly unreadable message gets the sell-or-buy
+        # fork. Understanding runs here too, not just on the buyer/seller paths.
+        return _stranger_said_something(db, convo, said)
 
     # ── A tap on a button or a list row ─────────────────────────────────────
     # These arrive as the ID we set when sending, so they are unambiguous in a
@@ -502,8 +688,13 @@ def handle(
         # when no catalogue is configured, so the option is never a dead end.
         return Outcome(_catalogue(db, seller, convo))
 
-    if lowered in {"store", "shop", "website", "open store", "see everything"}:
+    if lowered in {"store", "shop", "website", "open store", "see everything"} or wants_web_link(
+        lowered
+    ):
         # The only reply that can open a page inside WhatsApp — see _shop_card.
+        # wants_web_link() adds the sentence forms ("can I see the web link",
+        # "view the shop online") so a buyer asking in their own words gets the
+        # page, not a product search.
         return Outcome([_shop_card(seller)])
 
     # A buyer answering "what are you looking for?" is answering, not issuing
@@ -690,9 +881,15 @@ def handle(
         return spoken
 
     # ── Anything we still could not read ────────────────────────────────────
-    # Re-offering the menu beats "I didn't understand": the buyer's problem is
-    # not that we failed to parse, it is that they cannot see their options.
-    #
-    # NOT GREETED AGAIN, THOUGH. Landing here mid-purchase must not read as
-    # being met at the door by somebody who has forgotten the last ten minutes.
-    return Outcome(_menu(db, seller, convo))
+    # NOT THE CATALOGUE THROWN AGAIN. A miss used to re-dump the whole menu,
+    # which reads as "understood nothing". One focused question instead, naming
+    # the two things a buyer here most likely wants.
+    return Outcome(
+        [
+            Reply(
+                "I didn't quite catch that. Do you want to search for something, "
+                f"or see everything at *{seller.display_name}*?",
+                buttons=[("menu", "See everything"), ("ask", "Ask the seller")],
+            )
+        ]
+    )

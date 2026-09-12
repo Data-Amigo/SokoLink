@@ -138,6 +138,22 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str | None = None
     whatsapp_app_secret: str | None = None
 
+    #: The RSA private key (PEM) that decrypts WhatsApp Flows data-exchange
+    #: requests. Only a DYNAMIC Flow — one whose screens are filled from our
+    #: catalogue — needs it; the matching PUBLIC key is registered with Meta
+    #: once. Kept in the environment, never the database, so a Postgres dump
+    #: alone cannot read buyers' in-flight Flow data. See services/whatsapp_flows.
+    whatsapp_flow_private_key: str | None = None
+
+    #: Passphrase for the Flow private key, if it was generated with one.
+    whatsapp_flow_key_password: str | None = None
+
+    #: The published "Browse & order" Flow's id, from Flow Builder. Empty means
+    #: the Flow surface is off: the bot offers no "Shop now" mini-app and buyers
+    #: browse in the chat as before. Set it once the Flow is published and its
+    #: PUBLIC key is registered with Meta, so a half-configured Flow never opens.
+    whatsapp_flow_id: str | None = None
+
     #: The WhatsApp Business Account id. Distinct from the phone number id:
     #: templates belong to the ACCOUNT, messages are sent from the NUMBER, and
     #: one account can own several numbers. Needed only to create or list
@@ -213,6 +229,22 @@ class Settings(BaseSettings):
     daraja_environment: Literal["sandbox", "production"] = Field(
         default="sandbox",
         validation_alias=AliasChoices("DARAJA_ENVIRONMENT", "MPESA_ENVIRONMENT"),
+    )
+
+    #: The public URL Safaricom POSTs an STK result to. Optional.
+    #:
+    #: WHY IT IS A SETTING OF ITS OWN, and not just derived from
+    #: ``app_base_url``. The callback must be publicly reachable, and a deploy
+    #: routinely knows its public callback (a Railway domain, a tunnel) before
+    #: ``APP_BASE_URL`` has been wired for everything else. A callback silently
+    #: built from a default ``localhost`` ``app_base_url`` is unreachable, and
+    #: the symptom is the worst kind: the push is accepted, the buyer pays, and
+    #: the order never settles because the result had nowhere to land. When set,
+    #: this wins; when blank, we fall back to ``app_base_url`` + the path. See
+    #: ``services/payments.resolve_callback_url``.
+    mpesa_callback_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MPESA_CALLBACK_URL", "DARAJA_CALLBACK_URL"),
     )
 
     # ── Deployment identity ──────────────────────────────────────────────────

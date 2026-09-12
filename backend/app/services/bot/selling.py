@@ -4,10 +4,13 @@ The seller's side of the thread: forward, price, publish, open, orders.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    Account,
     ConversationState,
     Order,
     OrderStatus,
@@ -18,7 +21,13 @@ from app.models import (
     WaConversation,
 )
 from app.schemas.conversation import Intent
-from app.services.accounts import SignupError, create_account_for_phone, reserve_slug
+from app.services.accounts import (
+    SignupError,
+    add_shop_to_account,
+    create_account_for_phone,
+    find_by_phone,
+    reserve_slug,
+)
 from app.services.bot.common import get_conversation
 from app.services.bot.presentation import _ask_for, _share_card, _share_link, _shop_card
 from app.services.bot.reading import _understand
@@ -173,6 +182,305 @@ def _priced_summary(db: Session, seller: Seller) -> list[Reply]:
             f"Send *publish* to put {it} in your shop, or leave {it} as a draft."
         )
     ]
+
+
+_ANOTHER_SHOP_PHRASES = (
+    "another shop",
+    "second shop",
+    "a new shop",
+    "new shop",
+    "different shop",
+    "one more shop",
+    "extra shop",
+    "add a shop",
+    "add another shop",
+    "open another shop",
+    "create a shop",
+    "create another shop",
+    "start a shop",
+    "start another shop",
+    "another store",
+    "second store",
+    "new store",
+    "add a store",
+    "open another store",
+    "create a store",
+)
+
+
+def wants_another_shop(lowered: str) -> bool:
+    """
+    Whether a seller is asking to open ANOTHER shop on this number.
+
+    Multi-shop (2026-09) supports this, so the phrase now STARTS a new shop
+    rather than being refused. It stays a keyword guard because the model read
+    "open another shop for computers" as SELLER_OPEN — the word "open" won — and
+    opened the shop they already had; this catches the intent before that misread.
+    """
+    return any(phrase in lowered for phrase in _ANOTHER_SHOP_PHRASES)
+
+
+_WEB_LINK_PHRASES = (
+    "web link",
+    "weblink",
+    "web store",
+    "web shop",
+    "web version",
+    "web page",
+    "webpage",
+    "website link",
+    "shop website",
+    "shop app",
+    "app link",
+    "app web",
+    "storefront",
+    "store front",
+    "view shop",
+    "view my shop",
+    "view the shop",
+    "preview shop",
+    "preview my shop",
+    "see my shop",
+    "open in browser",
+    "browser link",
+    "online shop",
+    "shop online",
+    "online store",
+)
+
+
+def wants_web_link(lowered: str) -> bool:
+    """
+    Whether someone is asking for the WEB storefront page (opens in a browser).
+
+    A DIFFERENT LINK FROM "my shop link". "My shop link" is the wa.me deep link a
+    seller shares so buyers land in this chat; the web link is the ``/shop/<slug>``
+    page for looking at the whole shop in a browser. Both the seller (previewing)
+    and a buyer (browsing forty items) want it, and asked for it in many words —
+    "my shop app web link", "can I see the web link", "view my shop online". The
+    model read those as a product search and dumped the catalogue, so this catches
+    the intent as a keyword guard before that misread, exactly like
+    :func:`wants_another_shop`.
+
+    Deliberately does NOT match a bare "open" or "shop" — those already mean other
+    things (open for business; the status card) and are handled by exact-match.
+    """
+    return any(phrase in lowered for phrase in _WEB_LINK_PHRASES)
+
+
+def _live_shops(account: Account) -> list[Seller]:
+    """The account's shops that have not been deleted, oldest first."""
+    return [s for s in sorted(account.sellers, key=lambda x: x.id) if s.archived_at is None]
+
+
+def _start_new_shop(convo: WaConversation) -> list[Reply]:
+    """Begin creating an ADDITIONAL shop: ask its name and enter NAMING."""
+    convo.state = ConversationState.NAMING
+    convo.context = {}
+    return [
+        Reply(
+            "Let's set up another shop. What's it called?\n\n"
+            "_You can switch between your shops any time by sending *my shops*._"
+        )
+    ]
+
+
+def _list_my_shops(account: Account, convo: WaConversation, active: Seller) -> list[Reply]:
+    """List the shops on this number, mark the active one, and offer a switch."""
+    shops = _live_shops(account)
+    lines = []
+    for shop in shops:
+        here = " ← you're here" if shop.id == active.id else ""
+        state = "open" if shop.is_published else "closed"
+        lines.append(f"*{shop.display_name}* · {state}{here}")
+
+    convo.context = {**convo.context, "shop_options": [s.id for s in shops]}
+    # "switch:" not "shop:" — the buyer routing at the top of handle() already
+    # claims "shop:<slug>", so a switch id must not collide with it.
+    rows = [
+        (f"switch:{s.id}", s.display_name[:24], "open" if s.is_published else "closed")
+        for s in shops
+    ]
+    body = (
+        "*Your shops*\n\n"
+        + "\n".join(lines)
+        + "\n\nTap one to switch to it, or send *new shop* to start another."
+    )
+    return [Reply(body, rows=rows, list_label="Switch shop")]
+
+
+def _switch_shop(convo: WaConversation, account: Account, shop_id: int) -> list[Reply] | None:
+    """
+    Make ``shop_id`` the active shop, if it belongs to this account and is live.
+
+    Returns None when the id is not one of theirs, so the caller can treat the
+    message as something else rather than switching to a stranger's shop.
+    """
+    target = next((s for s in _live_shops(account) if s.id == shop_id), None)
+    if target is None:
+        return None
+    convo.managing_shop_id = target.id
+    convo.context = {}
+    return [
+        Reply(
+            f"Now managing *{target.display_name}*.\n\n"
+            "Everything you send next — items, orders, prices — is for this shop.",
+            buttons=[("orders", "Orders"), ("stock", "See this shop"), ("share", "Its link")],
+        )
+    ]
+
+
+def _close_shop(db: Session, seller: Seller) -> list[Reply]:
+    """Hide a shop from buyers, reversibly — the opposite of ``open``."""
+    if not seller.is_published:
+        return [
+            Reply(
+                f"*{seller.display_name}* is already closed — buyers can't see it.\n\n"
+                "Send *open* when you want it back, or *delete my shop* to remove it.",
+                buttons=[("open", "Open it")],
+            )
+        ]
+    seller.is_published = False
+    db.flush()
+    return [
+        Reply(
+            f"*{seller.display_name}* is closed. Buyers can't see it now and its link "
+            "shows nothing — but everything in it is kept.\n\n"
+            "Send *open* whenever you're ready to sell again.",
+            buttons=[("open", "Open it again")],
+        )
+    ]
+
+
+def _ask_delete(convo: WaConversation, seller: Seller) -> list[Reply]:
+    """Ask for a typed confirmation before deleting a shop — no accidental taps."""
+    convo.context = {**convo.context, "confirm_delete": seller.id}
+    return [
+        Reply(
+            f"This permanently removes *{seller.display_name}* and its items. "
+            "Your past orders stay on record.\n\n"
+            f"To confirm, reply *delete {seller.display_name}*.\n"
+            "_Or send *cancel* to keep it._"
+        )
+    ]
+
+
+def _do_delete(db: Session, convo: WaConversation, account: Account, target: Seller) -> list[Reply]:
+    """Soft-delete a shop: hide it, keep its orders, move to another if any."""
+    target.archived_at = datetime.now(UTC)
+    target.is_published = False
+    convo.context = {k: v for k, v in convo.context.items() if k != "confirm_delete"}
+    db.flush()
+
+    remaining = _live_shops(account)
+    if remaining:
+        nxt = remaining[0]
+        convo.managing_shop_id = nxt.id
+        return [
+            Reply(
+                f"*{target.display_name}* is deleted. You're now managing *{nxt.display_name}*.",
+                buttons=[("my shops", "My shops"), ("stock", "See this shop")],
+            )
+        ]
+    convo.managing_shop_id = None
+    convo.state = ConversationState.NEW
+    return [
+        Reply(
+            f"*{target.display_name}* is deleted. You have no shops now — send "
+            "*sell* to start a new one whenever you like."
+        )
+    ]
+
+
+def _stock_summary(db: Session, seller: Seller) -> list[Reply]:
+    """
+    The catalogue as it stands: what is live, and what still needs a price.
+
+    WHY THIS IS NOT :func:`_priced_summary`. That answers "what have I just
+    priced that I could publish" — the pricing queue, which is only DRAFTS that
+    have a price. A seller asking for "my products" or "stock" is asking the
+    opposite question: what is actually in my shop right now. Routed to the
+    queue, a seller with a full shop and an empty queue got "All done ✅ — send
+    another photo", which reads as "you have nothing". This lists their real
+    stock instead, and still surfaces anything the queue would have.
+
+    ALWAYS ENDS WITH SOMETHING TO TAP, like every other seller reply: a chat has
+    no menu bar, so a message that states stock and stops is a dead end.
+    """
+    published = db.scalars(
+        select(Product)
+        .where(
+            Product.seller_id == seller.id,
+            Product.status == ProductStatus.PUBLISHED.value,
+        )
+        .order_by(Product.created_at.desc())
+    ).all()
+    unpriced = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.DRAFT.value,
+                Product.price_kes.is_(None),
+            )
+        )
+        or 0
+    )
+    ready = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.seller_id == seller.id,
+                Product.status == ProductStatus.DRAFT.value,
+                Product.price_kes.is_not(None),
+            )
+        )
+        or 0
+    )
+
+    # Nothing anywhere — the true empty shop, where "forward a photo" is the
+    # only next step and the pricing queue's "all done" would be a lie.
+    if not published and not unpriced and not ready:
+        return [
+            Reply(
+                "You haven't added anything yet.\n\n"
+                "Forward me a photo from your catalogue — the photo and caption, "
+                "just as you'd send a customer — and I'll set it up."
+            )
+        ]
+
+    def _line(product: Product) -> str:
+        if product.stock <= 0:
+            tail = " — *sold out*"
+        elif product.stock <= 3:
+            tail = f" — only {product.stock} left"
+        else:
+            tail = ""
+        return f"• {product.title} — {product.price_display}{tail}"
+
+    if published:
+        shown = "\n".join(_line(p) for p in published[:PAGE_SIZE])
+        extra_count = len(published) - PAGE_SIZE
+        more = f"\n\n_…and {extra_count} more._" if extra_count > 0 else ""
+        state = "Open" if seller.is_published else "Closed"
+        head = f"*In your shop* — {state} · {_plural(len(published), 'item')}\n\n{shown}{more}"
+    else:
+        head = "Nothing is in your shop yet."
+
+    todo: list[str] = []
+    buttons: list[tuple[str, str]] = []
+    if unpriced:
+        needs = "needs" if unpriced == 1 else "need"
+        todo.append(f"🏷️ {_plural(unpriced, 'item')} still {needs} a price — send *prices*.")
+        buttons.append(("prices", "Add prices"))
+    if ready:
+        todo.append(f"📦 {_plural(ready, 'item')} ready to add — send *publish*.")
+        buttons.append(("publish", "Add to my shop"))
+    if published and not seller.is_published:
+        todo.append("Your shop is *closed* — send *open* when you're ready for buyers.")
+        buttons.append(("open", "Open for business"))
+    buttons.append(("share", "My shop link"))
+
+    body = head + ("\n\n" + "\n".join(todo) if todo else "")
+    return [Reply(body, buttons=buttons[:3])]
 
 
 def _set_price(db: Session, seller: Seller, convo: WaConversation, amount: int) -> list[Reply]:
@@ -505,7 +813,14 @@ def _save_payment(db: Session, seller: Seller, convo: WaConversation, said: str)
 
     replies = [Reply(f"Saved. Buyers will pay you on:\n\n*{shown}*")]
 
-    if not seller.is_published:
+    # WHAT COMES NEXT DEPENDS ON WHERE THEY ARE. Set during onboarding, before
+    # any stock, the next step is the first photo — not "open", which an empty
+    # shop cannot do anyway. With stock already in and the shop still closed,
+    # opening is the last step. An already-open shop needs nothing further.
+    has_any = db.scalar(select(func.count(Product.id)).where(Product.seller_id == seller.id)) or 0
+    if has_any == 0:
+        replies.extend(_onboarding_next_photo())
+    elif not seller.is_published:
         replies.append(
             Reply(
                 "That's the last thing you needed. Ready to open?",
@@ -763,17 +1078,25 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
             )
         ]
 
+    # First shop or another one? A brand-new number gets an account and its
+    # first shop; a seller who already has an account is adding a further shop
+    # (multi-shop, 2026-09) — same naming flow, different create path.
+    existing = find_by_phone(db, phone)
     try:
-        account = create_account_for_phone(db, phone=phone, shop_name=clean)
+        if existing is None:
+            account = create_account_for_phone(db, phone=phone, shop_name=clean)
+            seller = account.seller
+        else:
+            seller = add_shop_to_account(db, existing, clean)
     except SignupError as exc:
         # Names the actual problem: taken, or unusable as a web address.
         return [Reply(f"{exc}\n\nTry another name.")]
 
     db.flush()
-    seller = account.seller
     assert seller is not None
 
-    convo.state = ConversationState.NEW
+    # The shop just created becomes the one this thread is managing.
+    convo.managing_shop_id = seller.id
     convo.context = {}
 
     # THE LINK, IMMEDIATELY. It was held back at first, on the reasoning that
@@ -798,14 +1121,47 @@ def _create_shop(db: Session, convo: WaConversation, phone: str, name: str) -> l
             )
         )
 
+    # ONBOARDING NOW ASKS HOW THEY GET PAID, before the first photo. A shop that
+    # cannot receive money is not a shop, and discovering that at the open gate —
+    # after a seller has built a whole catalogue — is the wrong moment to find
+    # out. It stays ONE question in ONE message, and *skip* defers it for a
+    # seller who would rather add stock first; the open gate still asks later.
+    convo.state = ConversationState.PAY_KIND
+    convo.context = {}
     replies.append(
         Reply(
-            "Now forward me a post from your catalogue. Photo and caption, "
-            "exactly as you'd send a customer. I'll read it and set the item "
-            "up, and if I can't see a price I'll ask you for one."
+            "One quick thing so buyers can actually pay you — how do you take "
+            "M-Pesa?\n\n"
+            "*Pochi la Biashara* — the number on your phone\n"
+            "*Till* — Buy Goods, usually 6 digits\n"
+            "*Paybill* — a business number plus an account\n\n"
+            "Tap one, or type the word. _(Send *skip* to set this up later.)_",
+            buttons=[
+                ("pay:pochi", "Pochi la Biashara"),
+                ("pay:till", "Till number"),
+                ("pay:paybill", "Paybill"),
+            ],
         )
     )
     return replies
+
+
+def _onboarding_next_photo() -> list[Reply]:
+    """
+    The "forward your first item" nudge, used once payment is set or skipped.
+
+    Its own function because two paths reach it — a seller who finished payment
+    setup with an empty shop, and one who skipped payment — and both should land
+    on the same single next step rather than two worded-differently versions.
+    """
+    return [
+        Reply(
+            "Now forward me a post from your catalogue — the photo and caption, "
+            "exactly as you'd send a customer. I'll read it and set the item up, "
+            "and ask you for a price if I can't see one.",
+            buttons=[("share", "My shop link")],
+        )
+    ]
 
 
 def _seller_home(db: Session, seller: Seller) -> list[Reply]:
@@ -911,7 +1267,16 @@ def _seller_home(db: Session, seller: Seller) -> list[Reply]:
         candidates.append(("open", "Open for business"))
     candidates.append(("share", "My shop link"))
 
-    return [Reply("\n".join(lines), buttons=candidates[:3])]
+    home = [Reply("\n".join(lines), buttons=candidates[:3])]
+
+    # THE WEB STOREFRONT, OFFERED NOT ASKED FOR. A seller kept typing "web link"
+    # and getting their catalogue back, because the page was only reachable by a
+    # command nobody guessed. Whenever there is something to look at, the "Open
+    # my shop" web button rides along with the home card — its own message,
+    # because a cta_url link cannot share a message with reply buttons.
+    if in_shop:
+        home.append(_shop_card(seller))
+    return home
 
 
 def _seller_questions(db: Session, seller: Seller) -> list[Reply]:
@@ -1076,10 +1441,87 @@ def _seller_said_something(db: Session, convo: WaConversation, said: str, owner:
             ]
         )
 
+    # A SELLER TALKING LIKE A BUYER — "do I still have the sandals", "what's
+    # under 500 in my shop". They mean their OWN stock, so show it rather than
+    # a menu or a shrug.
+    if reading.intent in {Intent.FIND_PRODUCT, Intent.BUDGET, Intent.BROWSE}:
+        return Outcome(_stock_summary(db, owner))
+
     # A greeting or a question with no action behind it. The model's own words,
     # then their shop underneath — because "hello" deserves an answer AND a
     # seller opening the thread still wants to know where things stand.
     if reading.may_speak and reading.reply:
         return Outcome([Reply(reading.reply), *_seller_home(db, owner)])
 
-    return Outcome(_seller_home(db, owner))
+    # Recognised nothing actionable. NOT the home card thrown again — one
+    # focused question naming the two things a seller most often wants.
+    return _clarify_seller()
+
+
+def _clarify_seller() -> Outcome:
+    """
+    What to say to a seller when the message could not be read as an action.
+
+    NOT A MENU. The old fallback re-showed the whole home card on every
+    unreadable sentence, which is the "throwing menus around" a seller feels as
+    not being listened to. This names the two most likely next steps and tells
+    them the one thing that has no button — adding stock is a forwarded photo.
+    """
+    return Outcome(
+        [
+            Reply(
+                "I didn't quite catch that. Did you want your *orders*, or to "
+                "*add an item*? To add one, just forward me its photo.",
+                buttons=[("orders", "My orders"), ("share", "My shop link")],
+            )
+        ]
+    )
+
+
+def _stranger_said_something(db: Session, convo: WaConversation, said: str) -> Outcome:
+    """
+    A brand-new contact wrote a sentence — read whether they mean to sell or buy.
+
+    The bot number serves both sides and a first message cannot be assumed, but
+    it can be READ. "I'd love to open a shop" is someone to onboard; "do you
+    have any books" is someone who needs to open a seller's link first. Only when
+    the model has nothing does it fall back to the honest sell-or-buy fork —
+    which is a focused question, not a menu.
+    """
+    reading = _understand(db, convo, said, owner=None, shopping_at=None)
+    if reading is None:
+        return Outcome(_welcome(convo))
+
+    if reading.intent in {
+        Intent.SELLER_OPEN,
+        Intent.SHOP_NAME,
+        Intent.SET_ABOUT,
+        Intent.SELLER_ORDERS,
+        Intent.SELLER_PAYMENTS,
+        Intent.SELLER_ADD_STOCK,
+        Intent.SELLER_SHARE_LINK,
+    }:
+        return Outcome(_ask_shop_name(convo))
+
+    if reading.intent in {
+        Intent.FIND_PRODUCT,
+        Intent.BUDGET,
+        Intent.BROWSE,
+        Intent.ADD_TO_BASKET,
+        Intent.VIEW_BASKET,
+        Intent.CHECKOUT,
+        Intent.ABOUT_THIS_ITEM,
+        Intent.FOR_THE_SELLER,
+    }:
+        return Outcome(
+            [
+                Reply(
+                    "To buy, open the seller's link and I'll show you their shop "
+                    "right here.\n\n_It looks like wa.me/…?text=shop theirshop — "
+                    "ask them for it._"
+                )
+            ]
+        )
+
+    # GREET, HELP, SMALL_TALK, UNKNOWN, ANSWER — the honest fork.
+    return Outcome(_welcome(convo))

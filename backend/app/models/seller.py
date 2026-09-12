@@ -44,11 +44,14 @@ class Seller(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    #: The login this shop belongs to. One account, one shop.
+    #: The login this shop belongs to. ONE ACCOUNT, MANY SHOPS since 2026-09 —
+    #: the unique constraint was dropped so a seller can run several shops on one
+    #: WhatsApp number. Which shop a chat is acting on is the conversation's
+    #: ``managing_shop_id``; the web workspace uses ``Account.seller`` (primary).
     account_id: Mapped[int | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"), unique=True
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
     )
-    account: Mapped[Account | None] = relationship(back_populates="seller")
+    account: Mapped[Account | None] = relationship(back_populates="sellers")
 
     #: Public URL segment. Permanent once published.
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
@@ -70,6 +73,12 @@ class Seller(Base):
     #: False until the seller has reviewed their drafts and gone live.
     #: An unpublished storefront 404s rather than showing half-parsed junk.
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    #: Set when the seller DELETES this shop. A soft delete, not a row removal,
+    #: because orders reference it and a buyer's history must survive a seller
+    #: closing up: an archived shop is hidden from the owner's shop list, is
+    #: never published, and 404s for buyers — but its past orders remain intact.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

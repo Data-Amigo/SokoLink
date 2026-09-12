@@ -68,6 +68,27 @@ class PaymentError(RuntimeError):
     """A payment could not be started, with a message safe to show a buyer."""
 
 
+def resolve_callback_url() -> str:
+    """
+    The public URL Daraja posts an STK result to.
+
+    Prefers an explicit ``MPESA_CALLBACK_URL`` when set, because a deploy often
+    knows its public callback (a Railway domain) before ``APP_BASE_URL`` is wired
+    for everything else — and a callback silently built from a ``localhost``
+    ``app_base_url`` is unreachable, which strands every STK payment after the
+    buyer has already paid. Falls back to ``app_base_url`` + the path.
+
+    Returns:
+        An absolute URL ending in :data:`MPESA_CALLBACK_PATH`.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    if settings.mpesa_callback_url:
+        return settings.mpesa_callback_url.strip()
+    return f"{settings.app_base_url}{MPESA_CALLBACK_PATH}"
+
+
 def start_stk_payment(
     db: Session,
     order: Order,

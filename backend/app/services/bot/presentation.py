@@ -35,6 +35,7 @@ from app.services.orders import (
 )
 from app.services.storefront import get_categories, get_public_products
 from app.services.whatsapp_cloud import MAX_MPM_PRODUCTS
+from app.services.whatsapp_flows import first_screen_seed, mint_flow_token
 
 
 def _shop_card(seller: Seller) -> Reply:
@@ -191,13 +192,32 @@ def _greeting(db: Session, seller: Seller) -> list[Reply]:
 
     parts.append("What are you after today? 😊")
 
-    return [
-        Reply(
-            "\n\n".join(parts),
-            rows=[(f"cat:{name}", name, "") for name in categories] or None,
-            list_label="Browse",
-        )
-    ]
+    greeting = Reply(
+        "\n\n".join(parts),
+        rows=[(f"cat:{name}", name, "") for name in categories] or None,
+        list_label="Browse",
+    )
+    offer = _flow_offer(db, seller)
+    return [greeting, offer] if offer is not None else [greeting]
+
+
+def _flow_offer(db: Session, seller: Seller) -> Reply | None:
+    """
+    The one-tap "Shop now" mini-app, when this deployment has a Flow published.
+
+    Returns None unless ``WHATSAPP_FLOW_ID`` is set, so a deployment without a
+    Flow simply never offers one and the buyer browses in the chat as before.
+    The token names this shop; the opening screen is seeded so the Flow shows
+    live categories the instant it opens.
+    """
+    if not settings.whatsapp_flow_id:
+        return None
+    token = mint_flow_token(seller)
+    return Reply(
+        f"Prefer to browse everything at once? Tap below to shop *{seller.display_name}* "
+        "here in WhatsApp.",
+        flow=(settings.whatsapp_flow_id, token, first_screen_seed(db, seller)),
+    )
 
 
 def _menu(
@@ -438,6 +458,13 @@ def _add_to_basket(
                 buttons=[("menu", "See what's left")],
             )
         ]
+
+    # add_item wrote a new row and flushed it, but it never touched this cart's
+    # already-loaded ``items`` collection — so rendering the basket now would show
+    # it one item behind: the just-added item missing, and the first add reading
+    # the contradiction "Added ✅ … your basket is empty". Expire the collection
+    # so the basket we show is read fresh, with what we just added in it.
+    db.expire(cart, ["items"])
 
     named = f"{product.title} ({variant})" if variant else product.title
     replies = _show_cart(db, seller, convo)

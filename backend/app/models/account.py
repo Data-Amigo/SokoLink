@@ -69,9 +69,31 @@ class Account(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    seller: Mapped[Seller | None] = relationship(
-        back_populates="account", cascade="all, delete-orphan", uselist=False
+    #: The shops this account owns. ONE-TO-MANY since 2026-09: multi-shop lets a
+    #: seller run several shops on one WhatsApp number. Was a one-to-one
+    #: ``seller``; the ``seller`` property below preserves that single-shop view
+    #: for the web workspace and older callers, which still manage one at a time.
+    sellers: Mapped[list[Seller]] = relationship(
+        back_populates="account",
+        cascade="all, delete-orphan",
+        order_by="Seller.id",
     )
+
+    @property
+    def seller(self) -> Seller | None:
+        """
+        The account's primary shop — its first shop that is not archived.
+
+        A COMPATIBILITY SHIM. Before multi-shop, one account had exactly one
+        ``seller`` and the whole web workspace reads ``account.seller``. Rather
+        than rewrite all of that at once, this keeps a single-shop view: the
+        chat chooses an ACTIVE shop per conversation (``managing_shop_id``),
+        while the web keeps operating on this primary one until it grows its own
+        shop switcher. Returns None only for an account with no shop at all.
+        """
+        live = [s for s in self.sellers if s.archived_at is None]
+        candidates = live or self.sellers
+        return candidates[0] if candidates else None
 
     __table_args__ = (
         # Lowercase enforced in the database, so "Guru@x.com" and "guru@x.com"

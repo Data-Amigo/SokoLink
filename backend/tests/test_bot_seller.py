@@ -512,14 +512,17 @@ class TestOnboardingAStranger:
 
     def test_it_says_what_to_do_next(self, db: Session) -> None:
         """Onboarding that ends in silence has produced an empty shop and a
-        person with no idea what it was for."""
+        person with no idea what it was for. Naming now leads into payment
+        setup — how they get paid — which is the next step, before the first
+        photo (a seller can send *skip* to defer it)."""
         phone = "254700111222"
         handle(db, phone, "hi")
         handle(db, phone, "sell")
 
         said = "\n".join(r.body for r in handle(db, phone, "Mama Njeri").replies)
 
-        assert "forward" in said.lower()
+        assert "m-pesa" in said.lower()
+        assert "skip" in said.lower()
 
     def test_an_unusable_name_asks_again(self, db: Session) -> None:
         phone = "254700111222"
@@ -615,3 +618,57 @@ class TestASellerSayingHello:
         seller_with_number(db)
 
         assert "sell, or to shop" not in say(db, "hi")
+
+
+class TestWebStorefrontLink:
+    """
+    The web storefront page is offered without being asked for, and understood
+    however it is phrased.
+
+    A seller kept typing "web link" / "my shop app web link" and getting their
+    catalogue back, because the page was only reachable by a command nobody
+    guessed and the sentence forms fell through to a product search. The page is
+    the ``/shop/<slug>`` storefront — a different link from the wa.me deep link
+    "My shop link" a seller shares with buyers.
+    """
+
+    def _published_shop(self, db: Session) -> Seller:
+        seller = seller_with_number(db, is_published=True)
+        make_product(
+            db,
+            seller,
+            title="Ankara Shirt",
+            status=ProductStatus.PUBLISHED.value,
+            price_kes=1800,
+            platform_post_id="710000000000012001",
+        )
+        return seller
+
+    def _web_links(self, outcome: Any, seller: Seller) -> list[str]:
+        return [
+            r.link[0] for r in outcome.replies if r.link and f"/shop/{seller.slug}" in r.link[0]
+        ]
+
+    def test_seller_home_offers_the_web_link(self, db: Session) -> None:
+        seller = self._published_shop(db)
+        outcome = handle(db, SELLER_PHONE, "my shop")
+        assert self._web_links(outcome, seller), (
+            "seller home should include the web storefront link"
+        )
+
+    def test_a_web_link_sentence_returns_the_page_not_the_catalogue(self, db: Session) -> None:
+        seller = self._published_shop(db)
+        outcome = handle(db, SELLER_PHONE, "I want to see my shop app web link")
+        assert self._web_links(outcome, seller)
+
+    def test_can_i_see_the_web_link(self, db: Session) -> None:
+        seller = self._published_shop(db)
+        outcome = handle(db, SELLER_PHONE, "Can I see the web link")
+        assert self._web_links(outcome, seller)
+
+    def test_a_buyer_asks_for_the_web_link_while_browsing(self, db: Session) -> None:
+        seller = self._published_shop(db)
+        buyer = "254700111222"
+        handle(db, buyer, f"shop:{seller.slug}")  # open the shop as a buyer
+        outcome = handle(db, buyer, "can I see the web link")
+        assert self._web_links(outcome, seller)
