@@ -30,7 +30,9 @@ from app.api import (
     catalogue,
     customers,
     dashboard,
+    flows,
     health,
+    legal,
     orders,
     payments,
     seller_auth,
@@ -139,6 +141,7 @@ def _not_found(request: Request, exc: Exception) -> Response:
 
 
 app.include_router(health.router)
+app.include_router(legal.router)
 app.include_router(auth.router)
 app.include_router(seller_auth.router)
 app.include_router(dashboard.router)
@@ -149,6 +152,7 @@ app.include_router(analytics.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
 app.include_router(whatsapp_cloud.router)
+app.include_router(flows.router)
 app.include_router(settings_routes.router)
 
 # The design system, and anything else the browser fetches by URL. Version-free

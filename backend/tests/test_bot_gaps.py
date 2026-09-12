@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import ConversationState, ProductStatus
+from app.models import ConversationState, ProductStatus, Seller
 from app.services.bot import get_conversation, handle
 from app.services.bot.buying import _mpesa_code
 from app.services.bot.common import find_account_by_phone
@@ -28,7 +28,7 @@ def _onboard_owner(db: Session) -> None:
     handle(db, PHONE, "skip")  # defer payment; account + first shop now exist
 
 
-def _openable_seller(db: Session):
+def _openable_seller(db: Session) -> Seller:
     """A closed shop that COULD be opened — live item + a way to be paid."""
     seller = make_seller(db, whatsapp_number=PHONE, is_published=False)
     make_product(

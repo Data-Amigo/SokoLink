@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 VARIANT_LIMIT = 10
 
@@ -67,6 +68,18 @@ class Reply:
     #: as an ``order`` message. The catalogue id is the deployment's, added at
     #: send time — the conversation names the products, not the catalogue.
     product_list: tuple[str, list[tuple[str, list[str]]]] | None = None
+
+    #: A WhatsApp Flow to open, as ``(flow_id, flow_token, first_screen_data)``.
+    #:
+    #: THE WHOLE SHOP IN ONE TAP, without leaving WhatsApp. The buyer opens a
+    #: native mini-app — category, products, cart, checkout — served screen by
+    #: screen from our encrypted Flows endpoint. The ``flow_token`` names the shop
+    #: (``<seller_id>.<nonce>``) so the endpoint and the completion both know
+    #: whose catalogue this is; ``first_screen_data`` seeds the opening screen so
+    #: the Flow shows stock instantly rather than waiting on a round-trip. The
+    #: body still names the shop, so a client that cannot draw a Flow is not
+    #: stranded. Requires ``WHATSAPP_FLOW_ID`` to be configured, or it is skipped.
+    flow: tuple[str, str, dict[str, Any]] | None = None
 
 
 @dataclass

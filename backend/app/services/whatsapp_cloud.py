@@ -826,3 +826,92 @@ def send_cta_url(
         },
     )
     return str(result.get("messages", [{}])[0].get("id", ""))
+
+
+#: The Flow message protocol version. "3" is current for data-exchange Flows;
+#: it is the message envelope's version, distinct from the Flow JSON version.
+FLOW_MESSAGE_VERSION = "3"
+
+#: The Flow's opening button label cap. Meta's hard limit.
+FLOW_CTA_CHARS = 30
+
+
+def send_flow(
+    to: str,
+    body: str,
+    flow_id: str,
+    flow_token: str,
+    first_screen: str,
+    first_screen_data: dict[str, Any],
+    *,
+    cta: str = "Shop now",
+    header: str = "",
+    footer: str = "",
+) -> str:
+    """
+    Open a WhatsApp Flow — the whole shop as a native mini-app in the thread.
+
+    Args:
+        to: Recipient, digits with country code.
+        body: The message above the Flow button. Always names the shop, so a
+            client that cannot draw a Flow is not left with a bare button.
+        flow_id: The published Flow's id, from Flow Builder (``WHATSAPP_FLOW_ID``).
+        flow_token: Names this session's shop as ``<seller_id>.<nonce>``. It comes
+            back on every screen request and on completion, so the endpoint never
+            has to trust the client for whose catalogue to serve.
+        first_screen: The screen to open on, e.g. ``CATEGORY``.
+        first_screen_data: That screen's data, seeded here so the Flow shows live
+            stock the instant it opens rather than waiting on a round-trip. Every
+            value the screen binds must be present, or Meta refuses to render it.
+        cta: The button that opens the Flow. 30 characters, hard limit.
+        header: Optional bold line above the body, 60 characters.
+        footer: Optional small line below the body, 60 characters.
+
+    Returns:
+        Meta's message id.
+
+    Raises:
+        CloudApiError: If the send fails.
+
+    Notes:
+        NAVIGATE, NOT DATA_EXCHANGE, ON OPEN. The first screen is seeded from
+        here — we already hold the seller and the catalogue at send time — so the
+        Flow paints immediately. Every screen after the first is served by the
+        encrypted endpoint. Both paths meet the same ``route_screen`` contract.
+    """
+    phone_id = _require("WHATSAPP_PHONE_NUMBER_ID", settings.whatsapp_phone_number_id)
+
+    interactive: dict[str, Any] = {
+        "type": "flow",
+        "body": {"text": _clip(body, BODY_CHARS)},
+        "action": {
+            "name": "flow",
+            "parameters": {
+                "flow_message_version": FLOW_MESSAGE_VERSION,
+                "flow_token": flow_token,
+                "flow_id": flow_id,
+                "flow_cta": _clip(cta, FLOW_CTA_CHARS),
+                "flow_action": "navigate",
+                "flow_action_payload": {
+                    "screen": first_screen,
+                    "data": first_screen_data,
+                },
+            },
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": _clip(header, CTA_HEADER_CHARS)}
+    if footer:
+        interactive["footer"] = {"text": _clip(footer, CTA_FOOTER_CHARS)}
+
+    result = _post(
+        f"{phone_id}/messages",
+        {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to.lstrip("+"),
+            "type": "interactive",
+            "interactive": interactive,
+        },
+    )
+    return str(result.get("messages", [{}])[0].get("id", ""))

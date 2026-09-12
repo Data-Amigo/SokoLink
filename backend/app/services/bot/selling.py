@@ -220,6 +220,54 @@ def wants_another_shop(lowered: str) -> bool:
     return any(phrase in lowered for phrase in _ANOTHER_SHOP_PHRASES)
 
 
+_WEB_LINK_PHRASES = (
+    "web link",
+    "weblink",
+    "web store",
+    "web shop",
+    "web version",
+    "web page",
+    "webpage",
+    "website link",
+    "shop website",
+    "shop app",
+    "app link",
+    "app web",
+    "storefront",
+    "store front",
+    "view shop",
+    "view my shop",
+    "view the shop",
+    "preview shop",
+    "preview my shop",
+    "see my shop",
+    "open in browser",
+    "browser link",
+    "online shop",
+    "shop online",
+    "online store",
+)
+
+
+def wants_web_link(lowered: str) -> bool:
+    """
+    Whether someone is asking for the WEB storefront page (opens in a browser).
+
+    A DIFFERENT LINK FROM "my shop link". "My shop link" is the wa.me deep link a
+    seller shares so buyers land in this chat; the web link is the ``/shop/<slug>``
+    page for looking at the whole shop in a browser. Both the seller (previewing)
+    and a buyer (browsing forty items) want it, and asked for it in many words —
+    "my shop app web link", "can I see the web link", "view my shop online". The
+    model read those as a product search and dumped the catalogue, so this catches
+    the intent as a keyword guard before that misread, exactly like
+    :func:`wants_another_shop`.
+
+    Deliberately does NOT match a bare "open" or "shop" — those already mean other
+    things (open for business; the status card) and are handled by exact-match.
+    """
+    return any(phrase in lowered for phrase in _WEB_LINK_PHRASES)
+
+
 def _live_shops(account: Account) -> list[Seller]:
     """The account's shops that have not been deleted, oldest first."""
     return [s for s in sorted(account.sellers, key=lambda x: x.id) if s.archived_at is None]
@@ -1219,7 +1267,16 @@ def _seller_home(db: Session, seller: Seller) -> list[Reply]:
         candidates.append(("open", "Open for business"))
     candidates.append(("share", "My shop link"))
 
-    return [Reply("\n".join(lines), buttons=candidates[:3])]
+    home = [Reply("\n".join(lines), buttons=candidates[:3])]
+
+    # THE WEB STOREFRONT, OFFERED NOT ASKED FOR. A seller kept typing "web link"
+    # and getting their catalogue back, because the page was only reachable by a
+    # command nobody guessed. Whenever there is something to look at, the "Open
+    # my shop" web button rides along with the home card — its own message,
+    # because a cta_url link cannot share a message with reply buttons.
+    if in_shop:
+        home.append(_shop_card(seller))
+    return home
 
 
 def _seller_questions(db: Session, seller: Seller) -> list[Reply]:
@@ -1384,10 +1441,87 @@ def _seller_said_something(db: Session, convo: WaConversation, said: str, owner:
             ]
         )
 
+    # A SELLER TALKING LIKE A BUYER — "do I still have the sandals", "what's
+    # under 500 in my shop". They mean their OWN stock, so show it rather than
+    # a menu or a shrug.
+    if reading.intent in {Intent.FIND_PRODUCT, Intent.BUDGET, Intent.BROWSE}:
+        return Outcome(_stock_summary(db, owner))
+
     # A greeting or a question with no action behind it. The model's own words,
     # then their shop underneath — because "hello" deserves an answer AND a
     # seller opening the thread still wants to know where things stand.
     if reading.may_speak and reading.reply:
         return Outcome([Reply(reading.reply), *_seller_home(db, owner)])
 
-    return Outcome(_seller_home(db, owner))
+    # Recognised nothing actionable. NOT the home card thrown again — one
+    # focused question naming the two things a seller most often wants.
+    return _clarify_seller()
+
+
+def _clarify_seller() -> Outcome:
+    """
+    What to say to a seller when the message could not be read as an action.
+
+    NOT A MENU. The old fallback re-showed the whole home card on every
+    unreadable sentence, which is the "throwing menus around" a seller feels as
+    not being listened to. This names the two most likely next steps and tells
+    them the one thing that has no button — adding stock is a forwarded photo.
+    """
+    return Outcome(
+        [
+            Reply(
+                "I didn't quite catch that. Did you want your *orders*, or to "
+                "*add an item*? To add one, just forward me its photo.",
+                buttons=[("orders", "My orders"), ("share", "My shop link")],
+            )
+        ]
+    )
+
+
+def _stranger_said_something(db: Session, convo: WaConversation, said: str) -> Outcome:
+    """
+    A brand-new contact wrote a sentence — read whether they mean to sell or buy.
+
+    The bot number serves both sides and a first message cannot be assumed, but
+    it can be READ. "I'd love to open a shop" is someone to onboard; "do you
+    have any books" is someone who needs to open a seller's link first. Only when
+    the model has nothing does it fall back to the honest sell-or-buy fork —
+    which is a focused question, not a menu.
+    """
+    reading = _understand(db, convo, said, owner=None, shopping_at=None)
+    if reading is None:
+        return Outcome(_welcome(convo))
+
+    if reading.intent in {
+        Intent.SELLER_OPEN,
+        Intent.SHOP_NAME,
+        Intent.SET_ABOUT,
+        Intent.SELLER_ORDERS,
+        Intent.SELLER_PAYMENTS,
+        Intent.SELLER_ADD_STOCK,
+        Intent.SELLER_SHARE_LINK,
+    }:
+        return Outcome(_ask_shop_name(convo))
+
+    if reading.intent in {
+        Intent.FIND_PRODUCT,
+        Intent.BUDGET,
+        Intent.BROWSE,
+        Intent.ADD_TO_BASKET,
+        Intent.VIEW_BASKET,
+        Intent.CHECKOUT,
+        Intent.ABOUT_THIS_ITEM,
+        Intent.FOR_THE_SELLER,
+    }:
+        return Outcome(
+            [
+                Reply(
+                    "To buy, open the seller's link and I'll show you their shop "
+                    "right here.\n\n_It looks like wa.me/…?text=shop theirshop — "
+                    "ask them for it._"
+                )
+            ]
+        )
+
+    # GREET, HELP, SMALL_TALK, UNKNOWN, ANSWER — the honest fork.
+    return Outcome(_welcome(convo))

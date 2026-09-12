@@ -17,13 +17,14 @@ from app.models import (
     WaConversation,
 )
 from app.schemas.conversation import Intent
-from app.services.bot.common import _basket, _tell_seller
+from app.services.bot.common import _basket, _tell_seller, owner_context
 from app.services.bot.presentation import (
     _add_to_basket,
     _ask_for,
     _ask_variant,
     _found,
     _menu,
+    _shop_card,
     _show_cart,
     _start_checkout,
 )
@@ -325,6 +326,87 @@ def _hand_off(
     return Outcome([Reply(told)], notify=_tell_seller(seller, alert))
 
 
+#: Intents that only make sense for a SELLER. When the model returns one of
+#: these while the person is browsing, the buyer branches have nowhere to send
+#: it — :func:`_bridge_to_seller` does.
+_SELLER_INTENTS = frozenset(
+    {
+        Intent.SELLER_OPEN,
+        Intent.SHOP_NAME,
+        Intent.SELLER_PAYMENTS,
+        Intent.SELLER_ORDERS,
+        Intent.SELLER_ADD_STOCK,
+        Intent.SET_ABOUT,
+        Intent.SELLER_SHARE_LINK,
+    }
+)
+
+
+def _bridge_to_seller(
+    db: Session, seller: Seller, convo: WaConversation, said: str, reading: object
+) -> Outcome | None:
+    """
+    Route a seller intent that arrived while the person was in buyer mode.
+
+    THE ONE NUMBER, TWO ROLES PROBLEM. The bot number is shared: the same person
+    sells on Monday and buys on Tuesday, and tests their own shop by opening its
+    link — which puts them in buyer mode. So "I meant my shop is called Bossman"
+    or "I would love to open a shop" arrives while ``convo`` points at a shop
+    they are browsing. The model reads it correctly; this puts it where it
+    belongs.
+
+    Returns:
+        - An OWNER of a shop on this number is taken out of buyer mode and their
+          sentence is handed to the seller handler, which already routes renames,
+          payments, orders and the rest.
+        - Someone with NO shop who wants to sell is started on onboarding.
+        - Someone with no shop asking a management question is offered a shop.
+        - A request for "the link" while browsing is answered with THIS shop's
+          page (they are still a customer looking at this shop).
+        None is never returned today, but the caller treats None as "not handled".
+    """
+    # Imported lazily: selling imports presentation/common, not buying, so a
+    # top-level import here would be safe — but the seller handler pulls in a lot,
+    # and keeping it lazy holds the buyer path's import cost down.
+    from app.services.bot.selling import _ask_shop_name, _seller_said_something
+
+    intent = getattr(reading, "intent", None)
+
+    # A buyer asking to see "the link" wants the shop they are looking at.
+    if intent is Intent.SELLER_SHARE_LINK:
+        return Outcome([_shop_card(seller)])
+
+    _, owner = owner_context(db, convo, convo.phone)
+    if owner is not None:
+        # They run a shop on this number; they were only browsing. Hand them back
+        # to their own shop and let the seller handler answer the sentence.
+        convo.seller_id = None
+        convo.state = ConversationState.NEW
+        convo.context = {}
+        return _seller_said_something(db, convo, said, owner)
+
+    # No shop on this number. Wanting to open/name one starts onboarding.
+    if intent in {Intent.SELLER_OPEN, Intent.SHOP_NAME}:
+        convo.seller_id = None
+        return Outcome(_ask_shop_name(convo))
+
+    # A management question (payments, orders, stock) from someone with no shop.
+    # Clear the browsing context so the "sell" tap lands on onboarding rather
+    # than being read as a buyer command for the shop they were looking at.
+    convo.seller_id = None
+    convo.state = ConversationState.NEW
+    convo.context = {}
+    return Outcome(
+        [
+            Reply(
+                "You'll need your own shop first — want to open one? It only takes "
+                "a minute, and I'll walk you through it.",
+                buttons=[("sell", "Open my shop")],
+            )
+        ]
+    )
+
+
 def _buyer_said_something(
     db: Session, seller: Seller, convo: WaConversation, said: str
 ) -> Outcome | None:
@@ -346,6 +428,15 @@ def _buyer_said_something(
     reading = _understand(db, convo, said, owner=None, shopping_at=seller)
     if reading is None:
         return None
+
+    # A SELLER INTENT FROM SOMEONE IN BUYER MODE. The model reads "I want to open
+    # a shop", a rename, "how do I get paid" correctly even while they are
+    # browsing — but every branch below is a BUYER action, so those answers used
+    # to fall through to the catalogue. Bridge them to the seller side instead.
+    if reading.intent in _SELLER_INTENTS:
+        bridged = _bridge_to_seller(db, seller, convo, said, reading)
+        if bridged is not None:
+            return bridged
 
     if reading.intent is Intent.FIND_PRODUCT and not reading.query:
         return _ask_for(convo, "query")

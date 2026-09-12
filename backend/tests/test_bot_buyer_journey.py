@@ -488,11 +488,9 @@ class TestItTakesThemAtTheirWord:
         The fallback has to stay: not finding a match is no reason to leave
         somebody with nothing.
 
-        ASSERTED ON BEING OFFERED THE STOCK, not on a particular sentence. This
-        shop's products carry no category, so the menu is the whole catalogue
-        rather than a list of pills — checking for "What are you looking for?"
-        was checking which BRANCH ran, when the rule is that the buyer can still
-        get somewhere.
+        ASSERTED ON A WAY FORWARD, not on a particular sentence. An unreadable
+        message now gets ONE focused question — not the whole catalogue thrown
+        again — but it must still hand the buyer something to tap.
         """
         seller = a_shop(db)
         plain_item(db, seller)
@@ -500,7 +498,7 @@ class TestItTakesThemAtTheirWord:
 
         replies = say(db, "helicopter")
 
-        assert "Leather Tote Bag" in screen(replies)
+        assert "didn't quite catch that" in screen(replies).lower()
         assert taps(replies), "a reply with nothing to tap is a dead end"
 
 
