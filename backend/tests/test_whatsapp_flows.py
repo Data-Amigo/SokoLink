@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.api.flows import FLOWS_ENDPOINT_PATH
 from app.config import get_settings, settings
-from app.models import ConversationState, Order, ProductStatus
+from app.models import ConversationState, Order, ProductStatus, Seller
 from app.services import whatsapp_cloud
 from app.services.bot import get_conversation, handle_flow_order
 from app.services.bot.replies import Reply
@@ -57,7 +58,7 @@ def _keypair() -> tuple[str, rsa.RSAPublicKey]:
 
 
 def _meta_encrypts(
-    payload: dict, public_key: rsa.RSAPublicKey
+    payload: dict[str, Any], public_key: rsa.RSAPublicKey
 ) -> tuple[str, str, str, bytes, bytes]:
     """Do exactly what Meta's servers do to a request body."""
     aes_key = os.urandom(32)
@@ -76,13 +77,14 @@ def _meta_encrypts(
     return b64(flow_data), b64(wrapped), b64(iv), aes_key, iv
 
 
-def _meta_decrypts_response(response_b64: str, aes_key: bytes, iv: bytes) -> dict:
+def _meta_decrypts_response(response_b64: str, aes_key: bytes, iv: bytes) -> dict[str, Any]:
     """Do what Meta does to read our reply: same key, IV bit-flipped."""
     flipped = bytes(b ^ 0xFF for b in iv)
     raw = base64.b64decode(response_b64)
     ciphertext, tag = raw[:-16], raw[-16:]
     decryptor = Cipher(algorithms.AES(aes_key), modes.GCM(flipped, tag)).decryptor()
-    return json.loads(decryptor.update(ciphertext) + decryptor.finalize())
+    decoded: dict[str, Any] = json.loads(decryptor.update(ciphertext) + decryptor.finalize())
+    return decoded
 
 
 class TestFlowCrypto:
@@ -167,7 +169,7 @@ class TestFlowsEndpoint:
             get_settings.cache_clear()
 
 
-def _shop_with_catalogue(db: Session):
+def _shop_with_catalogue(db: Session) -> Seller:
     seller = make_seller(db, slug="kicks", is_published=True)
     make_product(
         db,
@@ -203,7 +205,7 @@ def _shop_with_catalogue(db: Session):
     return seller
 
 
-def _tok(seller) -> str:
+def _tok(seller: Seller) -> str:
     return f"{seller.id}.nonce"
 
 
@@ -325,7 +327,7 @@ class TestFlowToken:
 class TestFlowCompletion:
     """A finished Flow becomes a real order through the SAME checkout as the chat."""
 
-    def _completion(self, seller, **over):
+    def _completion(self, seller: Seller, **over: Any) -> dict[str, Any]:
         products = route_screen(
             db=over.pop("db"),
             payload={
@@ -335,7 +337,7 @@ class TestFlowCompletion:
             },
         )["data"]["products"]
         sneakers_id = next(p["id"] for p in products if p["title"] == "Canvas Sneakers")
-        base = {
+        base: dict[str, Any] = {
             "flow_token": _tok(seller),
             "cart": [
                 {
@@ -392,7 +394,7 @@ class TestFlowCompletion:
     def test_a_sold_out_cart_charges_nothing(self, db: Session) -> None:
         seller = _shop_with_catalogue(db)
         make_payment_method(db, seller)
-        completion = {
+        completion: dict[str, object] = {
             "flow_token": _tok(seller),
             "cart": [{"product_id": "999999", "qty": 1}],  # not this shop's product
             "name": "Amina",
@@ -417,7 +419,9 @@ class TestFlowSend:
         replies = _greeting(db, seller)
         offers = [r for r in replies if r.flow is not None]
         assert len(offers) == 1
-        flow_id, token, seed = offers[0].flow
+        flow = offers[0].flow
+        assert flow is not None
+        flow_id, token, seed = flow
         assert flow_id == "1234567890"
         assert token.startswith(f"{seller.id}.")
         assert seed["shop_name"] == seller.display_name
@@ -429,19 +433,20 @@ class TestFlowSend:
         assert all(r.flow is None for r in _greeting(db, seller))
 
     def test_outbound_sends_a_flow_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        sent: list[tuple] = []
+        sent: list[tuple[Any, ...]] = []
         monkeypatch.setattr(settings, "whatsapp_flow_id", "555")
-        monkeypatch.setattr(
-            whatsapp_cloud,
-            "send_flow",
-            lambda *a, **k: sent.append((a, k)) or "mid",
-        )
+
+        def fake_send_flow(*a: Any, **k: Any) -> str:
+            sent.append(a)
+            return "mid"
+
+        monkeypatch.setattr(whatsapp_cloud, "send_flow", fake_send_flow)
         reply = Reply("Shop Nairobi Thrift", flow=("555", "7.abc", {"shop_name": "X"}))
 
         send_reply("254700000000", reply)
 
         assert len(sent) == 1
-        args, _ = sent[0]
+        args = sent[0]
         assert args[0] == "254700000000"
         assert args[2] == "555"  # flow_id from settings
         assert args[3] == "7.abc"  # flow_token
@@ -451,7 +456,12 @@ class TestFlowSend:
     ) -> None:
         texts: list[str] = []
         monkeypatch.setattr(settings, "whatsapp_flow_id", None)
-        monkeypatch.setattr(whatsapp_cloud, "send_text", lambda to, body: texts.append(body) or "m")
+
+        def fake_send_text(to: str, body: str) -> str:
+            texts.append(body)
+            return "m"
+
+        monkeypatch.setattr(whatsapp_cloud, "send_text", fake_send_text)
         reply = Reply("Shop Nairobi Thrift", flow=("x", "7.abc", {}))
 
         send_reply("254700000000", reply)

@@ -14,18 +14,18 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import ProductStatus
+from app.models import Product, ProductStatus, Seller
 from app.services.bot import handle
 from tests.factories import make_product, make_seller
 
 PHONE = "254712345678"
 
 
-def _seller(db: Session, **overrides: Any):
+def _seller(db: Session, **overrides: Any) -> Seller:
     return make_seller(db, whatsapp_number=PHONE, **overrides)
 
 
-def _published(db: Session, seller: Any, title: str, price: int, stock: int, i: int):
+def _published(db: Session, seller: Seller, title: str, price: int, stock: int, i: int) -> Product:
     return make_product(
         db,
         seller,

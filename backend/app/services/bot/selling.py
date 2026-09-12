@@ -220,6 +220,54 @@ def wants_another_shop(lowered: str) -> bool:
     return any(phrase in lowered for phrase in _ANOTHER_SHOP_PHRASES)
 
 
+_WEB_LINK_PHRASES = (
+    "web link",
+    "weblink",
+    "web store",
+    "web shop",
+    "web version",
+    "web page",
+    "webpage",
+    "website link",
+    "shop website",
+    "shop app",
+    "app link",
+    "app web",
+    "storefront",
+    "store front",
+    "view shop",
+    "view my shop",
+    "view the shop",
+    "preview shop",
+    "preview my shop",
+    "see my shop",
+    "open in browser",
+    "browser link",
+    "online shop",
+    "shop online",
+    "online store",
+)
+
+
+def wants_web_link(lowered: str) -> bool:
+    """
+    Whether someone is asking for the WEB storefront page (opens in a browser).
+
+    A DIFFERENT LINK FROM "my shop link". "My shop link" is the wa.me deep link a
+    seller shares so buyers land in this chat; the web link is the ``/shop/<slug>``
+    page for looking at the whole shop in a browser. Both the seller (previewing)
+    and a buyer (browsing forty items) want it, and asked for it in many words —
+    "my shop app web link", "can I see the web link", "view my shop online". The
+    model read those as a product search and dumped the catalogue, so this catches
+    the intent as a keyword guard before that misread, exactly like
+    :func:`wants_another_shop`.
+
+    Deliberately does NOT match a bare "open" or "shop" — those already mean other
+    things (open for business; the status card) and are handled by exact-match.
+    """
+    return any(phrase in lowered for phrase in _WEB_LINK_PHRASES)
+
+
 def _live_shops(account: Account) -> list[Seller]:
     """The account's shops that have not been deleted, oldest first."""
     return [s for s in sorted(account.sellers, key=lambda x: x.id) if s.archived_at is None]
@@ -1219,7 +1267,16 @@ def _seller_home(db: Session, seller: Seller) -> list[Reply]:
         candidates.append(("open", "Open for business"))
     candidates.append(("share", "My shop link"))
 
-    return [Reply("\n".join(lines), buttons=candidates[:3])]
+    home = [Reply("\n".join(lines), buttons=candidates[:3])]
+
+    # THE WEB STOREFRONT, OFFERED NOT ASKED FOR. A seller kept typing "web link"
+    # and getting their catalogue back, because the page was only reachable by a
+    # command nobody guessed. Whenever there is something to look at, the "Open
+    # my shop" web button rides along with the home card — its own message,
+    # because a cta_url link cannot share a message with reply buttons.
+    if in_shop:
+        home.append(_shop_card(seller))
+    return home
 
 
 def _seller_questions(db: Session, seller: Seller) -> list[Reply]:

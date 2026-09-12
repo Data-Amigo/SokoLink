@@ -35,7 +35,7 @@ from __future__ import annotations
 import base64
 import json
 import secrets
-from typing import Any
+from typing import Any, cast
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -243,7 +243,9 @@ def first_screen_seed(db: Session, seller: Seller) -> dict[str, Any]:
     ``data_exchange`` round-trips. It is the SAME shape the endpoint would
     return, so the opening screen and every later one agree.
     """
-    return _screen_categories(db, seller, [])["data"]
+    # Indexing a dict[str, Any] yields Any; cast to the precise shape so the
+    # declared return type is honoured (mypy --strict, no-any-return).
+    return cast(dict[str, Any], _screen_categories(db, seller, [])["data"])
 
 
 def parse_completion(response_json: str | None) -> dict[str, Any]:
